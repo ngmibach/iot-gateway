@@ -1,0 +1,25 @@
+user nodered
+topic readwrite #
+topic read $SYS/#
+
+# Sensors
+user sensor1
+topic readwrite sensors/sensor1/#
+topic readwrite sensors/sensor1/heartbeat
+topic read alerts/+
+
+user sensor2
+topic readwrite sensors/sensor2/#
+topic readwrite sensors/sensor2/heartbeat
+topic read alerts/+
+
+user sensor3
+topic readwrite sensors/sensor3/#
+
+# Default deny everything else
+user anonymous
+topic none
+
+
+user sensor4
+topic readwrite sensors/sensor4/#

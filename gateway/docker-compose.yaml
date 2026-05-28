@@ -1,0 +1,67 @@
+services:
+  promtail:
+    build:
+      context: promtail/build
+    container_name: promtail
+    volumes:
+      - ./promtail/config/promtail-config.yaml:/etc/promtail/config.yaml
+      - ./mosquitto/log:/mosquitto/log:ro
+      - ./nodered/data:/data:ro
+    command: -config.file=/etc/promtail/config.yaml
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+
+  mosquitto:
+    image: eclipse-mosquitto:latest
+    container_name: iot-mosquitto
+    network_mode: host
+    volumes:
+      - ./mosquitto/config:/mosquitto/config
+      - ./mosquitto/data:/mosquitto/data
+      - ./mosquitto/log:/mosquitto/log
+      - ./certs:/certs:ro
+    command: mosquitto -c /mosquitto/config/mosquitto.conf
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+
+  haproxy:
+    image: haproxy:2.9-alpine
+    container_name: iot-haproxy
+    network_mode: host
+    volumes:
+      - ./haproxy:/usr/local/etc/haproxy:ro
+      - ./certs:/etc/ssl/certs:ro
+    depends_on:
+      - mosquitto
+    environment:
+      - TZ=Asia/Ho_Chi_Minh
+
+  nodered:
+    build: 
+      context: ./nodered/build
+    container_name: iot-nodered
+    network_mode: host
+    volumes:
+      - ./nodered/data:/data
+    environment:
+      - TZ=Asia/Ho_Chi_Minh  
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    container_name: node-exporter
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host:ro
+    command:
+      - '--path.procfs=/host/proc'
+      - '--path.sysfs=/host/sys'
+      - '--path.rootfs=/host'
+      - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run|var/lib/docker)(/|$$)'
+      - '--collector.hwmon'
+    environment:
+      - TZ=Asia/Ho_Chi_Minh

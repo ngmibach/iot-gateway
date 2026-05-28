@@ -1,0 +1,234 @@
+[
+    {
+        "id": "iot-gateway",
+        "type": "tab",
+        "label": "IoT Gateway",
+        "disabled": false
+    },
+    {
+        "id": "local-mosquitto",
+        "type": "mqtt-broker",
+        "name": "Local Mosquitto",
+        "broker": "127.0.0.1",
+        "port": "1883",
+        "clientid": "",
+        "autoConnect": true,
+        "usetls": false,
+        "protocolVersion": "4",
+        "keepalive": "60",
+        "cleansession": true,
+        "autoUnsubscribe": true,
+        "birthTopic": "",
+        "birthQos": "0",
+        "birthPayload": "",
+        "birthMsg": {},
+        "closeTopic": "",
+        "closePayload": "",
+        "closeMsg": {},
+        "willTopic": "",
+        "willQos": "0",
+        "willPayload": "",
+        "willMsg": {},
+        "userProps": "",
+        "sessionExpiry": ""
+    },
+    {
+        "id": "mqtt-in",
+        "type": "mqtt in",
+        "z": "iot-gateway",
+        "name": "Sensors In",
+        "topic": "sensors/#",
+        "qos": "2",
+        "datatype": "auto-detect",
+        "broker": "local-mosquitto",
+        "nl": false,
+        "rap": false,
+        "inputs": 0,
+        "x": 60,
+        "y": 100,
+        "wires": [
+            [
+                "eb1adea36202416f"
+            ]
+        ]
+    },
+    {
+        "id": "process",
+        "type": "function",
+        "z": "iot-gateway",
+        "name": "Process + Log",
+        "func": "// === Process + Log (After Decryption) ===\n\nlet finalPayload;\n\n// Parse output from Python Exec node\ntry {\n    finalPayload = JSON.parse(msg.payload);\n} catch(e) {\n    node.warn(\"Failed to parse Python output\");\n    finalPayload = msg.originalPayload || msg.payload;\n}\n\n// If decryption failed (Python returned error object)\nif (finalPayload && finalPayload.error) {\n    node.warn(\"Decryption failed: \" + finalPayload.error);\n    finalPayload = msg.originalPayload || {};\n}\n\n// Build final message\nconst topicParts = msg.topic.split('/');\nconst deviceId = topicParts[1] || msg.deviceId || 'unknown';\n\nconst map = flow.get(\"clientIpMap\") || {};\nconst ipInfo = map[deviceId] || { ip: \"unknown\" };\n\nmsg.payload = {\n    timestamp: new Date().toISOString(),\n    event_type: \"sensor_data\",\n    deviceId: deviceId,\n    username: deviceId,\n    source_ip: ipInfo.ip || msg.source_ip,\n    topic: msg.topic,\n    payload: finalPayload,           // ← Decrypted data goes here\n    gateway: \"pi-iot-gateway\"\n};\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": "",
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 800,
+        "y": 100,
+        "wires": [
+            [
+                "file-out",
+                "forward",
+                "debug"
+            ]
+        ]
+    },
+    {
+        "id": "file-out",
+        "type": "file",
+        "z": "iot-gateway",
+        "name": "Write Sensor Log",
+        "filename": "/data/logs/sensor_data.log",
+        "filenameType": "str",
+        "appendNewline": true,
+        "createDir": true,
+        "overwriteFile": "false",
+        "encoding": "none",
+        "x": 1050,
+        "y": 60,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "forward",
+        "type": "mqtt out",
+        "z": "iot-gateway",
+        "name": "Forward to Central",
+        "topic": "gateway/processed",
+        "qos": "2",
+        "retain": "false",
+        "respTopic": "",
+        "contentType": "",
+        "userProps": "",
+        "correl": "",
+        "expiry": "",
+        "broker": "local-mosquitto",
+        "x": 1050,
+        "y": 140,
+        "wires": []
+    },
+    {
+        "id": "debug",
+        "type": "debug",
+        "z": "iot-gateway",
+        "name": "Debug",
+        "active": true,
+        "tosidebar": true,
+        "console": false,
+        "tostatus": false,
+        "complete": "true",
+        "targetType": "full",
+        "statusVal": "",
+        "statusType": "auto",
+        "x": 1050,
+        "y": 200,
+        "wires": []
+    },
+    {
+        "id": "2834a6274690e2e9",
+        "type": "mqtt in",
+        "z": "iot-gateway",
+        "name": "",
+        "topic": "$SYS/broker/log/#",
+        "qos": "0",
+        "datatype": "auto-detect",
+        "broker": "local-mosquitto",
+        "nl": false,
+        "rap": true,
+        "rh": 0,
+        "inputs": 0,
+        "x": 130,
+        "y": 320,
+        "wires": [
+            [
+                "0ed7b38737a11bb8"
+            ]
+        ]
+    },
+    {
+        "id": "0ed7b38737a11bb8",
+        "type": "function",
+        "z": "iot-gateway",
+        "name": "Parse Mosquitto Log",
+        "func": "const line = msg.payload.toString().trim();\n\nconst now = new Date().toISOString();\n\n// === 1. New Client Connected (Best source for IP + username) ===\nif (line.includes(\"New client connected from\")) {\n    const ipMatch = line.match(/from ([\\d.]+):\\d+/);\n    const clientIdMatch = line.match(/as ([\\w-]+) /);\n    const userMatch = line.match(/u'([^']+)'/);\n\n    if (ipMatch && userMatch) {\n        msg.payload = {\n            type: \"connection\",\n            timestamp: now,\n            ip: ipMatch[1],\n            username: userMatch[1],\n            clientId: clientIdMatch ? clientIdMatch[1] : null\n        };\n        return [msg, null];\n    }\n}\n\n// === 2. Connection from (fallback) ===\nelse if (line.includes(\"New connection from\")) {\n    const ipMatch = line.match(/from ([\\d.]+):\\d+/);\n    if (ipMatch) {\n        msg.payload = {\n            type: \"raw_connection\",\n            timestamp: now,\n            ip: ipMatch[1]\n        };\n        return [msg, null];\n    }\n}\n\nreturn null;",
+        "outputs": 2,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 400,
+        "y": 320,
+        "wires": [
+            [
+                "34927bc662e1c1ec"
+            ],
+            []
+        ]
+    },
+    {
+        "id": "34927bc662e1c1ec",
+        "type": "function",
+        "z": "iot-gateway",
+        "name": "Store Client IP",
+        "func": "// === Store Client IP - Function Node ===\n\nif (!flow.get(\"clientIpMap\")) {\n    flow.set(\"clientIpMap\", {});\n}\n\nconst map = flow.get(\"clientIpMap\");\nconst entry = {\n    ip: msg.payload.ip,\n    timestamp: Date.now()\n};\n\nmap[msg.payload.username] = entry;\n\n// Cleanup old entries (older than 10 minutes)\nconst now = Date.now();\nfor (let user in map) {\n    if (now - map[user].timestamp > 600000) {\n        delete map[user];\n    }\n}\n\nflow.set(\"clientIpMap\", map);\n\nreturn null;   // Important: no output",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 700,
+        "y": 320,
+        "wires": [
+            []
+        ]
+    },
+    {
+        "id": "eb1adea36202416f",
+        "type": "function",
+        "z": "iot-gateway",
+        "name": "Prepare for Decryption",
+        "func": "// Prepare for Decryption\nconst topicParts = msg.topic.split('/');\nconst deviceId = topicParts[1] || 'unknown';\n\nconst map = flow.get(\"clientIpMap\") || {};\nconst ipInfo = map[deviceId] || { ip: \"unknown\" };\n\n// Save original\nmsg.originalPayload = msg.payload;\n\n// Ensure payload is a clean JSON string for Python\nif (typeof msg.payload === 'object') {\n    msg.payload = JSON.stringify(msg.payload);\n} else if (typeof msg.payload === 'string') {\n    try {\n        JSON.parse(msg.payload); // validate\n    } catch(e) {\n        node.warn(\"Invalid JSON payload\");\n        return null;\n    }\n}\n\nmsg.deviceId = deviceId;\nmsg.source_ip = ipInfo.ip;\n\nreturn msg;",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [],
+        "x": 260,
+        "y": 100,
+        "wires": [
+            [
+                "678002e24b751481"
+            ]
+        ]
+    },
+    {
+        "id": "678002e24b751481",
+        "type": "function",
+        "z": "iot-gateway",
+        "name": "Decrypt Parameters",
+        "func": "function fernetDecrypt(tokenB64url, keyB64url) {\n    const keyBuf = Buffer.from(keyB64url, 'base64');\n    if (keyBuf.length !== 32) {\n        throw new Error('Invalid key length: ' + keyBuf.length + ' (expected 32)');\n    }\n    const signingKey = keyBuf.slice(0, 16);\n    const encryptionKey = keyBuf.slice(16, 32);\n\n    const tokenBuf = Buffer.from(tokenB64url, 'base64');\n    if (tokenBuf.length < 57) {\n        throw new Error('Token too short: ' + tokenBuf.length);\n    }\n\n    const version = tokenBuf[0];\n    if (version !== 0x80) {\n        throw new Error('Unsupported Fernet version: 0x' + version.toString(16));\n    }\n\n    // Verify HMAC-SHA256\n    const hmacData = tokenBuf.slice(0, tokenBuf.length - 32);\n    const hmacGiven = tokenBuf.slice(tokenBuf.length - 32);\n    const hmacCalc = crypto.createHmac('sha256', signingKey).update(hmacData).digest();\n    if (!crypto.timingSafeEqual(hmacGiven, hmacCalc)) {\n        throw new Error('HMAC verification failed — wrong key or corrupted data');\n    }\n\n    // Decrypt AES-128-CBC\n    const iv = tokenBuf.slice(9, 25);\n    const ciphertext = tokenBuf.slice(25, tokenBuf.length - 32);\n    const decipher = crypto.createDecipheriv('aes-128-cbc', encryptionKey, iv);\n    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);\n\n    return JSON.parse(decrypted.toString('utf8'));\n}\n\ntry {\n    let data = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\n\n    const key = data.key;\n    const encrypted = data.process && data.process.parametersEncrypted;\n\n    if (!key || !encrypted) {\n        node.warn('Missing \"key\" or \"process.parametersEncrypted\" — forwarding as-is');\n        msg.payload = JSON.stringify(data);\n        return msg;\n    }\n\n    const parameters = fernetDecrypt(encrypted, key);\n\n    delete data.process.parametersEncrypted;\n    delete data.key;\n    data.process.parameters = parameters;\n\n    msg.payload = JSON.stringify(data);\n    return msg;\n\n} catch (e) {\n    node.warn('Fernet decryption error: ' + e.message);\n    msg.payload = JSON.stringify({ error: e.message });\n    return msg;\n}",
+        "outputs": 1,
+        "timeout": 0,
+        "noerr": 0,
+        "initialize": "",
+        "finalize": "",
+        "libs": [
+            {
+                "var": "crypto",
+                "module": "crypto"
+            }
+        ],
+        "x": 560,
+        "y": 100,
+        "wires": [
+            [
+                "process"
+            ]
+        ]
+    }
+]

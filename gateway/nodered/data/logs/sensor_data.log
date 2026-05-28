@@ -1,0 +1,1 @@
+{"gateway_received_at":"2026-05-28T02:19:24.632Z","device_reported_at":null,"event_type":"sensor_data","deviceId":"sensor1","username":"sensor1","source_ip":"10.185.90.215","topic":"sensors/sensor1/test","payload":{"test":"ok"},"gateway":"pi-iot-gateway"}
