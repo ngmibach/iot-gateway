@@ -43,6 +43,18 @@ services:
       - '--web.console.libraries=/etc/prometheus/console_libraries'
       - '--web.console.templates=/etc/prometheus/consoles'
 
+  streamlit:
+    build: 
+      context: build/streamlit
+    container_name: iot-streamlit
+    restart: unless-stopped
+    networks:
+      - iot-net
+    environment:
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+    depends_on:
+      - loki
+
 networks:
   iot-net:
     driver: bridge
