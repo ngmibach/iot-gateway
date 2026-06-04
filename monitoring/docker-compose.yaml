@@ -47,6 +47,8 @@ services:
     build: 
       context: build/streamlit
     container_name: iot-streamlit
+    ports:
+      - 8000:8501
     restart: unless-stopped
     networks:
       - iot-net
