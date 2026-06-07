@@ -22,8 +22,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest
       volumes:
-        - /workspace/share/iot-gateway/certs:/server/certs
-        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /home/bach/workspace/iot-gateway/certs:/server/certs
+        - /home/bach/workspace/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
     outputs:
       ca_crt: ${{ steps.cert-generation.outputs.ca_crt }}
       ca_key: ${{ steps.cert-generation.outputs.ca_key }}
@@ -120,8 +120,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
       volumes:
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/sensor1:/client/sensor1/certs
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/server_certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor1:/client/sensor1/certs
+        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job
@@ -137,8 +137,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
       volumes:
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/sensor2:/client/sensor2/certs
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/server_certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor2:/client/sensor2/certs
+        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job
@@ -154,8 +154,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
       volumes:
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/sensor3:/client/sensor3/certs
-        - /home/developer/workspace/Pi_Gateway/Fake_Sensor/server_certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor3:/client/sensor3/certs
+        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job

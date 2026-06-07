@@ -10,8 +10,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest
       volumes:
-        - /workspace/share/iot-gateway/mosquitto/log/mosquitto.log:/mosquitto/log/mosquitto.log
-        - /workspace/share/iot-gateway/nodered/data/logs/sensor_data.log:/nodered/logs/sensor_data.log
+        - /home/bach/workspace/iot-gateway/mosquitto/log/mosquitto.log:/mosquitto/log/mosquitto.log
+        - /home/bach/workspace/iot-gateway/nodered/data/logs/sensor_data.log:/nodered/logs/sensor_data.log
     steps:
       - name: Test Gitea Action Mount
         run: |

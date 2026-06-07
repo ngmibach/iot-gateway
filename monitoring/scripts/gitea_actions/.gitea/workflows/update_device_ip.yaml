@@ -24,8 +24,8 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest
       volumes:
-        - /workspace/share/iot-gateway/haproxy/allowed-ips.txt:/device/allowed-ips.txt
-        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /home/bach/workspace/iot-gateway/haproxy/allowed-ips.txt:/device/allowed-ips.txt
+        - /home/bach/workspace/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
     steps:
       - name: Test Gitea Action Mount
         run: |

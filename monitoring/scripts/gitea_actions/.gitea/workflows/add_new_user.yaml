@@ -29,10 +29,10 @@ jobs:
     container:
       image: localhost:5000/gitea/runner-images:ubuntu-latest
       volumes:
-        - /workspace/share/iot-gateway/mosquitto/config/acl:/mosquitto/config/acl
-        - /workspace/share/iot-gateway/mosquitto/config/passwords:/mosquitto/config/passwords
-        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
-        - /workspace/share/iot-gateway/haproxy/allowed-ips.txt:/haproxy/allowed-ips.txt
+        - /home/bach/workspace/iot-gateway/mosquitto/config/acl:/mosquitto/config/acl
+        - /home/bach/workspace/iot-gateway/mosquitto/config/passwords:/mosquitto/config/passwords
+        - /home/bach/workspace/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /home/bach/workspace/iot-gateway/haproxy/allowed-ips.txt:/haproxy/allowed-ips.txt
     steps:
       - name: Test Gitea Action Mount
         run: |
