@@ -1,0 +1,18 @@
+{
+	"ulid": "01KTKVZ4W9236XRMF2BKW07VG0",
+	"minTime": 1780920000000,
+	"maxTime": 1780927200000,
+	"stats": {
+		"numSamples": 2385,
+		"numFloatSamples": 2385,
+		"numSeries": 5,
+		"numChunks": 16
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KTKVZ4W9236XRMF2BKW07VG0"
+		]
+	},
+	"version": 1
+}

@@ -1,0 +1,18 @@
+{
+	"ulid": "01KTK7BYBRY4EH1SQ40F9PX1CT",
+	"minTime": 1780898409975,
+	"maxTime": 1780905600000,
+	"stats": {
+		"numSamples": 2400,
+		"numFloatSamples": 2400,
+		"numSeries": 5,
+		"numChunks": 20
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01KTK7BYBRY4EH1SQ40F9PX1CT"
+		]
+	},
+	"version": 1
+}
