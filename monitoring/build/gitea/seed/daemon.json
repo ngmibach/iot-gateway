@@ -1,0 +1,8 @@
+{
+  "insecure-registries": [
+    "172.17.0.1:5000",
+    "localhost:5000",
+    "127.0.0.1:5000"
+  ],
+  "registry-mirrors": []
+}

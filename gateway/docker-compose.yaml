@@ -57,11 +57,22 @@ services:
       - /proc:/host/proc:ro
       - /sys:/host/sys:ro
       - /:/host:ro
+      - ./node-exporter/textfile_collector:/textfile:ro
     command:
       - '--path.procfs=/host/proc'
       - '--path.sysfs=/host/sys'
       - '--path.rootfs=/host'
       - '--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc|run|var/lib/docker)(/|$$)'
       - '--collector.hwmon'
+      - '--collector.textfile.directory=/textfile'
     environment:
       - TZ=Asia/Ho_Chi_Minh
+
+  ip-allow:
+    build:
+      context: ./ip-allow/build
+    container_name: ip-allow
+    restart: unless-stopped
+    volumes:
+      - ./haproxy/allowed-ips.txt:/config/allowed-ips.txt:ro
+      - ./node-exporter/textfile_collector:/textfile

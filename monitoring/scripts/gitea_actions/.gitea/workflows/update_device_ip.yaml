@@ -22,10 +22,10 @@ jobs:
   update-device-ip:
     runs-on: raspbot
     container:
-      image: localhost:5000/gitea/runner-images:ubuntu-latest
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
       volumes:
-        - /home/bach/workspace/iot-gateway/haproxy/allowed-ips.txt:/device/allowed-ips.txt
-        - /home/bach/workspace/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /home/bach/workspace/iot-gateway/gateway/haproxy/allowed-ips.txt:/device/allowed-ips.txt
+        - /home/bach/workspace/iot-gateway/gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
     steps:
       - name: Test Gitea Action Mount
         run: |

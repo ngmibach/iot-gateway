@@ -49,6 +49,8 @@ services:
       context: build/streamlit
     container_name: iot-streamlit
     restart: unless-stopped
+    ports:
+      - 8000:8501
     networks:
       - iot-net
     environment:
@@ -110,9 +112,11 @@ services:
       - GITEA_ADMIN_EMAIL=${GITEA_ADMIN_EMAIL:-admin@localhost}
       - GITEA_SEED_REPO=${GITEA_SEED_REPO:-actions}
       - CONTENT_DIR=/content
+      - GITEA_REGISTRY=${GITEA_REGISTRY:-localhost:5000}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ./scripts/gitea_actions:/content:ro
+      - ./build/gitea/action_latest:/build-context/gitea-action-latest:ro
   gitearunner:
     build:
       context: build/gitea/runner
@@ -129,10 +133,7 @@ services:
       - ./data/gitea-runner:/data
     depends_on:
       - gitea
-  gitea_action_latest:
-    image: localhost:5000/gitea/runner-images:ubuntu-latest
-    build:
-      context: build/gitea/action_latest
+      - gitea-seed
 
 networks:
   iot-net:

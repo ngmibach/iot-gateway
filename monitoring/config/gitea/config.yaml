@@ -9,7 +9,7 @@ runner:
   fetch_timeout: 10s
   fetch_interval: 2s
   labels:
-    - ubuntu-system:docker://localhost:5000/gitea/runner-images:ubuntu-latest 
+    - ubuntu-system:docker://localhost:5000/admin/gitea/runner-images:ubuntu-latest 
 
 cache:
   enabled: false 

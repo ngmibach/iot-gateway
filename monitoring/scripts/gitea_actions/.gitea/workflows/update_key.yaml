@@ -20,10 +20,10 @@ jobs:
   update-cert-server:
     runs-on: ubuntu-system
     container:
-      image: localhost:5000/gitea/runner-images:ubuntu-latest
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
       volumes:
-        - /home/bach/workspace/iot-gateway/certs:/server/certs
-        - /home/bach/workspace/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /home/bach/workspace/iot-gateway/gateway/certs:/server/certs
+        - /home/bach/workspace/iot-gateway/gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
     outputs:
       ca_crt: ${{ steps.cert-generation.outputs.ca_crt }}
       ca_key: ${{ steps.cert-generation.outputs.ca_key }}
@@ -33,6 +33,8 @@ jobs:
       client_key_sensor2: ${{ steps.cert-generation.outputs.client_key_sensor2 }}
       client_crt_sensor3: ${{ steps.cert-generation.outputs.client_crt_sensor3 }}
       client_key_sensor3: ${{ steps.cert-generation.outputs.client_key_sensor3 }}
+      client_crt_sensor4: ${{ steps.cert-generation.outputs.client_crt_sensor4 }}
+      client_key_sensor4: ${{ steps.cert-generation.outputs.client_key_sensor4 }}
 
     steps:
       - name: Test Gitea Action Mount
@@ -104,6 +106,20 @@ jobs:
           echo "client_crt_sensor3=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
           echo "client_key_sensor3=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
 
+          # --- Client Certificate Generation for Sensor 4 ---
+          openssl genrsa -out client.key 2048
+          openssl req -new -out client.csr -key client.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Sensors/CN=sensor4"
+
+          openssl x509 -req -in client.csr \
+            -CA ca.crt \
+            -CAkey ca.key \
+            -passin pass:${{ env.CA_PASSWORD }} \
+            -CAcreateserial -out client.crt -days ${{ env.DURATION }}
+
+          echo "client_crt_sensor4=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
+          echo "client_key_sensor4=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
+
           sync
           chown -R 1883:1883 .
           chmod 644 ca.crt server.crt
@@ -118,10 +134,10 @@ jobs:
     needs: update-cert-server
     runs-on: ubuntu-system
     container:
-      image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
       volumes:
-        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor1:/client/sensor1/certs
-        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/gateway/fake_sensor/build/sensor1:/client/sensor1/certs
+        - /home/bach/workspace/iot-gateway/gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job
@@ -135,10 +151,10 @@ jobs:
     needs: update-cert-server
     runs-on: ubuntu-system
     container:
-      image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
       volumes:
-        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor2:/client/sensor2/certs
-        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/gateway/fake_sensor/build/sensor2:/client/sensor2/certs
+        - /home/bach/workspace/iot-gateway/gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job
@@ -152,10 +168,10 @@ jobs:
     needs: update-cert-server
     runs-on: ubuntu-system
     container:
-      image: localhost:5000/gitea/runner-images:ubuntu-latest-x86
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
       volumes:
-        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor3:/client/sensor3/certs
-        - /home/bach/workspace/iot-gateway/gateway/certs:/client/server/certs
+        - /home/bach/workspace/iot-gateway/gateway/fake_sensor/build/sensor3:/client/sensor3/certs
+        - /home/bach/workspace/iot-gateway/gateway/gateway/certs:/client/server/certs
 
     steps:
       - name: Import CA from previous job
@@ -164,3 +180,20 @@ jobs:
 
           printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor3 }}" | base64 -d > /client/sensor3/certs/client.crt
           printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor3 }}" | base64 -d > /client/sensor3/certs/client.key
+
+  update-cert-client-sensor4:
+    needs: update-cert-server
+    runs-on: ubuntu-system
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
+      volumes:
+        - /home/bach/workspace/iot-gateway/gateway/fake_sensor/build/sensor4:/client/sensor4/certs
+        - /home/bach/workspace/iot-gateway/gateway/gateway/certs:/client/server/certs
+
+    steps:
+      - name: Import CA from previous job
+        run: |
+          printf '%s' "${{ needs.update-cert-server.outputs.ca_crt }}" | base64 -d > /client/server/certs/ca.crt
+
+          printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor4 }}" | base64 -d > /client/sensor4/certs/client.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor4 }}" | base64 -d > /client/sensor4/certs/client.key

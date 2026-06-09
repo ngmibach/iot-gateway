@@ -1,0 +1,7 @@
+# HELP allowed_ip Allowed source IP addresses that can connect to the MQTT gateway (HAProxy ACL)
+# TYPE allowed_ip gauge
+allowed_ip{ip="10.185.90.215"} 1
+allowed_ip{ip="172.17.0.1"} 1
+# HELP allowed_ip_count Total number of allowed IPs configured
+# TYPE allowed_ip_count gauge
+allowed_ip_count 2

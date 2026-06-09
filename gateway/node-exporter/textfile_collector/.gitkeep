@@ -1,0 +1,3 @@
+# Node exporter textfile collector directory.
+# The allowed-ips-updater sidecar writes allowed_ips.prom here.
+# This file ensures the directory is tracked in git.
