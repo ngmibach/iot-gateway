@@ -1,4 +1,4 @@
-#!/bin/shSSS
+#!/bin/sh
 
 set -eu
 
