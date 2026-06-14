@@ -12,7 +12,7 @@ ORG_UNIT="IOT Devices"
 CA_CN="My IOT CA Root"
 
 # --- Server Details ---
-SERVER_CN="10.185.90.215"
+SERVER_CN="172.31.217.41"
 
 # --- Client Details ---
 CLIENT_CN_1="sensor1"

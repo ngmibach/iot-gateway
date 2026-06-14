@@ -1,0 +1,86 @@
+# Device Whitelist and Authorization Registry
+# This file defines all authorized IoT devices that can send packets to the IDS Gateway
+
+devices:
+  - device_id: "ESP32_SENSOR_001"
+    ip_address: "192.168.1.100"
+    mac_address: "aa:bb:cc:dd:ee:01"
+    token: null
+    device_type: "temperature_sensor"
+    location: "hallway"
+    registered_date: "2026-05-01"
+    max_packets_per_sec: 50.0
+    enabled: true
+
+  - device_id: "ESP32_SENSOR_002"
+    ip_address: "192.168.1.101"
+    mac_address: "aa:bb:cc:dd:ee:02"
+    token: null
+    device_type: "humidity_sensor"
+    location: "office"
+    registered_date: "2026-05-01"
+    max_packets_per_sec: 50.0
+    enabled: true
+
+  - device_id: "ESP32_CAMERA_001"
+    ip_address: "192.168.1.102"
+    mac_address: "aa:bb:cc:dd:ee:03"
+    token: null
+    device_type: "camera"
+    location: "entrance"
+    registered_date: "2026-05-02"
+    max_packets_per_sec: 200.0
+    enabled: true
+
+  - device_id: "GATEWAY_TEST_DEVICE"
+    ip_address: "192.168.1.103"
+    mac_address: "aa:bb:cc:dd:ee:04"
+    token: null
+    device_type: "test"
+    location: "lab"
+    registered_date: "2026-06-01"
+    max_packets_per_sec: 100.0
+    enabled: true
+
+  # E2E test range (192.168.1.100-200): Generic sensors for test benign phase
+  - device_id: "TEST_SENSORS_RANGE"
+    ip_address: "192.168.1.150"
+    mac_address: null
+    token: null
+    device_type: "test_sensor"
+    location: "test_lab"
+    registered_date: "2026-06-07"
+    max_packets_per_sec: 100.0
+    enabled: true
+
+  # E2E test attack range (203.0.113.0/24): For testing attack detection with whitelisted source
+  # IMPORTANT: This allows ML to see attack patterns from external IPs (for E2E testing)
+  - device_id: "E2E_TEST_ATTACK_SUBNET"
+    ip_address: "203.0.113.100"
+    mac_address: null
+    token: null
+    device_type: "test_attack_source"
+    location: "test_lab"
+    registered_date: "2026-06-07"
+    max_packets_per_sec: 500.0
+    enabled: true
+
+  # Disabled device (for testing reject behavior)
+  - device_id: "LEGACY_DEVICE"
+    ip_address: "192.168.0.50"
+    mac_address: "ff:ff:ff:ff:ff:ff"
+    token: null
+    device_type: "deprecated"
+    location: "archive"
+    registered_date: "2024-01-01"
+    max_packets_per_sec: 10.0
+    enabled: false
+
+# Trusted subnets (optional, for future subnet-based rules)
+trusted_subnets:
+  - "127.0.0.0/8"
+  - "192.168.1.0/24"
+  - "203.0.113.0/24"
+  - "192.168.65.0/24"
+  - "172.31.217.0/24"
+  - "172.19.0.0/16"

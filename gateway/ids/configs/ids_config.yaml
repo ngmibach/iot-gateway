@@ -1,0 +1,117 @@
+# gateway:
+#   capture_interface: auto
+#   gateway_subnet: 192.168.4.0/24
+#   default_block_seconds: 600
+#   packet_window_seconds: 10
+#   inference_interval_seconds: 1
+#   suspicious_threshold: 0.65  # Optimized threshold balancing detection vs false positives
+#   capture_type: pcap   # 'pcap' or 'mqtt'
+#   mac_tracking: false  # if true, prefer grouping by src_mac when available
+#   min_pkts: 1
+#   ip_aggregation_window: 6
+#   min_windows_for_decision: 4
+#   min_attack_windows: 3
+#   attack_vote_ratio_threshold: 0.60
+#   ip_avg_score_threshold: 0.65
+#   device_whitelist_path: /app/configs/device_whitelist.yaml
+#   # BPF filter for pcap capture mode — limit to MQTT traffic only
+#   capture_filter: "tcp port 1883 or tcp port 18883 or tcp port 8883"
+#   mqtt:
+#     broker: localhost
+#     topic: ids/packets/#
+#     client_id: ids_gateway
+
+# model:
+#   type: random_forest
+#   path: models/ids_model.joblib
+#   scaler_path: models/feature_scaler.joblib
+#   expected_features:
+#     - pkt_count
+#     - tcp_count
+#     - udp_count
+#     - icmp_count
+#     - syn_count
+#     - ack_count
+#     - rst_count
+#     - unique_dst_port_count
+#     - avg_pkt_len
+#     - mean_inter_arrival_ms
+
+# training:
+#   dataset_path: data/processed/ids_features.csv
+#   label_column: label
+#   test_size: 0.2
+#   random_state: 42
+
+
+
+gateway:
+  capture_interface: auto
+  gateway_subnet: 192.168.4.0/24
+  default_block_seconds: 600
+
+  # Match current runtime audit semantics
+  packet_window_seconds: 3
+  inference_interval_seconds: 1
+
+  # Let metadata threshold override config threshold
+  suspicious_threshold: null
+
+  # Direction A: inference from gateway message stream, not pcap packet capture
+  capture_type: mqtt_message
+  mac_tracking: false
+  allow_loopback_sources: true
+
+  min_pkts: 1
+  min_model_packets: 1
+  ml_semantic_guard:
+    enabled: false
+
+  # IP decision smoothing
+  ip_aggregation_window: 6
+  min_windows_for_decision: 4
+  min_attack_windows: 3
+  attack_vote_ratio_threshold: 0.60
+  ip_avg_score_threshold: 0.68
+
+  device_whitelist_path: /app/configs/device_whitelist.yaml
+
+  # Not used in message mode, keep empty for clarity
+  capture_filter: ""
+
+  mqtt:
+    broker: localhost
+    port: 1883
+    topic: gateway/processed
+    client_id: ids_gateway_message
+    username: sensor1
+    password: admin
+
+model:
+  type: lightgbm
+  path: models/ids_model.joblib
+  scaler_path: models/feature_scaler.joblib
+
+  expected_features:
+    - msg_count
+    - topic_unique_count
+    - topic_flood_ratio
+    - process_path_ratio
+    - avg_payload_len
+    - std_payload_len
+    - min_payload_len
+    - max_payload_len
+    - mean_inter_arrival_ms
+    - std_inter_arrival_ms
+    - avg_delay
+    - max_delay
+    - attack_blob_ratio
+
+training:
+  dataset_path: data/processed/ids_features_gateway_message.csv
+  label_column: label
+  test_size: 0.2
+  random_state: 42
+  split_strategy: group
+  group_column: source_group
+  time_column: window_start_ts

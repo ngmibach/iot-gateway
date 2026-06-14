@@ -7,6 +7,7 @@ user sensor1
 topic readwrite sensors/sensor1/#
 topic readwrite sensors/sensor1/heartbeat
 topic read alerts/+
+topic readwrite gateway/processed
 
 user sensor2
 topic readwrite sensors/sensor2/#

@@ -1,0 +1,50 @@
+gateway:
+  capture_interface: auto
+  gateway_subnet: 192.168.4.0/24
+  default_block_seconds: 600
+  packet_window_seconds: 3
+  inference_interval_seconds: 3
+  suspicious_threshold: null
+  capture_type: pcap
+  mac_tracking: false
+  min_pkts: 1
+  min_model_packets: 3
+  ip_aggregation_window: 6
+  min_windows_for_decision: 4
+  min_attack_windows: 3
+  attack_vote_ratio_threshold: 0.60
+  ip_avg_score_threshold: 0.68
+  device_whitelist_path: /app/configs/device_whitelist.yaml
+  capture_filter: "tcp port 1883 or tcp port 18883 or tcp port 8883"
+  ml_semantic_guard:
+    enabled: true
+    block_on_high_risk: false
+    require_real_tcp_flags_for_mqtt_topics: true
+    require_port_diversity: false
+    min_unique_dst_ports: 1
+  mqtt:
+    broker: localhost
+    topic: ids/packets/#
+    client_id: ids_gateway
+
+model:
+  type: lightgbm
+  path: models/ids_model.joblib
+  scaler_path: models/feature_scaler.joblib
+  expected_features:
+    - pkt_count
+    - tcp_count
+    - udp_count
+    - icmp_count
+    - syn_count
+    - ack_count
+    - rst_count
+    - unique_dst_port_count
+    - avg_pkt_len
+    - mean_inter_arrival_ms
+
+training:
+  dataset_path: data/processed/ids_features.csv
+  label_column: label
+  test_size: 0.2
+  random_state: 42
