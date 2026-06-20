@@ -87,7 +87,6 @@ services:
       - ./promtail/config/promtail-config.yaml:/etc/promtail/config.yaml
       - ./mosquitto/log:/mosquitto/log:ro
       - ./nodered/data:/data:ro
-      - ./ids/logs:/ids/logs:ro
     command: -config.file=/etc/promtail/config.yaml
     restart: unless-stopped
     network_mode: host
@@ -121,11 +120,13 @@ services:
 
   nodered:
     build:
-      context: ./nodered/build
+      context: .
+      dockerfile: ./nodered/build/Dockerfile
     container_name: iot-nodered
     network_mode: host
     volumes:
       - ./nodered/data:/data
+      - ./nodered/data/logs:/app/nodered_logs
     environment:
       - TZ=Asia/Ho_Chi_Minh
 
@@ -157,24 +158,3 @@ services:
     volumes:
       - ./haproxy/allowed-ips.txt:/config/allowed-ips.txt:ro
       - ./node-exporter/textfile_collector:/textfile
-
-  ids-gateway:
-    build:
-      context: ./ids
-    container_name: iot-ids-gateway
-    network_mode: host
-    cap_add:
-      - NET_ADMIN
-      - NET_RAW
-    restart: unless-stopped
-    depends_on:
-      - mosquitto
-    volumes:
-      - ./ids/ids_gateway:/app/ids_gateway:ro
-      - ./ids/configs:/app/configs:ro
-      - ./ids/models:/app/models:ro
-      - ./ids/logs:/app/logs
-      - ./ids/data:/app/data
-    environment:
-      - TZ=Asia/Ho_Chi_Minh
-    command: python -m ids_gateway.main /app/configs/ids_config.yaml

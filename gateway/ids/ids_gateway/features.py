@@ -5,7 +5,8 @@ from typing import Dict, List
 
 import numpy as np
 
-from .capture import PacketRecord
+from .records import PacketRecord
+from .utils import safe_float
 
 
 FEATURE_NAMES = [
@@ -28,15 +29,6 @@ def empty_feature_vector() -> Dict[str, float]:
     return {name: 0.0 for name in FEATURE_NAMES}
 
 
-def _safe_float(value, default: float = 0.0) -> float:
-    try:
-        if value is None:
-            return default
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _extract_topic(record: PacketRecord) -> str:
     topic = getattr(record, "mqtt_topic", None)
     if topic is None:
@@ -55,7 +47,7 @@ def _extract_delay(record: PacketRecord) -> float:
     for attr in ("mqtt_delay", "delay", "mqttdelay"):
         if hasattr(record, attr):
             value = getattr(record, attr)
-            f = _safe_float(value, default=np.nan)
+            f = safe_float(value, default=np.nan)
             if not np.isnan(f):
                 return float(f)
     return 0.0
@@ -88,7 +80,7 @@ def build_feature_vector(records: List[PacketRecord]) -> Dict[str, float]:
     if not records:
         return empty_feature_vector()
 
-    ordered = sorted(records, key=lambda r: _safe_float(getattr(r, "ts", 0.0), 0.0))
+    ordered = sorted(records, key=lambda r: safe_float(getattr(r, "ts", 0.0), 0.0))
 
     topics: List[str] = []
     payload_lens: List[float] = []
@@ -104,7 +96,7 @@ def build_feature_vector(records: List[PacketRecord]) -> Dict[str, float]:
         payload_lens.append(float(_payload_len(payload)))
         delays.append(float(max(_extract_delay(record), 0.0)))
 
-        ts = _safe_float(getattr(record, "ts", 0.0), 0.0)
+        ts = safe_float(getattr(record, "ts", 0.0), 0.0)
         timestamps.append(ts)
 
         if _has_attack_blob(payload):

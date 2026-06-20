@@ -5,25 +5,16 @@ import ipaddress
 import time
 from collections import defaultdict
 
-from .blocker import IptablesBlocker
-from .capture import PacketCapture
 from .config import load_config
 from .detector import Detector
+from .log_capture import SensorLogCapture
 from .model import IDSModel
 from .rules import RuleEngine
+from .utils import device_id_from_topic
 
 
 INTERNAL_TOPIC_PREFIXES = ("$SYS/",)
 SENSOR_TOPIC_PREFIX = "sensors/"
-
-
-def _device_id_from_topic(topic: str) -> str:
-    if not topic:
-        return ""
-    parts = topic.split("/")
-    if len(parts) >= 3 and parts[0] == "sensors":
-        return parts[1]
-    return ""
 
 
 def _is_internal_or_loopback_ip(ip: str) -> bool:
@@ -53,7 +44,7 @@ def _describe_batch(records):
     topic = first_record.mqtt_topic or "unknown"
     device_id = (
         first_record.mqtt_device_id
-        or _device_id_from_topic(topic)
+        or device_id_from_topic(topic)
         or first_record.src_ip
     )
     observed_src = first_record.observed_src_ip or first_record.src_ip
@@ -76,30 +67,20 @@ def run(config_path: str = "configs/ids_config.yaml") -> None:
     cfg = load_config(config_path)
     gateway_cfg = cfg["gateway"]
     model_cfg = cfg["model"]
-    capture_type = str(gateway_cfg.get("capture_type", "pcap") or "pcap").strip().lower()
+    capture_type = str(gateway_cfg.get("capture_type", "sensor_log") or "sensor_log").strip().lower()
     use_mac = gateway_cfg.get("mac_tracking", False)
     allow_loopback_sources = bool(gateway_cfg.get("allow_loopback_sources", False))
 
-    if capture_type in {"mqtt", "mqtt_message"}:
-        from .mqtt_capture import MQTTCapture
-        mqtt_cfg = gateway_cfg.get("mqtt", {})
-        capture = MQTTCapture(
-            broker=mqtt_cfg.get("broker", "localhost"),
-            port=int(mqtt_cfg.get("port", 1883)),
-            topic=mqtt_cfg.get("topic", "ids/packets/#"),
-            client_id=mqtt_cfg.get("client_id"),
-            username=mqtt_cfg.get("username"),
-            password=mqtt_cfg.get("password"),
-            use_mac=use_mac,
+    if capture_type not in {"sensor_log", "file_log", "log"}:
+        raise ValueError(
+            "capture_type must be sensor_log in the current runtime profile"
         )
-    else:
-        bpf_filter = gateway_cfg.get(
-            "capture_filter", "tcp port 1883 or tcp port 18883 or tcp port 8883"
-        )
-        print(f"[IDS] capture BPF filter: {bpf_filter!r}")
-        capture = PacketCapture(
-            interface=gateway_cfg["capture_interface"], bpf_filter=bpf_filter
-        )
+
+    sensor_log_cfg = gateway_cfg.get("sensor_log", {})
+    capture = SensorLogCapture(
+        file_path=sensor_log_cfg.get("path", "/app/nodered_logs/sensor_data.log"),
+        use_mac=use_mac,
+    )
 
     model = IDSModel(
         model_path=model_cfg["path"],
@@ -148,11 +129,9 @@ def run(config_path: str = "configs/ids_config.yaml") -> None:
     block_on_high_risk = bool(semantic_guard.get("block_on_high_risk", False))
 
     ip_window_state: dict[str, list[tuple[float, bool]]] = defaultdict(list)
-    blocker = IptablesBlocker(block_seconds=gateway_cfg["default_block_seconds"])
 
     print(f"[IDS] capture type: {capture_type}")
-    if capture_type not in {"mqtt", "mqtt_message"}:
-        print(f"[IDS] capture interface active: {capture.interface}")
+    print(f"[IDS] sensor log source: {capture.file_path}")
     print(f"[IDS] suspicious threshold: {float(configured_threshold):.6f} ({threshold_source})")
     print(f"[IDS] packet_window_seconds: {packet_window_seconds}")
     print(f"[IDS] min_model_packets: {min_model_packets}")
@@ -167,7 +146,6 @@ def run(config_path: str = "configs/ids_config.yaml") -> None:
 
     while True:
         packets_by_source = capture.sniff_once(timeout=gateway_cfg["inference_interval_seconds"])
-        blocker.unblock_expired()
 
         for src_key, records in packets_by_source.items():
             windows = _split_into_model_windows(records, packet_window_seconds)
@@ -212,15 +190,6 @@ def run(config_path: str = "configs/ids_config.yaml") -> None:
                             f"type={violation.violation_type} severity={violation.severity} "
                             f"msg={violation.message}"
                         )
-                        if violation.severity == "critical":
-                            if _is_internal_or_loopback_ip(result.src_ip):
-                                print(f"[IDS] skip blocking internal/loopback ip {result.src_ip}")
-                            else:
-                                try:
-                                    blocker.block_ip(result.src_ip)
-                                    print(f"[IDS] blocked (rule critical) {result.src_ip}")
-                                except Exception as e:
-                                    print(f"[IDS] failed to block {result.src_ip}: {e}")
                         continue
 
                     if result.skipped_reason:
@@ -267,15 +236,6 @@ def run(config_path: str = "configs/ids_config.yaml") -> None:
                         f"vote_ratio={vote_ratio:.2f} avg_score={avg_score:.6f} ip_attack={ip_attack}"
                     )
 
-                    if ip_attack:
-                        if _is_internal_or_loopback_ip(result.src_ip):
-                            print(f"[IDS] skip blocking internal/loopback ip {result.src_ip}")
-                            continue
-                        try:
-                            blocker.block_ip(result.src_ip)
-                            print(f"[IDS] blocked (ip_aggregated_ml) {result.src_ip}")
-                        except Exception as e:
-                            print(f"[IDS] failed to block {result.src_ip}: {e}")
         time.sleep(0.1)
 
 

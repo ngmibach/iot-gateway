@@ -3,9 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from .capture import PacketRecord
 from .features import build_feature_vector, empty_feature_vector
 from .model import IDSModel
+from .records import PacketRecord
 from .rules import RuleEngine, RuleViolation
 
 _MQTT_PORTS: frozenset[int] = frozenset({1883, 18883, 8883})
@@ -63,7 +63,7 @@ class Detector:
         has_any_tcp_flags = any(bool(r.tcp_flags) for r in records)
         all_mqtt_topics = all(bool(r.mqtt_topic) for r in records)
         any_fallback = any(
-            getattr(r, "capture_mode", "pcap") == "mqtt_fallback" for r in records
+            getattr(r, "capture_mode", "sensor_log") == "mqtt_fallback" for r in records
         )
         any_low_quality = any(
             getattr(r, "semantic_quality", "HIGH") == "LOW" for r in records
