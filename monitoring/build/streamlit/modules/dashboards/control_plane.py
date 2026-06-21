@@ -84,7 +84,7 @@ def render_control_plane():
                 )
                 delete_readwrite = st.text_input(
                     "Delete ReadWrite Rules",
-                    value="sensors/sensor3/#",
+                    value="",
                     placeholder="sensors/sensor3/#",
                     help="ReadWrite rules to remove (comma-separated)"
                 )
