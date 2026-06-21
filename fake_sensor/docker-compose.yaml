@@ -1,0 +1,42 @@
+services:
+  sensor1:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor1
+  sensor2:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor2
+  sensor3:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor3
+  sensor4:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor4
+
+  sensor5:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor5
+
+  sensor6:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor6
+
+  sensor9:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor9
+
+  sensor7:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor7
+
+  sensor8:
+    build:
+      context: build
+      dockerfile: Dockerfile.sensor8

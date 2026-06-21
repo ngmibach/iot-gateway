@@ -1,0 +1,10 @@
+pi ip is 10.194.220.170
+
+mosquitto_pub -h 10.184.134.81 -p 1883   -u sensor1 -P admin   -t sensors/sensor1/temperature   -m '{"value": 26.5, "unit": "C", "battery": 85}'
+
+mosquitto_pub -h 10.184.134.81 -p 8883 -u sensor1 -P admin \
+  -t sensors/sensor1/temperature \
+  -m '{"value": 26.5, "unit": "C", "battery": 85}' \
+  --cafile ./ca.crt \
+  --cert ./client.crt \
+  --key ./client.key

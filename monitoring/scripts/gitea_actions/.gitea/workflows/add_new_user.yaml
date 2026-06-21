@@ -1,0 +1,98 @@
+name: Gitea Actions to Automatically Register new User to MQTT Broker
+on:
+  workflow_dispatch:
+    inputs:
+      USER_ID:
+        required: true
+        type: string
+        description: 'Name of the user to register to MQTT Broker'
+      USER_PASSWORD:
+        required: true
+        type: string
+        description: 'Password of the user to log in while using port 1883'
+      USER_TOPIC_READ:
+        required: false 
+        type: string
+        description: 'Topic that UserID is granted to read'
+      USER_TOPIC_READ_WRITE:
+        required: false 
+        type: string
+        description: 'Topic that UserID is granted to read and write'
+      USER_IP:
+        required: true 
+        type: number
+        description: 'IP of the Sensor4'
+
+jobs:
+  update-user:
+    runs-on: ubuntu-system-arm
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest-arm
+      volumes:
+        - /workspace/share/iot-gateway/mosquitto/config/acl:/mosquitto/config/acl
+        - /workspace/share/iot-gateway/mosquitto/config/passwords:/mosquitto/config/passwords
+        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+        - /workspace/share/iot-gateway/haproxy/allowed-ips.txt:/haproxy/allowed-ips.txt
+    steps:
+      - name: Test Gitea Action Mount
+        run: |
+          ls -la /mosquitto/config/acl
+          cat /mosquitto/config/acl
+
+      - name: Add new User 
+        run: |
+          ACL_FILE="/mosquitto/config/acl"
+
+          echo "" >> "$ACL_FILE"
+          echo "" >> "$ACL_FILE"
+          echo "user ${{ inputs.USER_ID }}" >> "$ACL_FILE"
+
+          if [ -n "${{ inputs.USER_TOPIC_READ }}" ]; then
+            echo "topic read ${{ inputs.USER_TOPIC_READ }}" >> "$ACL_FILE"
+          fi
+          
+          if [ -n "${{ inputs.USER_TOPIC_READ_WRITE }}" ]; then
+            echo "topic readwrite ${{ inputs.USER_TOPIC_READ_WRITE }}" >> "$ACL_FILE"
+          fi
+
+          echo "=== Updated ACL ==="
+          cat "$ACL_FILE"
+
+      - name: Update Password 
+        run: |
+          PASSWORD_FILE="/mosquitto/config/passwords"
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+
+          docker compose -f "$COMPOSE_FILE" exec mosquitto mosquitto_passwd -b /mosquitto/config/passwords ${{ inputs.USER_ID }} ${{ inputs.USER_PASSWORD }}
+
+          docker compose -f "$COMPOSE_FILE" exec mosquitto chown mosquitto:mosquitto /mosquitto/config/passwords
+          docker compose -f "$COMPOSE_FILE" exec mosquitto chown mosquitto:mosquitto /mosquitto/config/acl
+          docker compose -f "$COMPOSE_FILE" exec mosquitto chmod 0600 /mosquitto/config/passwords
+          docker compose -f "$COMPOSE_FILE" exec mosquitto chmod 0600 /mosquitto/config/acl
+
+          cat "$PASSWORD_FILE"
+
+      - name: Reload Mosquitto Service 
+        run: |
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+          docker compose -f "$COMPOSE_FILE" restart mosquitto
+
+      - name: Add User IP 
+        run: |
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+          HA_PROXY_FILE="/haproxy/allowed-ips.txt"
+          USER_IP="${{ inputs.USER_IP }}"
+
+          if grep -q "^${USER_IP}$" "$HA_PROXY_FILE"; then
+            echo "IP ${USER_IP} already exists in allowed-ips.txt"
+            RESTART_NEEDED=false
+          else
+            echo "Adding new IP ${USER_IP} to allowed-ips.txt"
+            echo "${USER_IP}" >> "$HA_PROXY_FILE"
+            RESTART_NEEDED=true
+          fi 
+
+          if [ $RESTART_NEEDED = true]; then 
+            docker compose -f "$COMPOSE_FILE" down -v haproxy
+            docker compose -f "$COMPOSE_FILE" up -d haproxy
+          fi

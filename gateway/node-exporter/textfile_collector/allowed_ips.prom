@@ -1,0 +1,13 @@
+allowed_ip{ip="172.22.0.0/16"} 1
+allowed_ip_count 1
+acl{user="nodered",topic="#",permission="readwrite"} 1
+acl{user="nodered",topic="$SYS/#",permission="read"} 1
+acl{user="sensor1",topic="sensors/sensor1/#",permission="readwrite"} 1
+acl{user="sensor1",topic="sensors/sensor1/heartbeat",permission="readwrite"} 1
+acl{user="sensor1",topic="alerts/+",permission="read"} 1
+acl{user="sensor2",topic="sensors/sensor2/#",permission="readwrite"} 1
+acl{user="sensor2",topic="sensors/sensor2/heartbeat",permission="readwrite"} 1
+acl{user="sensor2",topic="alerts/+",permission="read"} 1
+acl{user="sensor3",topic="sensors/sensor3/#",permission="readwrite"} 1
+acl{user="anonymous",topic="none",permission="none"} 1
+acl{user="sensor4",topic="sensors/sensor4/#",permission="readwrite"} 1

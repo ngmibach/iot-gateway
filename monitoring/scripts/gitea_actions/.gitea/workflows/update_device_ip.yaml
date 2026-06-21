@@ -1,0 +1,87 @@
+name: Gitea Actions to Automatically Update Device IP for HAProxy
+on:
+  workflow_dispatch:
+    inputs:
+      ALLOWED_DEVICE_IP:
+        required: false
+        description: 'New Device IP(s) to add (comma separated)'
+        type: string
+      DENIED_DEVICE_IP:
+        required: false
+        description: 'Old Device IP(s) to remove (comma separated)'
+        type: string
+      REMOVE_ALL_IP:
+        type: choice
+        description: 'Remove all Device IP'
+        options:
+          - 'yes'
+          - 'no'
+        default: 'no'
+        required: false
+jobs:
+  update-device-ip:
+    runs-on: ubuntu-system-arm
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest-arm
+      volumes:
+        - /workspace/share/iot-gateway/haproxy/allowed-ips.txt:/device/allowed-ips.txt
+        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+    steps:
+      - name: Test Gitea Action Mount
+        run: |
+          ls -la /device/allowed-ips.txt
+      - name: Remove all Device IP from allowed-ips.txt
+        if: ${{ inputs.REMOVE_ALL_IP == 'yes' }}
+        run: |
+          > "/device/allowed-ips.txt"
+          echo "All IP have been removed"
+          echo "restart_HAProxy=true" >> "$GITHUB_ENV"
+        shell: bash
+      - name: Add new Device IP to allowed-ips.txt
+        if: ${{ inputs.ALLOWED_DEVICE_IP != '' }}
+        run: |
+          # Ensure the file ends with a newline before appending (so new IPs start on their own line)
+          if [ -s "/device/allowed-ips.txt" ] && [ "$(tail -c1 /device/allowed-ips.txt | wc -l)" -eq 0 ]; then
+            echo "" >> "/device/allowed-ips.txt"
+          fi
+
+          IFS=',' read -ra IPS <<< "${{ inputs.ALLOWED_DEVICE_IP }}"
+          for ip in "${IPS[@]}"; do
+            ip=$(echo "$ip" | xargs)
+            if [[ -n "$ip" ]]; then
+              # Avoid duplicates before append (sort -u will also clean, but this keeps the log clean)
+              if ! grep -q "^${ip}$" "/device/allowed-ips.txt"; then
+                echo "$ip" >> "/device/allowed-ips.txt"
+                echo "→ Added: $ip"
+              else
+                echo "→ Already present: $ip"
+              fi
+            fi
+          done
+          sort -u "/device/allowed-ips.txt" -o "/device/allowed-ips.txt"
+          cat /device/allowed-ips.txt
+          echo "restart_HAProxy=true" >> "$GITHUB_ENV"
+        shell: bash
+      - name: Remove old Device IP from allowed-ips.txt
+        if: ${{ inputs.DENIED_DEVICE_IP != '' && inputs.REMOVE_ALL_IP != 'yes' }}
+        run: |
+          IFS=',' read -ra IPS <<< "${{ inputs.DENIED_DEVICE_IP }}"
+          for ip in "${IPS[@]}"; do
+            ip=$(echo "$ip" | xargs)
+            if [[ -n "$ip" ]]; then
+              if grep -q "^${ip}$" "/device/allowed-ips.txt"; then
+                grep -v "^${ip}$" "/device/allowed-ips.txt" > "/device/allowed-ips.txt.tmp"
+                mv "/device/allowed-ips.txt.tmp" "/device/allowed-ips.txt"
+                echo "Removed: $ip"
+                echo "restart_HAProxy=true" >> "$GITHUB_ENV"
+              else
+                echo "Not found: $ip"
+              fi
+            fi
+          done
+        shell: bash
+      - name: Restart HAProxy service
+        if: ${{ env.restart_HAProxy == 'true' }}
+        run: |
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+          docker compose -f "$COMPOSE_FILE" restart haproxy

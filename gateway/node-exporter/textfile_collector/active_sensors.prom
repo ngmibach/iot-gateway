@@ -1,0 +1,5 @@
+# HELP mqtt_connected_sensor 1 while this sensor has recently sent data (active sender)
+# TYPE mqtt_connected_sensor gauge
+# HELP mqtt_connected_sensor_count Number of distinct sensors that have recently sent data
+# TYPE mqtt_connected_sensor_count gauge
+mqtt_connected_sensor_count 0

@@ -1,0 +1,23 @@
+log:
+  level: info
+
+runner:
+  file: .runner 
+  capacity: 7
+  timeout: 3h
+  insecure: true
+  fetch_timeout: 10s
+  fetch_interval: 2s
+  labels:
+    - ubuntu-system:docker://localhost:5000/admin/gitea/runner-images:ubuntu-latest 
+
+cache:
+  enabled: false 
+
+container:
+  privileged: true
+  force_pull: true 
+  workdir_parent: /gateway
+  level: info 
+  valid_volumes:
+    - '/home/**'

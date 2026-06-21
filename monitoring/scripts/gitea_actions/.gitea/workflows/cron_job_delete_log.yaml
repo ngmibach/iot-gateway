@@ -1,0 +1,35 @@
+name: Cronjob Gitea Actions to Automatically Delete Log in Suricata, Nodered and Mosquitto Logs
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+
+jobs:
+  update-user:
+    runs-on: ubuntu-system-arm
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest-arm
+      volumes:
+        - /workspace/share/iot-gateway/mosquitto/log/mosquitto.log:/mosquitto/log/mosquitto.log
+        - /workspace/share/iot-gateway/nodered/data/logs/sensor_data.log:/nodered/logs/sensor_data.log
+        - /workspace/share/iot-gateway/haproxy/logs/haproxy.log:/haproxy/logs/haproxy.log
+        - /workspace/share/iot-gateway/logs/gateway-state.log:/sync-config/logs/gateway-state.log
+    steps:
+      - name: Test Gitea Action Mount
+        run: |
+          ls -la /mosquitto/log/mosquitto.log
+          ls -la /nodered/logs/sensor_data.log
+          
+      - name: Clear Mosquitto, Node-RED and Suricata logs
+        run: |
+          echo "=== Truncating Mosquitto log ==="
+          echo -n > /mosquitto/log/mosquitto.log
+
+          echo "=== Truncating Node-RED log ==="
+          echo -n > /nodered/logs/sensor_data.log
+
+          echo "=== Truncating HaProxy log ==="
+          echo -n > /haproxy/logs/haproxy.log
+
+          echo "=== Truncating Sync-config log ==="
+          echo -n > /sync-config/logs/gateway-state.log

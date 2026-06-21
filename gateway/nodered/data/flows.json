@@ -1,0 +1,311 @@
+[
+  {
+    "id": "iot-gateway",
+    "type": "tab",
+    "label": "IoT Gateway",
+    "disabled": false
+  },
+  {
+    "id": "local-mosquitto",
+    "type": "mqtt-broker",
+    "name": "Local Mosquitto",
+    "broker": "127.0.0.1",
+    "port": "1883",
+    "clientid": "",
+    "autoConnect": true,
+    "usetls": false,
+    "protocolVersion": "4",
+    "keepalive": "60",
+    "cleansession": true,
+    "autoUnsubscribe": true,
+    "birthTopic": "",
+    "birthQos": "0",
+    "birthPayload": "",
+    "birthMsg": {},
+    "closeTopic": "",
+    "closePayload": "",
+    "closeMsg": {},
+    "willTopic": "",
+    "willQos": "0",
+    "willPayload": "",
+    "willMsg": {},
+    "userProps": "",
+    "sessionExpiry": ""
+  },
+  {
+    "id": "mqtt-in",
+    "type": "mqtt in",
+    "z": "iot-gateway",
+    "name": "Sensors In",
+    "topic": "sensors/#",
+    "qos": "2",
+    "datatype": "auto-detect",
+    "broker": "local-mosquitto",
+    "nl": false,
+    "rap": false,
+    "inputs": 0,
+    "x": 60,
+    "y": 100,
+    "wires": [
+      [
+        "eb1adea36202416f"
+      ]
+    ]
+  },
+  {
+    "id": "process",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Process + Log",
+    "func": "// === Process + Log (After Decryption) ===\n\n// Pass through denied events\nif (typeof msg.payload === \"object\" && msg.payload && msg.payload.event_type && msg.payload.event_type.startsWith(\"denied_\")) {\n    return msg;\n}\n\nlet finalPayload;\n\ntry {\n    finalPayload = JSON.parse(msg.payload);\n} catch (e) {\n    node.warn(\"Failed to parse Python output\");\n    finalPayload = msg.originalPayload || msg.payload;\n}\n\nif (finalPayload && finalPayload.error) {\n    node.warn(\"Decryption failed: \" + finalPayload.error);\n    finalPayload = msg.originalPayload || {};\n}\n\nconst topicParts = msg.topic.split(\"/\");\nconst deviceId = topicParts[1] || msg.deviceId || \"unknown\";\n\nconst map = flow.get(\"clientIpMap\") || {};\nconst ipInfo = map[deviceId] || { ip: \"unknown\" };\n\nconst gatewayReceivedAt = new Date().toISOString();\nconst deviceReportedAt = finalPayload.timestamp || null;\n\nlet delaySeconds = 0;\nif (deviceReportedAt) {\n    try {\n        const grTime = new Date(gatewayReceivedAt);\n        const drTime = new Date(deviceReportedAt);\n        const diffMs = grTime.getTime() - drTime.getTime();\n        delaySeconds = diffMs / 1000;\n        if (delaySeconds < 0) delaySeconds = 0;\n    } catch (e) {\n        node.warn(\"Delay calculation failed: \" + e.message);\n        delaySeconds = 0;\n    }\n}\n\nmsg.payload = {\n    gateway_received_at: gatewayReceivedAt,\n    device_reported_at: deviceReportedAt,\n    delay: parseFloat(delaySeconds.toFixed(3)),\n    event_type: \"sensor_data\",\n    deviceId: deviceId,\n    username: deviceId,\n    source_ip: ipInfo.ip || msg.source_ip,\n    topic: msg.topic,\n    payload: finalPayload,\n    payload_size_bytes: msg.payload_size_bytes || 0,\n    gateway: \"pi-iot-gateway\"\n};\n\nreturn msg;",
+    "outputs": 1,
+    "timeout": "",
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 800,
+    "y": 100,
+    "wires": [
+      [
+        "file-out",
+        "forward",
+        "debug"
+      ]
+    ]
+  },
+  {
+    "id": "file-out",
+    "type": "file",
+    "z": "iot-gateway",
+    "name": "Write Sensor Log",
+    "filename": "/data/logs/sensor_data.log",
+    "filenameType": "str",
+    "appendNewline": true,
+    "createDir": true,
+    "overwriteFile": "false",
+    "encoding": "none",
+    "x": 1050,
+    "y": 60,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "forward",
+    "type": "mqtt out",
+    "z": "iot-gateway",
+    "name": "Forward to Central",
+    "topic": "gateway/processed",
+    "qos": "2",
+    "retain": "false",
+    "respTopic": "",
+    "contentType": "",
+    "userProps": "",
+    "correl": "",
+    "expiry": "",
+    "broker": "local-mosquitto",
+    "x": 1050,
+    "y": 140,
+    "wires": []
+  },
+  {
+    "id": "debug",
+    "type": "debug",
+    "z": "iot-gateway",
+    "name": "Debug",
+    "active": true,
+    "tosidebar": true,
+    "console": false,
+    "tostatus": false,
+    "complete": "true",
+    "targetType": "full",
+    "statusVal": "",
+    "statusType": "auto",
+    "x": 1050,
+    "y": 200,
+    "wires": []
+  },
+  {
+    "id": "2834a6274690e2e9",
+    "type": "mqtt in",
+    "z": "iot-gateway",
+    "name": "",
+    "topic": "$SYS/broker/log/#",
+    "qos": "0",
+    "datatype": "auto-detect",
+    "broker": "local-mosquitto",
+    "nl": false,
+    "rap": true,
+    "rh": 0,
+    "inputs": 0,
+    "x": 130,
+    "y": 320,
+    "wires": [
+      [
+        "0ed7b38737a11bb8"
+      ]
+    ]
+  },
+  {
+    "id": "0ed7b38737a11bb8",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Parse Mosquitto Log",
+    "func": "const line = msg.payload.toString().trim();\n\nconst now = new Date().toISOString();\n\nnode.warn(\"[DEBUG Parse] line: \" + line); \n\n// === 1. New Client Connected (Best source for IP + username) ===\nif (line.includes(\"New client connected from\")) {\n    const ipMatch = line.match(/from ([\\d.]+):\\d+/);\n    const clientIdMatch = line.match(/as ([\\w-]+) /);\n    const userMatch = line.match(/u'([^']+)'/);\n\n    if (ipMatch && userMatch) {\n        msg.payload = {\n            type: \"connection\",\n            timestamp: now,\n            ip: ipMatch[1],\n            username: userMatch[1],\n            clientId: clientIdMatch ? clientIdMatch[1] : null\n        };\n        return [msg, null];\n    }\n}\n\n// === 2. Connection from (fallback) ===\nelse if (line.includes(\"New connection from\")) {\n    const ipMatch = line.match(/from ([\\d.]+):\\d+/);\n    if (ipMatch) {\n        msg.payload = {\n            type: \"raw_connection\",\n            timestamp: now,\n            ip: ipMatch[1]\n        };\n        return [msg, null];\n    }\n}\n\n// === 3. Denied PUBLISH from ACL or other (provides clientId + attempted topic) ===\n// This now catches cases like sensor4 publishing to sensors/sensor2/process (ACL violation)\nelse if (line.includes(\"Denied PUBLISH\")) {\n    // Primary regex for standard Mosquitto denied publish format\n    const deniedMatch = line.match(/Denied PUBLISH from ([^\\s(]+) \\(d(\\d+), q(\\d+), r(\\d+), m(\\d+), '([^']+)', \\.\\.\\. \\((\\d+) bytes\\)\\)/);\n    let clientId, topic, bytes, dup = 0, qos = 0, retain = 0, mid = 0;\n\n    if (deniedMatch) {\n        clientId = deniedMatch[1];\n        dup = parseInt(deniedMatch[2], 10);\n        qos = parseInt(deniedMatch[3], 10);\n        retain = parseInt(deniedMatch[4], 10);\n        mid = parseInt(deniedMatch[5], 10);\n        topic = deniedMatch[6];\n        bytes = parseInt(deniedMatch[7], 10);\n    } else {\n        // Robust fallback: extract clientId and the topic inside single quotes\n        const clientIdMatch = line.match(/Denied PUBLISH from ([^\\s(]+)/);\n        clientId = clientIdMatch ? clientIdMatch[1] : \"unknown\";\n\n        const topicMatch = line.match(/'([^']+)'/);\n        topic = topicMatch ? topicMatch[1] : \"unknown\";\n\n        const bytesMatch = line.match(/\\((\\d+) bytes\\)/);\n        bytes = bytesMatch ? parseInt(bytesMatch[1], 10) : 0;\n    }\n\n    // Lookup IP/username using clientIdMap (populated when \"New client connected\" is seen)\n    const cMap = flow.get(\"clientIdMap\") || {};\n    const info = cMap[clientId] || { ip: \"unknown\", username: null };\n    let username = info.username || clientId;\n    let ip = info.ip || \"unknown\";\n\n    // Fallback to clientIpMap (username-based map)\n    const uMap = flow.get(\"clientIpMap\") || {};\n    if (ip === \"unknown\" && uMap[clientId]) {\n        ip = uMap[clientId].ip || \"unknown\";\n        username = clientId;\n    }\n\n    msg.payload = {\n        type: \"denied_publish\",\n        timestamp: now,\n        clientId: clientId,\n        topic: topic,\n        dup: dup,\n        qos: qos,\n        retain: retain,\n        mid: mid,\n        size: bytes,\n        ip: ip,\n        username: username,\n        denied_type: \"acl_publish\"\n    };\n    return [null, msg];  // route to Prepare Denied Event\n}\n\n\nif (line.includes(\"Denied\") || line.includes(\"denied\")) {\n    node.warn(\"[DEBUG] Broad catch triggered for denied line: \" + line);\n    // Broad catch-all for any denial log line (including ACL publish denials from sensor4 to sensor2 topic)\n    // This ensures the event is always created even if specific regexes don't match the exact Mosquitto log format\n    let topic = \"unknown\";\n    const topicMatch = line.match(/'([^']+)'/);\n    if (topicMatch) topic = topicMatch[1];\n    let clientId = \"unknown\";\n    const clientMatch = line.match(/from ([^\\s(]+)/);\n    if (clientMatch) clientId = clientMatch[1];\n    msg.payload = {\n        type: \"denied_publish\",\n        timestamp: now,\n        clientId: clientId,\n        topic: topic,\n        ip: \"unknown\",\n        username: \"unknown\",\n        raw: line,\n        denied_type: \"acl_publish\"\n    };\n    return [null, msg];\n}\n\nreturn null;\n\n",
+    "outputs": 2,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 400,
+    "y": 320,
+    "wires": [
+      [
+        "34927bc662e1c1ec"
+      ],
+      [
+        "f0e1d2c3b4a59687"
+      ]
+    ]
+  },
+  {
+    "id": "34927bc662e1c1ec",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Store Client IP",
+    "func": "// === Store Client IP - Function Node ===\n\nif (msg.payload.type === \"raw_connection\" || !msg.payload.username) {\n    return null;\n}\n\nif (!flow.get(\"clientIpMap\")) {\n    flow.set(\"clientIpMap\", {});\n}\n\nconst map = flow.get(\"clientIpMap\");\nconst entry = {\n    ip: msg.payload.ip,\n    timestamp: Date.now()\n};\n\nmap[msg.payload.username] = entry;\n\n// Cleanup old entries (older than 10 minutes)\nconst now = Date.now();\nfor (let user in map) {\n    if (now - map[user].timestamp > 600000) {\n        delete map[user];\n    }\n}\n\nflow.set(\"clientIpMap\", map);\n\n// === Also maintain clientIdMap so Denied PUBLISH (which logs clientId not username) can be correlated to IP ===\nif (!flow.get(\"clientIdMap\")) {\n    flow.set(\"clientIdMap\", {});\n}\n\nconst cMap = flow.get(\"clientIdMap\");\nconst cEntry = {\n    ip: msg.payload.ip,\n    username: msg.payload.username,\n    timestamp: Date.now()\n};\nif (msg.payload.clientId) {\n    cMap[msg.payload.clientId] = cEntry;\n}\n\n// cleanup clientIdMap\nconst cnow = Date.now();\nfor (let cid in cMap) {\n    if (cnow - cMap[cid].timestamp > 600000) {\n        delete cMap[cid];\n    }\n}\nflow.set(\"clientIdMap\", cMap);\n\nreturn null;   // Important: no output",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 700,
+    "y": 320,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "f0e1d2c3b4a59687",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Prepare Denied Event",
+    "func": "const p = msg.payload || {};\nif (p.type !== \"denied_publish\" && p.type !== \"denied_connect\") { return null; }\n\nconst isPublish = p.type === \"denied_publish\";\nconst deviceId = (p.username && p.username !== \"unknown\") ? p.username : (p.clientId || \"unknown\");\n\nmsg.payload = {\n    gateway_received_at: new Date().toISOString(),\n    event_type: isPublish ? \"denied_publish\" : \"denied_connect\",\n    deviceId: deviceId,\n    username: p.username || \"unknown\",\n    clientId: p.clientId || \"unknown\",\n    source_ip: p.ip || \"unknown\",\n    topic: p.topic || \"unknown\",\n    qos: p.qos,\n    retain: p.retain,\n    size_bytes: p.size,\n    denied_type: isPublish ? (p.denied_type || \"acl_publish\") : (p.denied_type || p.reason || \"auth_failure\"),\n    reason: p.reason || null,\n    gateway: \"pi-iot-gateway\"\n};\n\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 700,
+    "y": 400,
+    "wires": [
+      [
+        "file-out",
+        "debug"
+      ]
+    ]
+  },
+  {
+    "id": "eb1adea36202416f",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Prepare for Decryption",
+    "func": "// Prepare for Decryption\nconst topicParts = msg.topic.split(\"/\");\nconst deviceId = topicParts[1] || \"unknown\";\n\nconst map = flow.get(\"clientIpMap\") || {};\nconst ipInfo = map[deviceId] || { ip: \"unknown\" };\n\n// Save original\nmsg.originalPayload = msg.payload;\n\n// Capture the raw incoming MQTT payload size (this is the \"package size\" of the encrypted message)\nlet incomingPayload = msg.payload;\nif (typeof incomingPayload !== \"string\") {\n    incomingPayload = JSON.stringify(incomingPayload || {});\n}\nmsg.payload_size_bytes = Buffer.byteLength(incomingPayload, \"utf8\");\n\n// Size restriction (keep existing logic)\nconst PAYLOAD_SIZE = 2802;\nlet payloadStr = typeof msg.payload === \"string\" ? msg.payload : JSON.stringify(msg.payload || {});\nif (Math.abs(payloadStr.length - PAYLOAD_SIZE) > 50) {\n    node.warn(`Payload size mismatch for device ${deviceId}: ${payloadStr.length} bytes (expected ~${PAYLOAD_SIZE})`);\n    msg.payload = {\n        gateway_received_at: new Date().toISOString(),\n        event_type: \"denied_payload_size\",\n        deviceId: deviceId,\n        source_ip: ipInfo.ip || \"unknown\",\n        denied_type: \"payload_size_mismatch\",\n        reason: `Payload size ${payloadStr.length} does not match expected size`,\n        payload_size_bytes: msg.payload_size_bytes,\n        gateway: \"pi-iot-gateway\"\n    };\n    return msg;\n}\n\n// Ensure payload is a clean JSON string for Python\nif (typeof msg.payload === \"object\") {\n    msg.payload = JSON.stringify(msg.payload);\n} else if (typeof msg.payload === \"string\") {\n    try {\n        JSON.parse(msg.payload); // validate\n    } catch(e) {\n        node.warn(\"Invalid JSON payload\");\n        return null;\n    }\n}\n\nmsg.deviceId = deviceId;\nmsg.source_ip = ipInfo.ip;\n\nreturn msg;",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [],
+    "x": 260,
+    "y": 100,
+    "wires": [
+      [
+        "678002e24b751481"
+      ]
+    ]
+  },
+  {
+    "id": "678002e24b751481",
+    "type": "function",
+    "z": "iot-gateway",
+    "name": "Decrypt Parameters",
+    "func": "function fernetDecrypt(tokenB64url, keyB64url) {\n    const keyBuf = Buffer.from(keyB64url, 'base64');\n    if (keyBuf.length !== 32) {\n        throw new Error('Invalid key length: ' + keyBuf.length + ' (expected 32)');\n    }\n    const signingKey = keyBuf.slice(0, 16);\n    const encryptionKey = keyBuf.slice(16, 32);\n\n    const tokenBuf = Buffer.from(tokenB64url, 'base64');\n    if (tokenBuf.length < 57) {\n        throw new Error('Token too short: ' + tokenBuf.length);\n    }\n\n    const version = tokenBuf[0];\n    if (version !== 0x80) {\n        throw new Error('Unsupported Fernet version: 0x' + version.toString(16));\n    }\n\n    // Verify HMAC-SHA256\n    const hmacData = tokenBuf.slice(0, tokenBuf.length - 32);\n    const hmacGiven = tokenBuf.slice(tokenBuf.length - 32);\n    const hmacCalc = crypto.createHmac('sha256', signingKey).update(hmacData).digest();\n    if (!crypto.timingSafeEqual(hmacGiven, hmacCalc)) {\n        throw new Error('HMAC verification failed \u2014 wrong key or corrupted data');\n    }\n\n    // Decrypt AES-128-CBC\n    const iv = tokenBuf.slice(9, 25);\n    const ciphertext = tokenBuf.slice(25, tokenBuf.length - 32);\n    const decipher = crypto.createDecipheriv('aes-128-cbc', encryptionKey, iv);\n    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);\n\n    return JSON.parse(decrypted.toString('utf8'));\n}\n\ntry {\n    // Pass through pre-created denied events (e.g. payload size from prepare)\n    if (typeof msg.payload === 'object' && msg.payload && msg.payload.event_type && msg.payload.event_type.startsWith('denied_')) {\n        return msg;\n    }\n\n    let wrapper = (typeof msg.payload === 'string') ? JSON.parse(msg.payload) : msg.payload;\n\n    const key = wrapper.key;\n    const encrypted = wrapper.encrypted;\n\n    if (!key || !encrypted) {\n        node.warn('Missing \"key\" or \"encrypted\" \u2014 forwarding as-is');\n        msg.payload = JSON.stringify(wrapper);\n        return msg;\n    }\n\n    const decrypted = fernetDecrypt(encrypted, key);\n\n    msg.payload = JSON.stringify(decrypted);\n    return msg;\n\n} catch (e) {\n    node.warn('Fernet decryption error: ' + e.message);\n    msg.payload = {\n        gateway_received_at: now,\n        event_type: \"denied_decryption\",\n        deviceId: msg.deviceId || \"unknown\",\n        source_ip: msg.source_ip || \"unknown\",\n        denied_type: \"decryption_failure\",\n        reason: \"Message could not be decrypted (encrypted with incompatible/different method or wrong/corrupted key). \" + e.message,\n        gateway: \"pi-iot-gateway\"\n    };\n    return msg;\n}",
+    "outputs": 1,
+    "timeout": 0,
+    "noerr": 0,
+    "initialize": "",
+    "finalize": "",
+    "libs": [
+      {
+        "var": "crypto",
+        "module": "crypto"
+      }
+    ],
+    "x": 560,
+    "y": 100,
+    "wires": [
+      [
+        "process"
+      ]
+    ]
+  },
+  {
+    "id": "3846a33b4b7fa465",
+    "type": "change",
+    "z": "iot-gateway",
+    "name": "",
+    "rules": [
+      {
+        "t": "set",
+        "p": "maxPayloadSize",
+        "pt": "flow",
+        "to": "4000",
+        "tot": "num"
+      }
+    ],
+    "action": "",
+    "property": "",
+    "from": "",
+    "to": "",
+    "reg": false,
+    "x": 550,
+    "y": 220,
+    "wires": [
+      []
+    ]
+  },
+  {
+    "id": "b706cf0968fd2d2e",
+    "type": "inject",
+    "z": "iot-gateway",
+    "name": "Set maxPayloadSize on start",
+    "props": [
+      {
+        "p": "payload"
+      },
+      {
+        "p": "topic",
+        "vt": "str"
+      }
+    ],
+    "repeat": "",
+    "crontab": "",
+    "once": true,
+    "onceDelay": 0.1,
+    "topic": "",
+    "payload": "",
+    "payloadType": "date",
+    "x": 280,
+    "y": 220,
+    "wires": [
+      [
+        "3846a33b4b7fa465"
+      ]
+    ]
+  }
+]

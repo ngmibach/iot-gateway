@@ -1,0 +1,13 @@
+monitoring/data/
+
+gateway/mosquitto/data/
+gateway/mosquitto/log/
+gateway/nodered/data/logs/
+gateway/nodered/data/*.backup
+gateway/nodered/data/.config.*
+gateway/haproxy/logs/haproxy.log
+gateway/logs/gateway-state.log
+
+*.crt
+*.key
+*.csr

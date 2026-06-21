@@ -1,0 +1,191 @@
+name: Gitea Actions to Automatically Update Server Certificate for SSL MQTT Server Connection
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 0 * * *" # Runs every day at 0:00 AM UTC
+
+env:
+  CA_PASSWORD: ${{ secrets.CA_PASSWORD }}
+  COUNTRY: ${{ secrets.COUNTRY }}
+  STATE: ${{ secrets.STATE }}
+  CITY: ${{ secrets.CITY }}
+  ORGANIZATION: ${{ secrets.ORGANIZATION }}
+  ORG_UNIT: ${{ secrets.ORG_UNIT }}
+  CA_CN: ${{ secrets.CA_CN }}
+  SERVER_CN: ${{ secrets.SERVER_CN }}
+  DURATION: ${{ secrets.DURATION }}
+
+jobs:
+  update-cert-server:
+    runs-on: ubuntu-system-arm
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest-arm
+      volumes:
+        - /workspace/share/iot-gateway/certs:/server/certs
+        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+    outputs:
+      ca_crt: ${{ steps.cert-generation.outputs.ca_crt }}
+      ca_key: ${{ steps.cert-generation.outputs.ca_key }}
+      client_crt_sensor1: ${{ steps.cert-generation.outputs.client_crt_sensor1 }}
+      client_key_sensor1: ${{ steps.cert-generation.outputs.client_key_sensor1 }}
+      client_crt_sensor2: ${{ steps.cert-generation.outputs.client_crt_sensor2 }}
+      client_key_sensor2: ${{ steps.cert-generation.outputs.client_key_sensor2 }}
+      client_crt_sensor3: ${{ steps.cert-generation.outputs.client_crt_sensor3 }}
+      client_key_sensor3: ${{ steps.cert-generation.outputs.client_key_sensor3 }}
+      client_crt_sensor4: ${{ steps.cert-generation.outputs.client_crt_sensor4 }}
+      client_key_sensor4: ${{ steps.cert-generation.outputs.client_key_sensor4 }}
+
+    steps:
+      - name: Test Gitea Action Mount
+        run: |
+          ls -la /server/certs
+
+      - name: Generate Server Certificate 
+        id: cert-generation
+        run: |
+          cd /server/certs
+          rm -f *.crt *.key *.csr *.srl
+
+          # --- CA Generation ---
+          echo "--- Generating CA key and certificate ---"
+          openssl genrsa -aes256 -passout pass:${{ env.CA_PASSWORD }} -out ca.key 2048
+          openssl req -new -x509 -days ${{ env.DURATION }} -key ca.key -passin pass:${{ env.CA_PASSWORD }} -out ca.crt \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=${{ env.ORG_UNIT }}/CN=${{ env.CA_CN }}"
+
+          # --- Server Certificate Generation ---
+          echo "--- Generating Server key and certificate ---"
+          openssl genrsa -out server.key 2048
+          openssl req -new -out server.csr -key server.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Broker/CN=${{ env.SERVER_CN }}"
+          openssl x509 -req -in server.csr -CA ca.crt -CAkey ca.key -passin pass:${{ env.CA_PASSWORD }} -CAcreateserial -out server.crt -days ${{ env.DURATION }}
+
+          echo "ca_crt=$(base64 -w0 ca.crt)" >> $GITHUB_OUTPUT
+          echo "ca_key=$(base64 -w0 ca.key)" >> $GITHUB_OUTPUT
+
+          # --- Client Certificate Generation for Sensor 1 ---
+          openssl genrsa -out client.key 2048
+          openssl req -new -out client.csr -key client.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Sensors/CN=sensor1"
+
+          openssl x509 -req -in client.csr \
+            -CA ca.crt \
+            -CAkey ca.key \
+            -passin pass:${{ env.CA_PASSWORD }} \
+            -CAcreateserial -out client.crt -days ${{ env.DURATION }}
+
+          echo "client_crt_sensor1=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
+          echo "client_key_sensor1=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
+
+          # --- Client Certificate Generation for Sensor 2 ---
+          openssl genrsa -out client.key 2048
+          openssl req -new -out client.csr -key client.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Sensors/CN=sensor2"
+
+          openssl x509 -req -in client.csr \
+            -CA ca.crt \
+            -CAkey ca.key \
+            -passin pass:${{ env.CA_PASSWORD }} \
+            -CAcreateserial -out client.crt -days ${{ env.DURATION }}
+
+          echo "client_crt_sensor2=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
+          echo "client_key_sensor2=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
+
+
+          # --- Client Certificate Generation for Sensor 3 ---
+          openssl genrsa -out client.key 2048
+          openssl req -new -out client.csr -key client.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Sensors/CN=sensor3"
+
+          openssl x509 -req -in client.csr \
+            -CA ca.crt \
+            -CAkey ca.key \
+            -passin pass:${{ env.CA_PASSWORD }} \
+            -CAcreateserial -out client.crt -days ${{ env.DURATION }}
+
+          echo "client_crt_sensor3=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
+          echo "client_key_sensor3=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
+
+          # --- Client Certificate Generation for Sensor 4 ---
+          openssl genrsa -out client.key 2048
+          openssl req -new -out client.csr -key client.key \
+            -subj "/C=${{ env.COUNTRY }}/ST=${{ env.STATE }}/L=${{ env.CITY }}/O=${{ env.ORGANIZATION }}/OU=Sensors/CN=sensor4"
+
+          openssl x509 -req -in client.csr \
+            -CA ca.crt \
+            -CAkey ca.key \
+            -passin pass:${{ env.CA_PASSWORD }} \
+            -CAcreateserial -out client.crt -days ${{ env.DURATION }}
+
+          echo "client_crt_sensor4=$(base64 -w0 client.crt)" >> $GITHUB_OUTPUT
+          echo "client_key_sensor4=$(base64 -w0 client.key)" >> $GITHUB_OUTPUT
+
+          sync
+          chown -R 1883:1883 .
+          chmod 644 ca.crt server.crt
+          chmod 600 server.key ca.key
+          
+      - name: Restart MQTT Broker Service 
+        run: |
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+          docker compose -f "$COMPOSE_FILE" restart mosquitto haproxy
+
+  update-cert-client-sensor1:
+    needs: update-cert-server
+    runs-on: ubuntu-system
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
+      volumes:
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor1:/client/sensor1/certs
+
+    steps:
+      - name: Import CA from previous job
+        run: |
+          printf '%s' "${{ needs.update-cert-server.outputs.ca_crt }}" | base64 -d > /client/sensor1/certs/ca.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor1 }}" | base64 -d > /client/sensor1/certs/client.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor1 }}" | base64 -d > /client/sensor1/certs/client.key
+
+  update-cert-client-sensor2:
+    needs: update-cert-server
+    runs-on: ubuntu-system
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
+      volumes:
+        -  /home/bach/workspace/iot-gateway/fake_sensor/build/sensor2:/client/sensor2/certs
+
+    steps:
+      - name: Import CA from previous job
+        run: |
+          printf '%s' "${{ needs.update-cert-server.outputs.ca_crt }}" | base64 -d > /client/sensor2/certs/ca.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor2 }}" | base64 -d > /client/sensor2/certs/client.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor2 }}" | base64 -d > /client/sensor2/certs/client.key
+
+  update-cert-client-sensor3:
+    needs: update-cert-server
+    runs-on: ubuntu-system
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
+      volumes:
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor3:/client/sensor3/certs
+
+    steps:
+      - name: Import CA from previous job
+        run: |
+          printf '%s' "${{ needs.update-cert-server.outputs.ca_crt }}" | base64 -d > /client/sensor3/certs/ca.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor3 }}" | base64 -d > /client/sensor3/certs/client.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor3 }}" | base64 -d > /client/sensor3/certs/client.key
+
+  update-cert-client-sensor4:
+    needs: update-cert-server
+    runs-on: ubuntu-system
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest
+      volumes:
+        - /home/bach/workspace/iot-gateway/fake_sensor/build/sensor4:/client/sensor4/certs
+
+    steps:
+      - name: Import CA from previous job
+        run: |
+          printf '%s' "${{ needs.update-cert-server.outputs.ca_crt }}" | base64 -d > /client/sensor4/certs/ca.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_crt_sensor4 }}" | base64 -d > /client/sensor4/certs/client.crt
+          printf '%s' "${{ needs.update-cert-server.outputs.client_key_sensor4 }}" | base64 -d > /client/sensor4/certs/client.key

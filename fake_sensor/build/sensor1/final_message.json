@@ -1,0 +1,43 @@
+{
+  "batch": {
+    "handlingUnit": null,
+    "material": null,
+    "name": "0",
+    "productionOrder": null,
+    "program": {
+      "name": "UNKNOWN",
+      "version": "UNKNOWN"
+    }
+  },
+  "dataModel": {
+    "id": "2",
+    "state": "PRODUCTIVE"
+  },
+  "device": {
+    "building": "UNKNOWN",
+    "giai": "UNKNOWN",
+    "id": "UNKNOWN",
+    "level": "UNKNOWN",
+    "location": "UNKNOWN",
+    "machineCluster": "ALD VKU vacuum sintering",
+    "machineName": "UNKNOWN",
+    "mesId": "UNKNOWN",
+    "organizationalUnit": "UNKNOWN",
+    "plant": "UNKNOWN",
+    "valueStream": "UNKOWN",
+    "workCenter": "UNKNOWN",
+    "workUnit": "UNKOWN"
+  },
+  "id": "101e6ab5-0c44-43fa-8ef9-a1dfe634c430",
+  "timestamp": "2026-05-27T02:05:07.146Z",
+  "process": {
+    "description": "UNKOWN",
+    "id": "UNKNOW",
+    "parametersEncrypted": "gAAAAABqFlFTdZ3viuvQmr4ukXCaNaHLs7w-wMkD51FyE2B7INE1TH9M5KWp_shNu5zkPMrHr9Q0kPj4xu_mRnbRzz5JfWJLiK2oMtGH7XwP1vejm5tN4KgLa0vIJzsEQ3O1SUyPnU13awQLT43hxNdEjFF3b8tqxgTycK9OqsA7GVBMM_jWLoVPYB-cydjwbaJxD22CVAgNa-77hcZS6u2ghKn2LASH0CuEUWw9zwli-XR-ojVcoVN1yjzLaPLn7Ggc8j4_tyFge5niO8t3VrZ9XooimByMwOCU3tZLE4jtds9UjDW2SwSDC8H1ds5xgIy_Fpm9aRV9TVbxQSI6nMBs1dwMhQB5Th2F3_pnLRuHvbT3HulAgbTgzAXERC88u4a4NWWvqSr-0ecdabmrYghK0kBLTG9XYUDMGP-0UgK7nHGYkkjm1HWVB4bY_nV_ZR2e-4u-ycKw0GRK3mgYqptudYE6sOndQbLwBpiSjmTrc2EQS0pvyFALv7R-kqUflGjO8cXCP8QRLV2Bsx2OLPQOIYjFjzK0G7g7tk1n4nXD8weAWcvNiR_Dthz3hcNPg__1W0drVCiLhvU8iMyEsdEmPeurKadhvY2vR1yznPNxlwSitd2octk7AgycQ3XOkY_Rv8B78EBDeKHbspczlWxnrPfEeUqjbwL1KbwE822nyeclSME2KyAIEIx-GnjJyG0hFm51RuYsEu_n9SXbqmrbX8vlhM8JMvTfn2UQakjLrx_KP6_H85KbN-5P3x8mPaVoyROIXZMpotZeVKqCDJm6-xyrCJIh8TdmcJSs1xDU2cbx47-ROi_jnITf3Z47Uxz96mcNeRrVV3w3CcYdpx2heNB0VfoioxVyKj6z6SjW8UBdXIw88YG-bAdz_be9w6zgwYjlGlFi76eZAH48mZ8CSNpZMVza5d2iHRoboXlHXD3_T_waBo-S84BuX1h9PEsGTUwtJ-IZB8JkhT-NDuViJB3Mx07ikhiNvXHfuhpBHTswdzzllk697b-82RlK40cXuMCTGn0TgEJpKrwSjI-xPS4yarnQXk4Jk_V63tEN_EmcS-mWdw2fg2Sh7-okFx-nEe62B_jpgl8gaDwwDT8_EuNZaooIONSNnBFks3QRqVKHG1ScCZAQUn-gQdF3J3mpnXbz7fDZWBySwIYkq52IUtW2f_0kAsCyj1WxrGcDPtybURIHytYnM97MFCyqWZAgg4WcARR1IAW-cEHiXmCa5-nvQyAE5dqPU8jxi6GzA5Dy0JuhN03evVPLAy29vx80NSNmG5yjZVWNmaq9u0wiM6Mc1VCjeLLJmtD6rQBFjISRls5j1G1N0x_MTM7sQuIqLImd6frY16qQX6CoTiSzBmfhqkIXepTRLwuBGmao4WoPGkANxVSdDXBZhVuLa-iNapM0XSsz9MxxjgNmkF3iMcGrFkLAa4LBxbmY3q5h9WPSpH71pAeBpA9yhRShldHsOygW4KDDm0ROLQ4346pypg3QNyO_SLcXZgMYq1aaHSs5Qx2def8lbX7Y6Bu2ZtflXXh86XOJ9dDlbxx94rTqxGKuhJgcKga9-NQb4InwtgC4lhFpN0WBMdtC_XEEuA9efFbsJ786Xs2XB90r55kFJupjLJa_eSmEfKEtcImQSgYPyHCQOyyk_FybYDLMF6_J_ewQKOG7K8U7ekWAKEGXCAXvhS6MmkhxNNhpuWAmKYQO2qM6sz0="
+  },
+  "station": {
+    "clampingUnit": "unclamped",
+    "name": "chamber"
+  },
+  "key": "JwmxTJrXRHYuaVkmQPSQlBLkc0-wsBsf9guQkoe5TIo="
+}

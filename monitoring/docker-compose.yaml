@@ -1,0 +1,144 @@
+services:
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./data/loki:/loki
+      - ./config/loki/loki-config.yaml:/etc/loki/local-config.yaml
+    command: -config.file=/etc/loki/local-config.yaml
+    networks:
+      - iot-net
+    
+  grafana:
+    image: grafana/grafana:12.2
+    container_name: grafana
+    ports:
+      - "3210:3000"
+    volumes:
+      - ./data/grafana:/var/lib/grafana
+      - ./config/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ./config/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ./config/grafana/dashboards:/etc/grafana/dashboards
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false 
+    networks:
+      - iot-net
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    # Host network required so Prometheus can scrape the gateway at 172.20.10.2
+    # (not routable from the Docker bridge network).
+    network_mode: host
+    volumes:
+      - ./data/prometheus:/prometheus
+      - ./config/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+
+  streamlit:
+    build: 
+      context: build/streamlit
+    container_name: iot-streamlit
+    ports:
+      - 8000:8501
+    networks:
+      - iot-net
+    environment:
+      - STREAMLIT_SERVER_ENABLE_CORS=false
+    depends_on:
+      - loki
+
+  gitea:
+    build:
+      context: build/gitea/server
+    container_name: gitea
+    restart: always
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+      - DB_TYPE=sqlite3
+      - GITEA__database__DB_TYPE=sqlite3
+      - GITEA__database__PATH=/data/gitea/gitea.db
+      - GITEA__server__PROTOCOL=http
+      - GITEA__server__ROOT_URL=http://${GITEA_DOMAIN}:5000/
+      - GITEA__server__LOCAL_ROOT_URL=http://172.17.0.1:5000/
+      - GITEA__server__HTTP_PORT=5000
+      - GITEA__service__DISABLE_REGISTRATION=true
+      - GITEA__service__DEFAULT_KEEP_EMAIL_PRIVATE=false
+      - GITEA__service__DEFAULT_ALLOW_CREATE_ORGANIZATION=true
+      - GITEA__service__DEFAULT_ENABLE_NOTIFY_MAIL=false
+      - GITEA__service__DEFAULT_ORG_VISIBILITY=limited
+      - GITEA__repository__DEFAULT_PUSH_CREATE_PRIVATE=true
+      - GITEA__repository__ENABLE_PUSH_CREATE_ORG=true
+      - GITEA__repository__ENABLE_PUSH_CREATE_USER=true
+      - GITEA_RUNNER_REGISTRATION_TOKEN_FILE=/runner_token/token
+      - GITEA__log__LEVEL=None
+    volumes:
+      - /data/gitea:/data
+      - ./config/gitea/token:/runner_token/token
+    ports:
+      - 5000:5000
+      - 22:22
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:5000/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 30s
+  gitea-seed:
+    build:
+      context: .
+      dockerfile: build/gitea/seed/Dockerfile
+    container_name: gitea-seed
+    depends_on:
+      gitea:
+        condition: service_healthy
+    environment:
+      - GITEA_INTERNAL_URL=http://172.17.0.1:5000
+      - GITEA_CONTAINER_NAME=gitea
+      - GITEA_ADMIN_USER=${GITEA_ADMIN_USER:-admin}
+      - GITEA_ADMIN_PASSWORD=${GITEA_ADMIN_PASSWORD:-admin}
+      - GITEA_ADMIN_EMAIL=${GITEA_ADMIN_EMAIL:-admin@localhost}
+      - GITEA_SEED_REPO=${GITEA_SEED_REPO:-actions}
+      - CONTENT_DIR=/content
+      - GITEA_REGISTRY=${GITEA_REGISTRY:-localhost:5000}
+      - CA_CN=${CA_CN:-My IOT CA Root}
+      - CA_PASSWORD=${CA_PASSWORD:-admin}
+      - COUNTRY=${COUNTRY:-VN}
+      - STATE=${STATE:-Hanoi}
+      - CITY=${CITY:-Hanoi}
+      - ORGANIZATION=${ORGANIZATION:-My IOT Org}
+      - ORG_UNIT=${ORG_UNIT:-IOT Devices}
+      - SERVER_CN=${SERVER_CN:-192.168.40.177}
+      - DURATION=${DURATION:-180}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./scripts/gitea_actions:/content:ro
+      - ./build/gitea/action_latest:/build-context/gitea-action-latest:ro
+  gitearunner:
+    build:
+      context: build/gitea/runner
+    environment:
+      - CONFIG_FILE=/config.yaml
+      - GITEA_INSTANCE_URL=http://172.17.0.1:5000/
+      - GITEA_RUNNER_REGISTRATION_TOKEN_FILE=/runner_token/token
+      - GITEA_RUNNER_NAME=gitearunner
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./config/gitea/token:/runner_token/token
+      - ./config/gitea/config.yaml:/config.yaml
+      - ./data/gitea-runner:/data
+    depends_on:
+      - gitea
+      - gitea-seed
+
+networks:
+  iot-net:
+    driver: bridge

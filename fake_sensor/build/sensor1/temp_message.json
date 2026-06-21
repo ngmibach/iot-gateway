@@ -1,0 +1,60 @@
+{
+  "batch": {
+    "handlingUnit": null,
+    "material": null,
+    "name": "0",
+    "productionOrder": null,
+    "program": { "name": "UNKNOWN", "version": "UNKNOWN" }
+  },
+  "dataModel": { "id": "2", "state": "PRODUCTIVE" },
+  "device": {
+    "building": "UNKNOWN",
+    "giai": "UNKNOWN",
+    "id": "UNKNOWN",
+    "level": "UNKNOWN",
+    "location": "UNKNOWN",
+    "machineCluster": "ALD VKU vacuum sintering",
+    "machineName": "UNKNOWN",
+    "mesId": "UNKNOWN",
+    "organizationalUnit": "UNKNOWN",
+    "plant": "UNKNOWN",
+    "valueStream": "UNKOWN",
+    "workCenter": "UNKNOWN",
+    "workUnit": "UNKOWN"
+  },
+  "id": "101e6ab5-0c44-43fa-8ef9-a1dfe634c430",
+  "timestamp": "2026-05-27T02:05:07.146Z",
+  "process": {
+    "description": "UNKOWN",
+    "id": "UNKNOW",
+    "parameters": {
+      "temperatureChamber": {"unit": "°C", "value": 1417.8},
+      "temperatureSetpoint": {"unit": "°C", "value": 1450.0},
+      "temperatureZone1": {"unit": "°C", "value": 1421.2},
+      "temperatureZone2": {"unit": "°C", "value": 1421.6},
+      "temperatureZone3": {"unit": "°C", "value": 1420.8},
+      "pressureChamber": {"unit": "mbar", "value": 0.00078},
+      "pressureSetpoint": {"unit": "mbar", "value": 0.001},
+      "pressureForevacuum": {"unit": "mbar", "value": 11.6},
+      "deltaPressureMuffle": {"unit": "mbar", "value": 0.12},
+      "gasFlowArgon": {"unit": "l/min", "value": 42.4},
+      "gasFlowNitrogen": {"unit": "l/min", "value": 0.6},
+      "gasFlowHydrogen": {"unit": "l/min", "value": 7.6},
+      "powerHeatingTotal": {"unit": "kW", "value": 40.8},
+      "powerHeatingZone1": {"unit": "kW", "value": 14.3},
+      "powerHeatingZone2": {"unit": "kW", "value": 14.3},
+      "powerHeatingZone3": {"unit": "kW", "value": 14.7},
+      "vacuumPumpSpeed": {"unit": "%", "value": 94.5},
+      "cycleTimeElapsed": {"unit": "s", "value": 10905},
+      "cycleTimeRemaining": {"unit": "s", "value": 4301},
+      "o2Concentration": {"unit": "ppm", "value": 0.8},
+      "dewPoint": {"unit": "°C", "value": -49.5},
+      "vibrationLevel": {"unit": "mm/s", "value": 0.11},
+      "sinteringStage": {"unit": "", "value": "RAMP_UP"}
+    }
+  },
+  "station": {
+    "clampingUnit": "unclamped",
+    "name": "chamber"
+  }
+}

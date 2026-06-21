@@ -1,0 +1,9 @@
+FROM ubuntu:noble 
+ENV TZ=Asia/Ho_Chi_Minh
+RUN apt-get update && apt-get install -y \ 
+    python3 python3-pip jq mosquitto-clients tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
+RUN pip install cryptography --break-system-packages
+COPY ./sensor8 . 
+CMD [ "bash", "test_sensor_data.sh" ]
