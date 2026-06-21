@@ -11,3 +11,4 @@ gateway/logs/gateway-state.log
 *.crt
 *.key
 *.csr
+*.pem

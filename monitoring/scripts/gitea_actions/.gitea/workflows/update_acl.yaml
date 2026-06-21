@@ -8,17 +8,17 @@ on:
         required: true
         default: 'sensor3'
       readwrite_topics:
-        description: 'New ReadWrite topics (comma-separated)'
+        description: 'New ReadWrite topics to ADD (comma-separated)'
         required: false
       read_topics:
-        description: 'New Read topics (comma-separated)'
+        description: 'New Read topics to ADD (comma-separated)'
         required: false
       delete_readwrite:
-        description: 'ReadWrite rules to DELETE for this user (comma-separated)'
+        description: 'ReadWrite rules to DELETE (comma-separated). Leave empty to keep all existing.'
         required: false
-        default: 'sensors/sensor3/#'
+        default: ''
       delete_read:
-        description: 'Read rules to DELETE for this user (comma-separated)'
+        description: 'Read rules to DELETE (comma-separated). Leave empty to keep all existing.'
         required: false
         default: ''
 
@@ -47,78 +47,83 @@ jobs:
           echo "=== Updating ACL for user: $USERNAME ==="
           cp "$ACL_FILE" "$ACL_FILE.bak.$(date +%s)"
 
-          # Normalize delete lists
           normalize_delete() {
-            echo "$1" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' | grep -v '^$'
+            echo "$1" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' || true
           }
 
           DELETE_RW_LIST=$(normalize_delete "$DELETE_RW")
           DELETE_READ_LIST=$(normalize_delete "$DELETE_READ")
 
-          # First pass: remove specified rules only under the target user
-          awk -v user="user $USERNAME" \
-              -v del_rw="$DELETE_RW_LIST" \
-              -v del_r="$DELETE_READ_LIST" '
-          BEGIN {
-            in_target_user = 0
-            split(del_rw, rw_arr, "\n")
-            split(del_r, r_arr, "\n")
-          }
-          {
-            if ($0 == user) {
-              in_target_user = 1
-              print $0
-              next
-            }
-            if (in_target_user && $0 ~ /^user /) {
-              in_target_user = 0
-            }
+          echo "Delete RW: [$DELETE_RW_LIST]"
+          echo "Delete Read: [$DELETE_READ_LIST]"
+          echo "Add RW: [$RW_NEW]"
+          echo "Add Read: [$READ_NEW]"
 
-            if (in_target_user) {
-              should_delete = 0
-              # Check readwrite
-              for (i in rw_arr) {
-                if (rw_arr[i] != "" && ($0 == "topic readwrite " rw_arr[i] || $0 ~ "topic readwrite " rw_arr[i] "$")) {
-                  should_delete = 1
-                  break
-                }
+          ACL_CONTENT=$(cat "$ACL_FILE")
+
+          # First pass: Delete only if explicitly specified
+          if [ -n "$DELETE_RW_LIST" ] || [ -n "$DELETE_READ_LIST" ]; then
+            ACL_AFTER_DELETE=$(awk -v user="user $USERNAME" \
+                -v del_rw="$DELETE_RW_LIST" \
+                -v del_r="$DELETE_READ_LIST" '
+            BEGIN {
+              in_target = 0
+              n_rw = split(del_rw, rw_arr, "\n")
+              n_rd = split(del_r, rd_arr, "\n")
+            }
+            {
+              if ($0 == user) {
+                in_target = 1
+                print $0
+                next
               }
-              # Check read
-              if (should_delete == 0) {
-                for (i in r_arr) {
-                  if (r_arr[i] != "" && ($0 == "topic read " r_arr[i] || $0 ~ "topic read " r_arr[i] "$")) {
-                    should_delete = 1
+              if (in_target && $0 ~ /^user[ ]/) {
+                in_target = 0
+              }
+              if (in_target) {
+                delete_this = 0
+                for (i = 1; i <= n_rw; i++) {
+                  if (rw_arr[i] != "" && index($0, "topic readwrite " rw_arr[i]) == 1) {
+                    delete_this = 1
                     break
                   }
                 }
+                if (!delete_this) {
+                  for (i = 1; i <= n_rd; i++) {
+                    if (rd_arr[i] != "" && index($0, "topic read " rd_arr[i]) == 1) {
+                      delete_this = 1
+                      break
+                    }
+                  }
+                }
+                if (delete_this) next
               }
-              if (should_delete) next
+              print $0
             }
-            print $0
-          }
-          ' "$ACL_FILE" > /tmp/acl_temp1
+            ' <<< "$ACL_CONTENT")
+          else
+            ACL_AFTER_DELETE="$ACL_CONTENT"
+          fi
 
-          # Second pass: insert new rules right after the user line
-          awk -v user="user $USERNAME" \
+          # Second pass: Always append new rules
+          FINAL_ACL=$(awk -v user="user $USERNAME" \
               -v rw_new="$RW_NEW" \
               -v read_new="$READ_NEW" '
           {
             print $0
             if ($0 == user) {
-              # Insert new readwrite rules
               if (rw_new != "" && rw_new != "none") {
-                split(rw_new, topics, ",")
-                for (i in topics) {
+                n = split(rw_new, topics, ",")
+                for (i=1; i<=n; i++) {
                   gsub(/^[ \t]+|[ \t]+$/, "", topics[i])
                   if (topics[i] != "") {
                     print "topic readwrite " topics[i]
                   }
                 }
               }
-              # Insert new read rules
               if (read_new != "" && read_new != "none") {
-                split(read_new, topics, ",")
-                for (i in topics) {
+                n = split(read_new, topics, ",")
+                for (i=1; i<=n; i++) {
                   gsub(/^[ \t]+|[ \t]+$/, "", topics[i])
                   if (topics[i] != "") {
                     print "topic read " topics[i]
@@ -127,10 +132,15 @@ jobs:
               }
             }
           }
-          ' /tmp/acl_temp1 > "$ACL_FILE"
+          ' <<< "$ACL_AFTER_DELETE")
+
+          echo "$FINAL_ACL" > "$ACL_FILE"
 
           echo "✅ ACL updated successfully:"
           cat "$ACL_FILE"
 
+          echo "Restarting Mosquitto..."
           docker compose -f "$COMPOSE_FILE" restart mosquitto
+
+          echo "updated_user=$USERNAME" >> $GITHUB_OUTPUT
         shell: bash
