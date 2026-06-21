@@ -1,0 +1,136 @@
+name: Gitea Actions to Automatically Update Access Control Rule
+
+on:
+  workflow_dispatch:
+    inputs:
+      username:
+        description: 'User to update'
+        required: true
+        default: 'sensor3'
+      readwrite_topics:
+        description: 'New ReadWrite topics (comma-separated)'
+        required: false
+      read_topics:
+        description: 'New Read topics (comma-separated)'
+        required: false
+      delete_readwrite:
+        description: 'ReadWrite rules to DELETE for this user (comma-separated)'
+        required: false
+        default: 'sensors/sensor3/#'
+      delete_read:
+        description: 'Read rules to DELETE for this user (comma-separated)'
+        required: false
+        default: ''
+
+jobs:
+  update-user:
+    runs-on: ubuntu-system-arm
+    container:
+      image: localhost:5000/admin/gitea/runner-images:ubuntu-latest-arm
+      volumes:
+        - /workspace/share/iot-gateway/mosquitto/config/acl:/mosquitto/config/acl
+        - /workspace/share/iot-gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+
+    steps:
+      - name: Update ACL permissions
+        run: |
+          set -euo pipefail
+
+          ACL_FILE="/mosquitto/config/acl"
+          COMPOSE_FILE="/iot-gateway/docker-compose.yaml"
+          USERNAME="${{ github.event.inputs.username }}"
+          RW_NEW="${{ github.event.inputs.readwrite_topics }}"
+          READ_NEW="${{ github.event.inputs.read_topics }}"
+          DELETE_RW="${{ github.event.inputs.delete_readwrite }}"
+          DELETE_READ="${{ github.event.inputs.delete_read }}"
+
+          echo "=== Updating ACL for user: $USERNAME ==="
+          cp "$ACL_FILE" "$ACL_FILE.bak.$(date +%s)"
+
+          # Normalize delete lists
+          normalize_delete() {
+            echo "$1" | tr ',' '\n' | sed 's/^[ \t]*//;s/[ \t]*$//' | grep -v '^$'
+          }
+
+          DELETE_RW_LIST=$(normalize_delete "$DELETE_RW")
+          DELETE_READ_LIST=$(normalize_delete "$DELETE_READ")
+
+          # First pass: remove specified rules only under the target user
+          awk -v user="user $USERNAME" \
+              -v del_rw="$DELETE_RW_LIST" \
+              -v del_r="$DELETE_READ_LIST" '
+          BEGIN {
+            in_target_user = 0
+            split(del_rw, rw_arr, "\n")
+            split(del_r, r_arr, "\n")
+          }
+          {
+            if ($0 == user) {
+              in_target_user = 1
+              print $0
+              next
+            }
+            if (in_target_user && $0 ~ /^user /) {
+              in_target_user = 0
+            }
+
+            if (in_target_user) {
+              should_delete = 0
+              # Check readwrite
+              for (i in rw_arr) {
+                if (rw_arr[i] != "" && ($0 == "topic readwrite " rw_arr[i] || $0 ~ "topic readwrite " rw_arr[i] "$")) {
+                  should_delete = 1
+                  break
+                }
+              }
+              # Check read
+              if (should_delete == 0) {
+                for (i in r_arr) {
+                  if (r_arr[i] != "" && ($0 == "topic read " r_arr[i] || $0 ~ "topic read " r_arr[i] "$")) {
+                    should_delete = 1
+                    break
+                  }
+                }
+              }
+              if (should_delete) next
+            }
+            print $0
+          }
+          ' "$ACL_FILE" > /tmp/acl_temp1
+
+          # Second pass: insert new rules right after the user line
+          awk -v user="user $USERNAME" \
+              -v rw_new="$RW_NEW" \
+              -v read_new="$READ_NEW" '
+          {
+            print $0
+            if ($0 == user) {
+              # Insert new readwrite rules
+              if (rw_new != "" && rw_new != "none") {
+                split(rw_new, topics, ",")
+                for (i in topics) {
+                  gsub(/^[ \t]+|[ \t]+$/, "", topics[i])
+                  if (topics[i] != "") {
+                    print "topic readwrite " topics[i]
+                  }
+                }
+              }
+              # Insert new read rules
+              if (read_new != "" && read_new != "none") {
+                split(read_new, topics, ",")
+                for (i in topics) {
+                  gsub(/^[ \t]+|[ \t]+$/, "", topics[i])
+                  if (topics[i] != "") {
+                    print "topic read " topics[i]
+                  }
+                }
+              }
+            }
+          }
+          ' /tmp/acl_temp1 > "$ACL_FILE"
+
+          echo "✅ ACL updated successfully:"
+          cat "$ACL_FILE"
+
+          docker compose -f "$COMPOSE_FILE" restart mosquitto
+        shell: bash

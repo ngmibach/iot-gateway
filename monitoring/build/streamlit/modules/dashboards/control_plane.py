@@ -13,19 +13,6 @@ from ..utils import (
 def render_control_plane():
     st.markdown('<h1 style="color:#a6e3a1;">Control Plane</h1>', unsafe_allow_html=True)
 
-    # Read the live-refresh state bound from the main app (see app.py)
-    mod = __import__(__name__)
-    ar = getattr(mod, "auto_refresh", False)
-    rs = getattr(mod, "refresh_seconds", 0)
-
-    if ar and rs > 0:
-        st.caption(
-            "Live auto-refresh runs at a very slow rate (every 30 minutes) while on the Control Plane. "
-            "This keeps the page stable for control actions. "
-            "Switching to a monitoring tab resumes the normal fast refresh interval you selected in the sidebar."
-        )
-    else:
-        st.caption("Live updates are disabled (see sidebar settings).")
 
     st.markdown("---")
 
@@ -34,6 +21,7 @@ def render_control_plane():
         "Select Action",
         options=[
             "Add / Register new MQTT User",
+            "Update Access Control (ACL) for MQTT User",
             "Update Device IP(s) in HAProxy allow-list",
             "Rotate Server & Client Certificates (Keys)",
             "Clear / Delete Logs (Mosquitto, Node-RED, Suricata)",
@@ -74,6 +62,70 @@ def render_control_plane():
                     with st.spinner("Dispatching add_new_user workflow..."):
                         result = gitea_dispatch_workflow("add_new_user.yaml", inputs=inputs)
                     _show_dispatch_result(result, "add_new_user.yaml")
+
+    elif action == "Update Access Control (ACL) for MQTT User":
+        st.subheader("Update Access Control (ACL) for MQTT User")
+
+        with st.form("form_update_acl", clear_on_submit=False):
+            username = st.text_input(
+                "USERNAME *",
+                value="sensor3",
+                placeholder="sensor3",
+                help="MQTT username whose ACL will be updated"
+            )
+
+            col1, col2 = st.columns(2)
+            with col1:
+                readwrite_topics = st.text_input(
+                    "ReadWrite Topics (comma-separated)",
+                    value="",
+                    placeholder="sensors/sensor3/#,home/#",
+                    help="New readwrite topics. Leave empty to keep existing."
+                )
+                delete_readwrite = st.text_input(
+                    "Delete ReadWrite Rules",
+                    value="sensors/sensor3/#",
+                    placeholder="sensors/sensor3/#",
+                    help="ReadWrite rules to remove (comma-separated)"
+                )
+
+            with col2:
+                read_topics = st.text_input(
+                    "Read-only Topics (comma-separated)",
+                    value="",
+                    placeholder="sensors/+/status,public/#",
+                    help="New read-only topics. Leave empty to keep existing."
+                )
+                delete_read = st.text_input(
+                    "Delete Read Rules",
+                    value="",
+                    placeholder="",
+                    help="Read rules to remove (comma-separated)"
+                )
+
+            submitted = st.form_submit_button(
+                "🚀 Update ACL Rules", 
+                type="primary", 
+                use_container_width=True
+            )
+
+            if submitted:
+                if not username:
+                    st.error("USERNAME is required.")
+                else:
+                    inputs = {
+                        "username": username.strip(),
+                        "readwrite_topics": readwrite_topics.strip(),
+                        "read_topics": read_topics.strip(),
+                        "delete_readwrite": delete_readwrite.strip(),
+                        "delete_read": delete_read.strip(),
+                    }
+                    with st.spinner("Dispatching ACL update workflow..."):
+                        result = gitea_dispatch_workflow(
+                            "update_acl.yaml",   # ← Make sure this matches your workflow filename
+                            inputs=inputs
+                        )
+                    _show_dispatch_result(result, "update_acl.yaml")
 
     elif action == "Update Device IP(s) in HAProxy allow-list":
         st.subheader("Update Device IP(s) in HAProxy allow-list")

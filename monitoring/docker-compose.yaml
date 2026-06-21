@@ -30,8 +30,6 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
-    # Host network required so Prometheus can scrape the gateway at 172.20.10.2
-    # (not routable from the Docker bridge network).
     network_mode: host
     volumes:
       - ./data/prometheus:/prometheus

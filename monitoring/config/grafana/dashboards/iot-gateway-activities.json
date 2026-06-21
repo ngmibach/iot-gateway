@@ -18,6 +18,7 @@
   "editable": true,
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
+  "id": 2,
   "links": [],
   "panels": [
     {
@@ -155,65 +156,6 @@
     },
     {
       "datasource": {
-        "type": "prometheus",
-        "uid": "prometheus"
-      },
-      "fieldConfig": {
-        "defaults": {
-          "color": {
-            "mode": "thresholds"
-          },
-          "mappings": [],
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": 0
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 4,
-        "w": 4,
-        "x": 12,
-        "y": 1
-      },
-      "id": 4,
-      "options": {
-        "colorMode": "value",
-        "graphMode": "area",
-        "justifyMode": "auto",
-        "orientation": "auto",
-        "percentChangeColorMode": "standard",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showPercentChange": false,
-        "textMode": "auto",
-        "wideLayout": true
-      },
-      "pluginVersion": "12.2.8",
-      "targets": [
-        {
-          "editorMode": "code",
-          "expr": "allowed_ip_count",
-          "refId": "A",
-          "instant": true
-        }
-      ],
-      "title": "Allowed IPs",
-      "type": "stat"
-    },
-    {
-      "datasource": {
         "type": "loki",
         "uid": "loki"
       },
@@ -270,6 +212,65 @@
         }
       ],
       "title": "Denied Publishes",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 12,
+        "y": 1
+      },
+      "id": 4,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.8",
+      "targets": [
+        {
+          "editorMode": "code",
+          "expr": "allowed_ip_count",
+          "instant": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Allowed IPs",
       "type": "stat"
     },
     {
@@ -341,10 +342,10 @@
               "job": true
             },
             "renameByName": {
-              "device_id": "Device ID",
               "client_id": "Client ID",
-              "source_ip": "Source IP",
-              "deviceId": "Device ID"
+              "deviceId": "Device ID",
+              "device_id": "Device ID",
+              "source_ip": "Source IP"
             }
           }
         }
@@ -596,9 +597,9 @@
               "job": true
             },
             "renameByName": {
-              "user": "User",
+              "permission": "Permission",
               "topic": "Topic",
-              "permission": "Permission"
+              "user": "User"
             }
           }
         }
@@ -725,7 +726,18 @@
             "mode": "palette-classic"
           },
           "custom": {
+            "axisBorderShow": false,
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "",
+            "axisPlacement": "auto",
             "fillOpacity": 80,
+            "gradientMode": "none",
+            "hideFrom": {
+              "legend": false,
+              "tooltip": false,
+              "viz": false
+            },
             "lineWidth": 1,
             "scaleDistribution": {
               "type": "linear"
@@ -782,13 +794,13 @@
         {
           "direction": "backward",
           "editorMode": "code",
-          "expr": "sum(count_over_time({container=\"iot-nodered\", event_type=\"sensor_data\"}[24h])) by (deviceId)",
+          "expr": "sum(count_over_time({container=\"iot-nodered\", event_type=\"sensor_data\"}[$__range])) by (deviceId)",
           "legendFormat": "{{deviceId}}",
           "queryType": "range",
           "refId": "A"
         }
       ],
-      "title": "Messages per Sensor (24h)",
+      "title": "Messages per Sensor",
       "type": "barchart"
     },
     {
@@ -869,9 +881,6 @@
           "id": "extractFields",
           "options": {
             "format": "json",
-            "keepTime": true,
-            "replace": true,
-            "source": "Line",
             "jsonPaths": [
               {
                 "path": "deviceId"
@@ -888,7 +897,10 @@
               {
                 "path": "payload_size_bytes"
               }
-            ]
+            ],
+            "keepTime": true,
+            "replace": true,
+            "source": "Line"
           }
         }
       ],
@@ -976,9 +988,6 @@
           "id": "extractFields",
           "options": {
             "format": "json",
-            "keepTime": true,
-            "replace": true,
-            "source": "Line",
             "jsonPaths": [
               {
                 "path": "source_ip"
@@ -989,7 +998,10 @@
               {
                 "path": "reason"
               }
-            ]
+            ],
+            "keepTime": true,
+            "replace": true,
+            "source": "Line"
           }
         },
         {
@@ -997,14 +1009,14 @@
           "options": {
             "excludeByName": {
               "Line": true,
+              "id": true,
               "labels": true,
-              "tsNs": true,
-              "id": true
+              "tsNs": true
             },
             "renameByName": {
-              "source_ip": "Source IP",
               "denied_type": "Denied Type",
-              "reason": "Reason"
+              "reason": "Reason",
+              "source_ip": "Source IP"
             }
           }
         }
@@ -1079,5 +1091,5 @@
   "timezone": "",
   "title": "IoT Sensor Gateway - Gateway Activities",
   "uid": "iot-sensor-gateway-v1",
-  "version": 1
+  "version": 20
 }
