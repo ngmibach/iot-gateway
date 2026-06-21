@@ -275,6 +275,70 @@
     },
     {
       "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              },
+              {
+                "color": "orange",
+                "value": 1
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 4,
+        "w": 4,
+        "x": 16,
+        "y": 1
+      },
+      "id": 15,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "area",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "percentChangeColorMode": "standard",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true
+      },
+      "pluginVersion": "12.2.8",
+      "targets": [
+        {
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "sum(count_over_time({job=\"ids-alerts\", event_type=\"ids_alert\"}[$__range]))",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "IDS Detections",
+      "type": "stat"
+    },
+    {
+      "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
       },
@@ -1029,7 +1093,28 @@
         "uid": "loki"
       },
       "fieldConfig": {
-        "defaults": {},
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto"
+            },
+            "footer": {
+              "reducers": []
+            },
+            "inspect": false
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": 0
+              }
+            ]
+          }
+        },
         "overrides": []
       },
       "gridPos": {
@@ -1037,6 +1122,112 @@
         "w": 24,
         "x": 0,
         "y": 46
+      },
+      "id": 16,
+      "options": {
+        "cellHeight": "sm",
+        "showHeader": true,
+        "showTime": true,
+        "sortBy": [
+          {
+            "desc": true,
+            "displayName": "Time"
+          }
+        ]
+      },
+      "pluginVersion": "12.2.8",
+      "targets": [
+        {
+          "direction": "backward",
+          "editorMode": "code",
+          "expr": "{job=\"ids-alerts\", event_type=\"ids_alert\"} | json",
+          "queryType": "range",
+          "refId": "A"
+        }
+      ],
+      "title": "IDS Detections",
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "format": "json",
+            "jsonPaths": [
+              {
+                "path": "device_id"
+              },
+              {
+                "path": "source_ip"
+              },
+              {
+                "path": "score"
+              },
+              {
+                "path": "score_type"
+              },
+              {
+                "path": "suspicion"
+              },
+              {
+                "path": "suspicion_category"
+              },
+              {
+                "path": "severity"
+              },
+              {
+                "path": "alert_type"
+              },
+              {
+                "path": "detection"
+              },
+              {
+                "path": "message"
+              }
+            ],
+            "keepTime": true,
+            "replace": true,
+            "source": "Line"
+          }
+        },
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": {
+              "Line": true,
+              "id": true,
+              "labels": true,
+              "tsNs": true
+            },
+            "renameByName": {
+              "alert_type": "Alert Type",
+              "detection": "Detection Rule",
+              "device_id": "Device",
+              "message": "Details",
+              "score": "Score",
+              "score_type": "Score Type",
+              "severity": "Severity",
+              "source_ip": "Source IP",
+              "suspicion": "Suspected Activity",
+              "suspicion_category": "Category"
+            }
+          }
+        }
+      ],
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "loki",
+        "uid": "loki"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 54
       },
       "id": 14,
       "options": {
@@ -1091,5 +1282,5 @@
   "timezone": "",
   "title": "IoT Sensor Gateway - Gateway Activities",
   "uid": "iot-sensor-gateway-v1",
-  "version": 20
+  "version": 21
 }

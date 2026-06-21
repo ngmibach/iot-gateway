@@ -14,6 +14,7 @@ jobs:
         - /workspace/share/iot-gateway/nodered/data/logs/sensor_data.log:/nodered/logs/sensor_data.log
         - /workspace/share/iot-gateway/haproxy/logs/haproxy.log:/haproxy/logs/haproxy.log
         - /workspace/share/iot-gateway/logs/gateway-state.log:/sync-config/logs/gateway-state.log
+        - /workspace/share/iot-gateway/logs/ids-alerts.log:/ids/logs/ids-alerts.log
     steps:
       - name: Test Gitea Action Mount
         run: |
@@ -33,3 +34,6 @@ jobs:
 
           echo "=== Truncating Sync-config log ==="
           echo -n > /sync-config/logs/gateway-state.log
+
+          echo "=== Truncating Ids log ==="
+          echo -n > /ids/logs/ids-alerts.log

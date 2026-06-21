@@ -1,0 +1,97 @@
+gateway:
+  packet_window_seconds: 3
+  loop_interval_seconds: 1
+  inference_interval_seconds: 1
+
+  suspicious_threshold: null
+
+  capture_type: sensor_log
+  mac_tracking: false
+
+  min_pkts: 1
+  min_model_packets: 1
+
+  ip_aggregation_window: 6
+  min_windows_for_decision: 4
+  min_attack_windows: 3
+  attack_vote_ratio_threshold: 0.60
+  ip_avg_score_threshold: 0.68
+
+  alert_log_path: /var/log/iot-gateway/ids-alerts.log
+
+  sensor_log:
+    path: /app/nodered_logs/sensor_data.log
+
+  mosquitto_log:
+    path: /mosquitto/log/mosquitto.log
+    connect_window_seconds: 60
+
+  haproxy_log:
+    path: /haproxy-logs/haproxy.log
+    window_seconds: 60
+
+  gateway_state:
+    active_sensors_prom: /textfile/active_sensors.prom
+    allowed_ips_prom: /textfile/allowed_ips.prom
+    gateway_state_log: /var/log/iot-gateway/gateway-state.log
+    refresh_interval_seconds: 1
+
+  behavioral_rules:
+    enabled: true
+
+    expected_source_ips: {}
+
+    enforce_allowed_ips: true
+    enforce_acl_users: true
+    ignored_acl_users:
+      - nodered
+      - anonymous
+
+    expected_payload_sizes: [2769, 2793]
+
+    max_message_rate_per_sec: 1.5
+    min_inter_arrival_baseline_ms: 900
+    rapid_fire_min_messages: 3
+    min_inter_arrival_ms: 80
+
+    max_clock_skew_seconds: 2.5
+
+    payload_reject_storm_threshold: 5
+    payload_reject_window_seconds: 60
+    ratio_window_seconds: 60
+    alert_cooldown_seconds: 60
+
+    deny_accept_ratio_threshold: 0.10
+    undersize_payload_threshold: 2500
+    undersize_payload_campaign_threshold: 3
+    denied_probe_burst_threshold: 5
+
+    max_mqtt_connect_rate: 1.5
+    min_mqtt_connect_count: 10
+    max_connect_publish_ratio: 1.15
+    ephemeral_client_multiplier: 1.25
+
+    ssl_handshake_storm_threshold: 10
+
+    attack_triad_enabled: true
+    attack_triad_deny_ratio: 0.10
+    attack_triad_connect_publish_ratio: 1.15
+
+model:
+  type: lightgbm
+  path: models/ids_model.joblib
+  scaler_path: models/feature_scaler.joblib
+
+  expected_features:
+    - msg_count
+    - topic_unique_count
+    - topic_flood_ratio
+    - avg_payload_len
+    - std_payload_len
+    - min_payload_len
+    - max_payload_len
+    - mean_inter_arrival_ms
+    - std_inter_arrival_ms
+    - avg_delay
+    - max_delay
+    - attack_blob_ratio

@@ -76,6 +76,38 @@ scrape_configs:
           source: timestamp
           format: RFC3339
 
+  - job_name: ids-alerts
+    static_configs:
+      - targets: [localhost]
+        labels:
+          job: ids-alerts
+          container: iot-ids
+          __path__: /var/log/iot-gateway/ids-alerts.log
+    pipeline_stages:
+      - json:
+          expressions:
+            event_type: event_type
+            alert_type: alert_type
+            detection: detection
+            device_id: device_id
+            source_ip: source_ip
+            severity: severity
+            suspicion: suspicion
+            suspicion_category: suspicion_category
+            score: score
+            score_type: score_type
+            ts: '"@timestamp"'
+      - labels:
+          event_type:
+          alert_type:
+          detection:
+          device_id:
+          severity:
+          suspicion_category:
+      - timestamp:
+          source: ts
+          format: RFC3339
+
   - job_name: 'gateway-state'
     static_configs:
       - targets:

@@ -109,3 +109,21 @@ services:
       - ./logs:/var/log/iot-gateway
     environment:
       - TZ=Asia/Ho_Chi_Minh
+
+  ids:
+    build:
+      context: ./ids
+      dockerfile: build/Dockerfile
+    container_name: iot-ids
+    restart: unless-stopped
+    depends_on:
+      - nodered
+    volumes:
+      - ./nodered/data/logs:/app/nodered_logs:ro
+      - ./mosquitto/log:/mosquitto/log:ro
+      - ./haproxy/logs:/haproxy-logs:ro
+      - ./node-exporter/textfile_collector:/textfile:ro
+      - ./ids/configs:/app/configs:ro
+      - ./logs:/var/log/iot-gateway
+    environment:
+      - TZ=Asia/Ho_Chi_Minh

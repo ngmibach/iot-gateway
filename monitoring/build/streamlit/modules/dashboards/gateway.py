@@ -32,7 +32,7 @@ def render_gateway():
 
     # ── Overview Metrics ──────────────────────────────────────────
     section("Overview")
-    c1, c2, c3, c4, c5, c6 = st.columns([1, 1, 1, 1, 1, 1])
+    c1, c2, c3, c4, c5 = st.columns([1, 1, 1, 1, 1])
 
     with st.spinner("Loading metrics…"):
         # Total sensor messages
@@ -65,6 +65,8 @@ def render_gateway():
         utils.end_ns = denied_end
         utils.duration = denied_dur
 
+        denied = 0
+        ids_alerts = 0
         try:
             # Range-aware queries (Full Day → start of day to real now;
             # Custom Hours → the exact selected window)
@@ -81,6 +83,10 @@ def render_gateway():
             denied_mos = int(_extract_scalar(d_mos_denied)) if d_mos_denied else 0
 
             denied = denied_nodered + denied_hap + denied_mos
+
+            q_ids = _prep_loki('count_over_time({job="ids-alerts", event_type="ids_alert"}[$__range])')
+            d_ids = query_loki(q_ids)
+            ids_alerts = int(_extract_scalar(d_ids)) if d_ids else 0
         finally:
             utils.start_ns = orig_start
             utils.end_ns = orig_end
@@ -101,10 +107,12 @@ def render_gateway():
         st.metric("Messages / Minute", f"{msgs_min:.2f}")
     with c3:
         st.metric("Denied Publishes", f"{denied:,}")
+    with c4:
+        st.metric("IDS Detections", f"{ids_alerts:,}")
     now = datetime.now()
     is_live_view = (now - end_dt).total_seconds() < 600  # last 10 min = live/current view
 
-    with c4:
+    with c5:
         if is_live_view:
             st.metric("Allowed IPs", f"{live_allowed_ips:,}")
         else:
@@ -520,6 +528,56 @@ def render_gateway():
         st.dataframe(df_denied, use_container_width=True, height=220)
     else:
         st.info("No denied events recorded")
+
+    st.markdown('<span style="font-weight:700;color:#fab387;">IDS Detections</span>', unsafe_allow_html=True)
+    st.caption("Post-gateway behavioral rules and ML anomaly alerts from the IDS service")
+
+    q_ids_table = _prep_loki('{job="ids-alerts", event_type="ids_alert"}')
+    d_ids_table = query_loki(q_ids_table, limit=150)
+    ids_rows = []
+    if d_ids_table and d_ids_table.get("data", {}).get("result"):
+        for stream in d_ids_table["data"]["result"]:
+            for ts, line in stream.get("values", []):
+                try:
+                    parsed = json.loads(line) if isinstance(line, str) else line
+                    ids_rows.append({
+                        "time": pd.Timestamp(datetime.fromtimestamp(int(ts) / 1e9)),
+                        "device_id": parsed.get("device_id"),
+                        "source_ip": parsed.get("source_ip"),
+                        "score": parsed.get("score"),
+                        "score_type": parsed.get("score_type"),
+                        "suspicion": parsed.get("suspicion"),
+                        "category": parsed.get("suspicion_category"),
+                        "severity": parsed.get("severity"),
+                        "alert_type": parsed.get("alert_type"),
+                        "detection": parsed.get("detection"),
+                        "message": parsed.get("message"),
+                    })
+                except Exception:
+                    pass
+
+    if ids_rows:
+        df_ids = pd.DataFrame(ids_rows).sort_values("time", ascending=False)
+        st.dataframe(
+            df_ids,
+            use_container_width=True,
+            height=260,
+            column_config={
+                "time": st.column_config.DatetimeColumn("Time", format="YYYY-MM-DD HH:mm:ss"),
+                "device_id": "Device",
+                "source_ip": "Source IP",
+                "score": st.column_config.NumberColumn("Score", format="%.4f"),
+                "score_type": "Score Type",
+                "suspicion": "Suspected Activity",
+                "category": "Category",
+                "severity": "Severity",
+                "alert_type": "Alert Type",
+                "detection": "Detection Rule",
+                "message": "Details",
+            },
+        )
+    else:
+        st.info("No IDS detections recorded in the selected time range")
 
     # Recent MQTT Events (full width below - large table, needs more horizontal space)
     st.markdown('<span style="font-weight:700;color:#89dceb;">Recent MQTT Events</span>', unsafe_allow_html=True)
