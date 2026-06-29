@@ -1,85 +1,204 @@
-## Gateway Setup and Start Process
+# IoT Gateway — Setup and Startup Guide
 
-### I. Full Operation Setup and Start
-This session describes the process to setup and start the full operation of IoT-Gateway, meaning it include:
+This guide walks through setting up and starting the full IoT Gateway stack:
 
-1. IoT Gateway (Receive Data from Sensor, Process and Forward to Monitoring Stack)
-2. Monitoring (Stack to Visualize and Monitor Data)
-3. Fake_Sensor (Stack to generation fake data to gateway for testing)
+| Component | Role |
+|-----------|------|
+| **Gateway** | Receives sensor data over MQTT, processes it, and forwards it to the monitoring stack |
+| **Monitoring** | Visualizes metrics and logs; provides the control plane (Grafana, Streamlit, Gitea, Prometheus) |
+| **Fake Sensor** | Generates simulated sensor traffic for testing (optional) |
 
----
-#### 1. Prerequisites
-For the setup to work properly, user need to follow these steps
-
-1. Check the current IP of the machine and replace the user machine's IP into the subsequent.
-    
-    User can extract their machine IP by running
-
-    ```shell
-    ifconfig
-    ```
-
-    Machine IP usually remains as follows
-    ```
-    eth1: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
-    inet 10.185.71.215  netmask 255.255.224.0  broadcast 10.185.95.255
-    inet6 fe80::c603:a8ff:fece:86ff  prefixlen 64  scopeid 0x20<link>
-    ether c4:03:a8:ce:86:ff  txqueuelen 1000  (Ethernet)
-    RX packets 146647  bytes 185525385 (185.5 MB)
-    RX errors 0  dropped 0  overruns 0  frame 0
-    TX packets 21119  bytes 22601597 (22.6 MB)
-    TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
-    ```
-
-    Copy the machine IP in the inet section into these following line in corresponding file
-
-    ``cert-generation.sh``
-    ```shell
-    # --- Server Details ---
-    SERVER_CN="10.185.90.215" <-- Place your Ip here
-    ```
-
-    ``/fake_sensor/build/sensor1/test_sensor_data.sh``
-    ```shell
-    HOST="10.184.134.81" <-- Place your Ip here
-    ```
-
-    ``/fake_sensor/build/sensor2/test_sensor_data.sh``
-    ```shell
-    HOST="10.184.134.81" <-- Place your Ip here
-    ```
-
-    ``/fake_sensor/build/sensor3/test_sensor_data.sh``
-    ```shell
-    HOST="10.184.134.81" <-- Place your Ip here
-    ```
-
-    ``/fake_sensor/build/sensor4/test_sensor_data.sh``
-    ```shell
-    HOST="10.184.134.81" <-- Place your Ip here
-    ```
-
-2. Go to source directory and run this following command to grant permission to Docker service
-    ```shell
-    sudo chmod 777 -R .
-    ```
+All commands below assume you are at the repository root unless a `cd` step is shown.
 
 ---
-#### 2. Start Process
-First before starting any serivce, user need to run ``cert-generation.sh`` script to update certificate for SSL verification. Run
+
+## Prerequisites
+
+- Docker and Docker Compose installed
+- `openssl` available (used by `cert-generation.sh`)
+- Network access to the gateway host
+
+### 1. Update IP addresses
+
+Find the gateway machine IP:
+
+```shell
+ip addr
+# or
+ifconfig
+```
+
+Use the `inet` address of your primary interface (for example `10.185.71.215` on `eth1`).
+
+Update the following files with that IP:
+
+**`cert-generation.sh`** — server certificate common name:
+
+```shell
+SERVER_CN="<your-gateway-ip>"
+```
+
+**`fake_sensor/build/sensor*/test_sensor_data.sh`** — MQTT broker host (sensors 1–4 used by cert generation):
+
+```shell
+HOST="<your-gateway-ip>"
+```
+
+> Sensors 5–9 also have `test_sensor_data.sh` scripts; update `HOST` there as well if you plan to run them.
+
+### 2. Set permissions
+
+From the repository root, grant broad write access so containers can read and write mounted volumes:
+
+```shell
+sudo chmod -R 777 .
+```
+
+### 3. Update Gitea workflow volume paths
+
+Gitea Actions workflows mount host directories into runner containers. Update the `volumes` section in every YAML file under:
+
+```
+monitoring/scripts/gitea_actions/.gitea/workflows/
+```
+
+Replace placeholder paths with your actual checkout location. Gateway files live under the `gateway/` subdirectory:
+
+```yaml
+volumes:
+  - /path/to/iot-gateway/gateway/mosquitto/config/acl:/mosquitto/config/acl
+  - /path/to/iot-gateway/gateway/mosquitto/config/passwords:/mosquitto/config/passwords
+  - /path/to/iot-gateway/gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
+  - /path/to/iot-gateway/gateway/haproxy/allowed-ips.txt:/haproxy/allowed-ips.txt
+```
+
+Workflows that touch certificates or sensor builds also need paths such as:
+
+```yaml
+  - /path/to/iot-gateway/gateway/certs:/server/certs
+  - /path/to/iot-gateway/fake_sensor/build/sensor1:/client/sensor1/certs
+```
+
+Check each workflow file — volume mounts differ per job.
+
+---
+
+## Startup procedure
+
+Services must be started in order: **certificates → gateway → monitoring → fake sensors (optional)**.
+
+### Step 1 — Generate certificates
+
+From the repository root:
+
 ```shell
 bash cert-generation.sh
 ```
 
-Each service start with following command
+This script:
+
+- Creates CA, server, and client certificates for sensors 1–4
+- Copies certs into `gateway/certs/` and `fake_sensor/build/sensor{1..4}/`
+- Rebuilds fake-sensor images and restarts Mosquitto and HAProxy if the gateway is already running
+
+### Step 2 — Start the gateway
+
 ```shell
+cd gateway
 docker compose build
 docker compose up -d
 ```
-The sequence to start each service is following:
 
-1. gateway
-2. monitoring
-3. fake_sensor
+Gateway services include Mosquitto, HAProxy, Node-RED, Promtail, IDS, and related exporters.
 
-> **Notice**: The service fake_sensor should only be started for a short period of time to prevent storage overflow
+### Step 3 — Start the monitoring stack
+
+```shell
+cd monitoring
+docker compose build
+docker compose up -d
+```
+
+Wait until containers are healthy, then open [http://localhost:5000](http://localhost:5000).
+
+#### First-time Gitea setup
+
+On a fresh install, Gitea shows the installation wizard:
+
+![Gitea installation page](assets/Gitea_UI.png)
+
+Open **Administrator Account Settings**:
+
+![Gitea administrator settings](assets/Administration_Section.png)
+
+Create the admin account:
+
+| Field | Value |
+|-------|-------|
+| Administrator Username | `admin` |
+| Email Address | `admin@localhost` |
+| Password | `admin` |
+| Confirm Password | `admin` |
+
+Click **Install Gitea**.
+
+After installation, bring the stack back up so seeding can finish:
+
+```shell
+docker compose up -d
+```
+
+Wait until the `gitea-seed` container completes. It creates the `admin/actions` repository, pushes workflow definitions, and registers the Gitea runner.
+
+### Monitoring dashboards
+
+| Service | URL | Credentials |
+|---------|-----|-------------|
+| Grafana | [http://localhost:3210](http://localhost:3210) | `admin` / `admin` |
+| Streamlit (control plane) | [http://localhost:8000](http://localhost:8000) | — |
+| Gitea | [http://localhost:5000](http://localhost:5000) | `admin` / `admin` |
+| Prometheus | [http://localhost:9090](http://localhost:9090) | — |
+
+---
+
+### Step 4 — Start fake sensors (optional)
+
+```shell
+cd fake_sensor
+docker compose build
+docker compose up -d
+```
+
+> Run fake sensors only for short test windows. Continuous simulated traffic can fill log and metrics storage quickly.
+
+#### Allow sensor IPs in HAProxy
+
+Fake sensors connect from Docker bridge networks. HAProxy only forwards traffic from IPs listed in `gateway/haproxy/allowed-ips.txt`.
+
+1. Get a sensor container IP:
+
+   ```shell
+   docker exec -it fake_sensor-sensor1-1 hostname -I
+   ```
+
+   Example output: `172.20.0.10`
+
+2. Add the IP (or the whole Docker subnet) to `gateway/haproxy/allowed-ips.txt`:
+
+   ```
+   172.20.0.10
+   ```
+
+   To allow all containers on the bridge network at once:
+
+   ```
+   172.20.0.0/16
+   ```
+
+3. Restart HAProxy from the repository root:
+
+   ```shell
+   docker compose -f gateway/docker-compose.yaml restart haproxy
+   ```
+
+You can also manage allowed IPs through the Streamlit control plane or the **Update Device IP** Gitea workflow once the runner is registered.
