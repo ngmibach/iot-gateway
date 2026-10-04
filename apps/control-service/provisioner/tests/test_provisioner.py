@@ -29,10 +29,10 @@ class FakeSSH:
         self.trees: list[tuple[str, str]] = []
         self.files: dict[str, bytes] = {}
         self._handlers: list[tuple] = []
+        self.upload_tree_error: Exception | None = None
         self.closed = False
 
     def when(self, substr: str, result: CommandResult | None = None, *, contains: bool = True):
-        """Register a response when command matches substr."""
         if result is None:
             result = CommandResult(0, "OK\n", "")
         self._handlers.append((substr, contains, result))
@@ -46,11 +46,13 @@ class FakeSSH:
                 return result
         return CommandResult(0, "", "")
 
-    def upload_bytes(self, data: bytes, remote_path: str, *, mode: int = 0o644) -> None:
+    def upload_file(self, local_path: Path, remote_path: str, *, mode: int = 0o644) -> None:
         self.uploads.append((remote_path, mode))
-        self.files[remote_path] = data
+        self.files[remote_path] = Path(local_path).read_bytes()
 
     def upload_tree(self, local_dir: Path, remote_dir: str) -> None:
+        if self.upload_tree_error is not None:
+            raise self.upload_tree_error
         self.trees.append((str(local_dir), remote_dir))
 
     def close(self) -> None:
@@ -58,22 +60,16 @@ class FakeSSH:
 
 
 def _ok_ssh(*, exists: bool = False, free_k: int = 5_000_000) -> FakeSSH:
-    """Fake SSH that passes docker + disk preflight."""
     ssh = FakeSSH()
     ssh.when("docker info", CommandResult(0, "OK\n", ""))
-    # df -Pk line: Filesystem 1024-blocks Used Available Capacity Mounted
     df_line = f"/dev/sda1 20000000 1000000 {free_k} 5% /opt\n"
     ssh.when("df -Pk", CommandResult(0, df_line, ""))
+    # shlex.quote leaves safe paths unquoted.
+    exists_substr = f"if [ -e {DEFAULT_INSTALL_ROOT} ]"
     if exists:
-        ssh.when(
-            f"if [ -e '{DEFAULT_INSTALL_ROOT}' ]",
-            CommandResult(0, "EXISTS\n", ""),
-        )
+        ssh.when(exists_substr, CommandResult(0, "EXISTS\n", ""))
     else:
-        ssh.when(
-            f"if [ -e '{DEFAULT_INSTALL_ROOT}' ]",
-            CommandResult(0, "", ""),
-        )
+        ssh.when(exists_substr, CommandResult(0, "", ""))
     ssh.when("docker compose", CommandResult(0, "started\n", ""))
     ssh.when("curl -fsS", CommandResult(0, "ready\n__LOKI_OK__\n", ""))
     ssh.when("test -f", CommandResult(0, "OK\n", ""))
@@ -91,48 +87,68 @@ class ParseDfTests(unittest.TestCase):
 
 
 class BackupPathTests(unittest.TestCase):
-    def test_latest_backup(self) -> None:
+    def test_latest_backup_scoped_to_install_root(self) -> None:
         paths = [
             "/opt/iot-gateway.bak-100",
             "/opt/iot-gateway.bak-250",
             "/opt/other.bak-999",
             "/opt/iot-gateway.bak-200",
         ]
-        self.assertEqual(latest_backup_path(paths), "/opt/other.bak-999")
+        self.assertEqual(
+            latest_backup_path(paths, DEFAULT_INSTALL_ROOT),
+            "/opt/iot-gateway.bak-250",
+        )
+        self.assertIsNone(latest_backup_path(paths, "/opt/missing"))
 
 
 class BundleStageTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self.repo = Path(__file__).resolve().parents[4]
+        self.gateway = self.repo / "gateway"
+        self.templates = self.repo / "deploy" / "templates"
+
     def test_renders_promtail_monitoring_ip(self) -> None:
-        repo = Path(__file__).resolve().parents[4]
-        gateway = repo / "gateway"
-        templates = repo / "deploy" / "templates"
         with tempfile.TemporaryDirectory() as tmp:
             staged = stage_gateway_bundle(
-                gateway,
+                self.gateway,
                 Path(tmp) / "stage",
                 values={"GATEWAY_IP": "10.0.0.5", "MONITORING_IP": "10.0.0.9"},
-                template_dir=templates,
-                repo_root=repo,
+                template_dir=self.templates,
+                repo_root=self.repo,
             )
             promtail = (
                 staged / "promtail" / "config" / "promtail-config.yaml"
             ).read_text(encoding="utf-8")
             self.assertIn("http://10.0.0.9:3100/loki/api/v1/push", promtail)
             self.assertNotIn("{{MONITORING_IP}}", promtail)
+            self.assertNotIn("172.17.0.1", promtail)
             self.assertTrue((staged / "docker-compose.yaml").is_file())
+            self.assertFalse((staged / ".rendered-templates").exists())
+
+    def test_missing_promtail_template_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            tpl = Path(tmp) / "templates"
+            tpl.mkdir()
+            (tpl / "prometheus.yml").write_text("x: {{GATEWAY_IP}}\n", encoding="utf-8")
+            with self.assertRaises((FileNotFoundError, ValueError)):
+                stage_gateway_bundle(
+                    self.gateway,
+                    Path(tmp) / "stage",
+                    values={"GATEWAY_IP": "10.0.0.5", "MONITORING_IP": "10.0.0.9"},
+                    template_dir=tpl,
+                    repo_root=self.repo,
+                )
 
 
 class ProvisionFlowTests(unittest.TestCase):
     def setUp(self) -> None:
         self.repo = Path(__file__).resolve().parents[4]
-        # Avoid multi-minute probe retries in unit tests.
-        self._retry_patch = mock.patch("provisioner.provision.PROBE_RETRIES", 1)
-        self._interval_patch = mock.patch("provisioner.provision.PROBE_INTERVAL_S", 0)
-        self._retry_patch.start()
+        self._interval_patch = mock.patch(
+            "provisioner.provision.DEFAULT_PROBE_INTERVAL_S", 0
+        )
         self._interval_patch.start()
 
     def tearDown(self) -> None:
-        self._retry_patch.stop()
         self._interval_patch.stop()
 
     def _config(self, **kwargs) -> ProvisionConfig:
@@ -143,6 +159,9 @@ class ProvisionFlowTests(unittest.TestCase):
             template_dir=self.repo / "deploy" / "templates",
             repo_root=self.repo,
             agent_mode="skip",
+            probe_retries=1,
+            loki_probe_retries=1,
+            probe_interval_s=0,
         )
         base.update(kwargs)
         return ProvisionConfig(**base)
@@ -150,7 +169,7 @@ class ProvisionFlowTests(unittest.TestCase):
     def test_happy_path_skips_agent(self) -> None:
         ssh = _ok_ssh()
         with mock.patch(
-            "provisioner.provision._wait_http",
+            "provisioner.provision.probe_http",
             return_value=(True, "ok"),
         ):
             result = provision(ssh, self._config())
@@ -160,12 +179,9 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertEqual(ssh.trees[0][1], DEFAULT_INSTALL_ROOT)
         self.assertTrue(any("docker compose" in c and "up -d" in c for c in ssh.commands))
         self.assertIn("loki_from_gateway", result.probes)
-        self.assertTrue(
-            any("no --with-images" in n or "cold pull" in n for n in result.notes)
-        )
 
     def test_disk_preflight_aborts(self) -> None:
-        ssh = _ok_ssh(free_k=100)  # 100 KiB free
+        ssh = _ok_ssh(free_k=100)
         with self.assertRaises(ProvisionError) as ctx:
             provision(ssh, self._config())
         self.assertIn("insufficient disk", str(ctx.exception))
@@ -178,40 +194,73 @@ class ProvisionFlowTests(unittest.TestCase):
             provision(ssh, self._config())
         self.assertIn("Docker engine", str(ctx.exception))
 
+    def test_stage_missing_src_is_provision_error(self) -> None:
+        ssh = _ok_ssh()
+        with self.assertRaises(ProvisionError) as ctx:
+            provision(ssh, self._config(gateway_src=Path("/nonexistent-gateway-src")))
+        self.assertIn("not found", str(ctx.exception).lower())
+
     def test_backup_then_compose(self) -> None:
         ssh = _ok_ssh(exists=True)
-        ssh.when("mv '/opt/iot-gateway'", CommandResult(0, "", ""))
         with mock.patch(
-            "provisioner.provision._wait_http",
+            "provisioner.provision.probe_http",
             return_value=(True, "ok"),
         ):
             result = provision(ssh, self._config())
         self.assertIsNotNone(result.backup_path)
         assert result.backup_path is not None
         self.assertTrue(result.backup_path.startswith(DEFAULT_INSTALL_ROOT + ".bak-"))
-        self.assertTrue(any(c.startswith("mv ") for c in ssh.commands))
+        self.assertTrue(
+            any(
+                c.startswith("mv ") and DEFAULT_INSTALL_ROOT + ".bak-" in c
+                for c in ssh.commands
+            )
+        )
 
-    def test_loki_probe_failure_message(self) -> None:
-        ssh = _ok_ssh()
+    def test_loki_probe_failure_auto_rollback(self) -> None:
+        ssh = _ok_ssh(exists=True)
         ssh.when("curl -fsS", CommandResult(7, "", "Failed to connect"))
         with mock.patch(
-            "provisioner.provision._wait_http",
+            "provisioner.provision.probe_http",
             return_value=(True, "ok"),
         ):
             with self.assertRaises(ProvisionError) as ctx:
                 provision(ssh, self._config())
-        self.assertIn("cannot reach monitoring loki", str(ctx.exception).lower())
+        msg = str(ctx.exception).lower()
+        self.assertIn("cannot reach monitoring loki", msg)
+        self.assertIn("auto-rolled back", msg)
+        self.assertTrue(any("docker compose" in c and "down" in c for c in ssh.commands))
 
-    def test_with_images_uploads_and_loads(self) -> None:
+    def test_keep_failed_skips_auto_rollback(self) -> None:
+        ssh = _ok_ssh(exists=True)
+        ssh.when("curl -fsS", CommandResult(7, "", "Failed to connect"))
+        with mock.patch(
+            "provisioner.provision.probe_http",
+            return_value=(True, "ok"),
+        ):
+            with self.assertRaises(ProvisionError) as ctx:
+                provision(ssh, self._config(keep_failed=True))
+        self.assertIn("keep-failed", str(ctx.exception).lower())
+        self.assertFalse(any(" down" in c for c in ssh.commands))
+
+    def test_upload_failure_restores_backup(self) -> None:
+        ssh = _ok_ssh(exists=True)
+        ssh.upload_tree_error = RuntimeError("sftp boom")
+        with self.assertRaises(ProvisionError) as ctx:
+            provision(ssh, self._config())
+        self.assertIn("sftp boom", str(ctx.exception))
+        self.assertTrue(any("docker compose" in c and "down" in c for c in ssh.commands))
+        self.assertTrue(any(c.startswith("mv ") and ".bak-" in c for c in ssh.commands))
+
+    def test_with_images_uploads_file_not_bytes(self) -> None:
         ssh = _ok_ssh()
         with tempfile.NamedTemporaryFile(suffix=".tar") as tf:
             tf.write(b"fake-tar")
             tf.flush()
             with mock.patch(
-                "provisioner.provision._wait_http",
+                "provisioner.provision.probe_http",
                 return_value=(True, "ok"),
             ):
-                # docker load handler
                 ssh.when("docker load", CommandResult(0, "Loaded image\n", ""))
                 result = provision(
                     ssh, self._config(images_tar=Path(tf.name), agent_mode="skip")
@@ -222,18 +271,20 @@ class ProvisionFlowTests(unittest.TestCase):
 
     def test_agent_compose_last(self) -> None:
         ssh = _ok_ssh()
-        # Ensure agent overlay "exists" on remote
         ssh.when("test -f", CommandResult(0, "OK\n", ""))
         with mock.patch(
-            "provisioner.provision._wait_http",
+            "provisioner.provision.probe_http",
             return_value=(True, "ok"),
         ):
             result = provision(ssh, self._config(agent_mode="compose"))
         self.assertTrue(result.agent_installed)
         self.assertEqual(result.agent_mode, "compose")
-        agent_cmds = [c for c in ssh.commands if "docker-compose.agent.yaml" in c and "up -d agent" in c]
+        agent_cmds = [
+            c
+            for c in ssh.commands
+            if "docker-compose.agent.yaml" in c and "up -d agent" in c
+        ]
         self.assertEqual(len(agent_cmds), 1)
-        # Agent command must come after the main compose up.
         main_idx = next(
             i
             for i, c in enumerate(ssh.commands)
@@ -242,18 +293,31 @@ class ProvisionFlowTests(unittest.TestCase):
         agent_idx = ssh.commands.index(agent_cmds[0])
         self.assertGreater(agent_idx, main_idx)
 
+    def test_agent_failure_is_soft(self) -> None:
+        ssh = _ok_ssh()
+        ssh.when(
+            "up -d agent",
+            CommandResult(1, "", "compose agent failed"),
+        )
+        with mock.patch(
+            "provisioner.provision.probe_http",
+            return_value=(True, "ok"),
+        ):
+            result = provision(ssh, self._config(agent_mode="compose"))
+        self.assertFalse(result.agent_installed)
+        self.assertTrue(any("agent install failed" in n for n in result.notes))
+
     def test_agent_missing_is_ok(self) -> None:
         ssh = _ok_ssh()
         with tempfile.TemporaryDirectory() as tmp:
             gw = Path(tmp) / "gateway"
-            # Minimal fake gateway without agent/
             (gw / "promtail" / "config").mkdir(parents=True)
             (gw / "docker-compose.yaml").write_text("services: {}\n", encoding="utf-8")
             (gw / "promtail" / "config" / "promtail-config.yaml").write_text(
                 "x: 1\n", encoding="utf-8"
             )
             with mock.patch(
-                "provisioner.provision._wait_http",
+                "provisioner.provision.probe_http",
                 return_value=(True, "ok"),
             ):
                 result = provision(
@@ -263,15 +327,30 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertFalse(result.agent_installed)
         self.assertTrue(any("not present" in n for n in result.notes))
 
-    def test_rollback_install(self) -> None:
+    def test_systemd_mode_rejected(self) -> None:
+        ssh = _ok_ssh()
+        with mock.patch(
+            "provisioner.provision.probe_http",
+            return_value=(True, "ok"),
+        ):
+            result = provision(ssh, self._config(agent_mode="systemd"))
+        # Soft-fail path: unsupported mode becomes agent note via ProvisionError catch
+        self.assertFalse(result.agent_installed)
+        self.assertTrue(any("systemd" in n.lower() or "unsupported" in n.lower() for n in result.notes))
+
+    def test_rollback_install_compose_down(self) -> None:
         ssh = FakeSSH()
+        ssh.when("docker compose", CommandResult(0, "", ""))
         ssh.when("rm -rf", CommandResult(0, "", ""))
         ssh.when("mv ", CommandResult(0, "", ""))
         rollback_install(ssh, DEFAULT_INSTALL_ROOT, "/opt/iot-gateway.bak-1")
+        self.assertTrue(any("down" in c for c in ssh.commands))
         self.assertTrue(any("rm -rf" in c for c in ssh.commands))
         self.assertTrue(
             any(
-                "mv '/opt/iot-gateway.bak-1' '/opt/iot-gateway'" in c
+                c.startswith("mv ")
+                and "/opt/iot-gateway.bak-1" in c
+                and DEFAULT_INSTALL_ROOT in c
                 for c in ssh.commands
             )
         )

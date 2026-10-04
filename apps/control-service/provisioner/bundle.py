@@ -1,4 +1,4 @@
-"""Local staging: copy gateway tree, render templates, prepare upload."""
+"""Local staging: copy gateway tree, render Promtail, prepare upload."""
 
 from __future__ import annotations
 
@@ -18,6 +18,9 @@ EXCLUDE_DIR_NAMES = {
 }
 EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
 
+PROMTAIL_REL = Path("promtail") / "config" / "promtail-config.yaml"
+FORBIDDEN_PROMTAIL_MARKERS = ("172.17.0.1", "{{")
+
 
 def repo_root_from_here() -> Path:
     # provisioner/ -> control-service/ -> apps/ -> repo
@@ -34,7 +37,6 @@ def load_render_config(repo_root: Path | None = None):
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
     mod = importlib.util.module_from_spec(spec)
-    # Keep a stable module name so reloads in tests don't duplicate.
     sys.modules[spec.name] = mod
     spec.loader.exec_module(mod)
     return mod
@@ -57,10 +59,10 @@ def stage_gateway_bundle(
     template_dir: Path | None = None,
     repo_root: Path | None = None,
 ) -> Path:
-    """Copy gateway_src → staging_dir and render deploy templates into place.
+    """Copy gateway_src → staging_dir and render Promtail onto the destination path.
 
-    Promtail config is written to ``promtail/config/promtail-config.yaml``.
-    Returns the staging directory.
+    Fails closed if the Promtail template is missing or the rendered file still
+    contains ``172.17.0.1`` / unresolved ``{{`` placeholders.
     """
     gateway_src = Path(gateway_src).resolve()
     staging_dir = Path(staging_dir).resolve()
@@ -91,14 +93,30 @@ def stage_gateway_bundle(
     if missing:
         raise KeyError(f"missing template values: {', '.join(missing)}")
 
-    # Render full template tree into a temp subdir, then copy gateway-relevant files.
-    rendered = staging_dir / ".rendered-templates"
-    written = render.render_tree(tpl_dir, rendered, dict(values))
-    promtail_src = rendered / "promtail-config.yaml"
-    if promtail_src.is_file():
-        dest = staging_dir / "promtail" / "config" / "promtail-config.yaml"
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(promtail_src, dest)
-    # Leave rendered dir for debugging; callers may delete staging wholesale.
-    _ = written
+    monitoring_ip = str(values["MONITORING_IP"]).strip()
+    promtail_tpl = tpl_dir / "promtail-config.yaml"
+    if not promtail_tpl.is_file():
+        raise FileNotFoundError(
+            f"Promtail template required for provision: {promtail_tpl}"
+        )
+
+    dest = staging_dir / PROMTAIL_REL
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    text = render.render_text(promtail_tpl.read_text(encoding="utf-8"), dict(values))
+    _assert_safe_promtail(text, monitoring_ip)
+    dest.write_text(text, encoding="utf-8")
     return staging_dir
+
+
+def _assert_safe_promtail(text: str, monitoring_ip: str) -> None:
+    for marker in FORBIDDEN_PROMTAIL_MARKERS:
+        if marker in text:
+            raise ValueError(
+                f"rendered Promtail config still contains {marker!r}; "
+                "refusing to ship a mis-rendered Loki client URL"
+            )
+    expected = f"http://{monitoring_ip}:3100/loki/api/v1/push"
+    if expected not in text:
+        raise ValueError(
+            f"rendered Promtail config missing expected Loki URL {expected!r}"
+        )

@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-import io
 import posixpath
+import shlex
 import tarfile
+import tempfile
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -28,7 +29,9 @@ class SSHSession(Protocol):
 
     def run(self, command: str, *, timeout: float = 120.0) -> CommandResult: ...
 
-    def upload_bytes(self, data: bytes, remote_path: str, *, mode: int = 0o644) -> None: ...
+    def upload_file(
+        self, local_path: Path, remote_path: str, *, mode: int = 0o644
+    ) -> None: ...
 
     def upload_tree(self, local_dir: Path, remote_dir: str) -> None: ...
 
@@ -104,31 +107,38 @@ class ParamikoSSHSession:
         code = stdout.channel.recv_exit_status()
         return CommandResult(exit_code=code, stdout=out, stderr=err)
 
-    def upload_bytes(self, data: bytes, remote_path: str, *, mode: int = 0o644) -> None:
+    def upload_file(
+        self, local_path: Path, remote_path: str, *, mode: int = 0o644
+    ) -> None:
+        local_path = Path(local_path)
+        if not local_path.is_file():
+            raise SSHError(f"local file not found: {local_path}")
         sftp = self._client.open_sftp()
         try:
             parent = posixpath.dirname(remote_path)
             if parent and parent != "/":
                 _sftp_makedirs(sftp, parent)
-            with sftp.file(remote_path, "wb") as rf:
-                rf.write(data)
+            sftp.put(str(local_path), remote_path)
             sftp.chmod(remote_path, mode)
         finally:
             sftp.close()
 
     def upload_tree(self, local_dir: Path, remote_dir: str) -> None:
-        """Tar-stream local_dir to remote_dir (mkdir + extract)."""
+        """Tar local_dir to a temp file, SFTP put, extract on remote."""
         local_dir = Path(local_dir)
         if not local_dir.is_dir():
             raise SSHError(f"local tree not found: {local_dir}")
-        buf = io.BytesIO()
-        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
-            tar.add(str(local_dir), arcname=".")
-        payload = buf.getvalue()
         remote_tar = f"/tmp/iotgw-bundle-{int(time.time())}.tar.gz"
-        self.upload_bytes(payload, remote_tar, mode=0o600)
-        quoted_root = shell_quote(remote_dir)
-        quoted_tar = shell_quote(remote_tar)
+        with tempfile.NamedTemporaryFile(suffix=".tar.gz", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            with tarfile.open(tmp_path, mode="w:gz") as tar:
+                tar.add(str(local_dir), arcname=".")
+            self.upload_file(tmp_path, remote_tar, mode=0o600)
+        finally:
+            tmp_path.unlink(missing_ok=True)
+        quoted_root = shlex.quote(remote_dir)
+        quoted_tar = shlex.quote(remote_tar)
         result = self.run(
             f"mkdir -p {quoted_root} && tar xzf {quoted_tar} -C {quoted_root} "
             f"&& rm -f {quoted_tar}",
@@ -160,10 +170,6 @@ def _is_auth_error(exc: BaseException) -> bool:
     return "authentication" in msg or "auth failed" in msg
 
 
-def shell_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\"'\"'") + "'"
-
-
 def _sftp_makedirs(sftp: object, path: str) -> None:
     """mkdir -p over SFTP."""
     parts = []
@@ -179,3 +185,7 @@ def _sftp_makedirs(sftp: object, path: str) -> None:
                 sftp.mkdir(p)  # type: ignore[attr-defined]
             except OSError:
                 pass
+
+
+# Re-export for callers that still import shell_quote from this module.
+shell_quote = shlex.quote

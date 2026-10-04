@@ -6,6 +6,8 @@ from .provision import (
     ProvisionConfig,
     ProvisionError,
     ProvisionResult,
+    latest_backup_path,
+    list_remote_backups,
     provision,
     rollback_install,
 )
@@ -16,6 +18,8 @@ __all__ = [
     "ProvisionConfig",
     "ProvisionError",
     "ProvisionResult",
+    "latest_backup_path",
+    "list_remote_backups",
     "provision",
     "rollback_install",
 ]

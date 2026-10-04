@@ -3,21 +3,25 @@
 from __future__ import annotations
 
 import re
+import shlex
 import shutil
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional, Sequence
 
-from .bundle import load_render_config, repo_root_from_here, stage_gateway_bundle
-from .ssh import SSHSession, shell_quote
+from .bundle import repo_root_from_here, stage_gateway_bundle
+from .ssh import SSHSession
 
 DEFAULT_INSTALL_ROOT = "/opt/iot-gateway"
 # Abort before unpack when free space is below this (df -Pk units are KiB).
 MIN_FREE_BYTES = 2 * 1024 * 1024 * 1024
-PROBE_RETRIES = 12
-PROBE_INTERVAL_S = 5.0
+DEFAULT_PROBE_RETRIES = 12
+DEFAULT_PROBE_INTERVAL_S = 5.0
+DEFAULT_LOKI_PROBE_RETRIES = 24  # longer window for Promtail/NAT path
 
 
 class ProvisionError(RuntimeError):
@@ -36,9 +40,13 @@ class ProvisionConfig:
     min_free_bytes: int = MIN_FREE_BYTES
     compose_timeout: float = 600.0
     probe_timeout: float = 5.0
-    skip_agent: bool = False
-    # Prefer compose overlay; fall back to systemd unit copy when no compose file.
-    agent_mode: str = "auto"  # auto | compose | systemd | skip
+    probe_retries: int = DEFAULT_PROBE_RETRIES
+    probe_interval_s: float = DEFAULT_PROBE_INTERVAL_S
+    loki_probe_retries: int = DEFAULT_LOKI_PROBE_RETRIES
+    # On post-upload failure, restore bak unless keep_failed is set.
+    keep_failed: bool = False
+    # Compose-only in v1 (systemd needs a provisioned venv — deferred).
+    agent_mode: str = "auto"  # auto | compose | skip
 
 
 @dataclass
@@ -73,21 +81,30 @@ def provision(ssh: SSHSession, config: ProvisionConfig) -> ProvisionResult:
 
     staging = Path(tempfile.mkdtemp(prefix="iotgw-stage-"))
     try:
-        stage_gateway_bundle(
-            gateway_src,
-            staging,
-            values={
-                "GATEWAY_IP": config.gateway_ip,
-                "MONITORING_IP": config.monitoring_ip,
-            },
-            template_dir=config.template_dir,
-            repo_root=root,
-        )
-        ssh.upload_tree(staging, install_root)
-    except Exception:
-        if backup_path:
-            _restore_backup(ssh, install_root, backup_path)
-        raise
+        try:
+            stage_gateway_bundle(
+                gateway_src,
+                staging,
+                values={
+                    "GATEWAY_IP": config.gateway_ip,
+                    "MONITORING_IP": config.monitoring_ip,
+                },
+                template_dir=config.template_dir,
+                repo_root=root,
+            )
+            ssh.upload_tree(staging, install_root)
+        except ProvisionError:
+            if backup_path:
+                _restore_backup(ssh, install_root, backup_path)
+            raise
+        except (OSError, KeyError, ValueError, FileNotFoundError) as e:
+            if backup_path:
+                _restore_backup(ssh, install_root, backup_path)
+            raise ProvisionError(str(e)) from e
+        except Exception as e:
+            if backup_path:
+                _restore_backup(ssh, install_root, backup_path)
+            raise ProvisionError(f"stage/upload failed: {e}") from e
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -98,24 +115,48 @@ def provision(ssh: SSHSession, config: ProvisionConfig) -> ProvisionResult:
             gateway_ip=config.gateway_ip,
             monitoring_ip=config.monitoring_ip,
             timeout=config.probe_timeout,
+            retries=config.probe_retries,
+            interval_s=config.probe_interval_s,
+            loki_retries=config.loki_probe_retries,
         )
         agent_installed = False
         agent_mode: Optional[str] = None
-        if config.skip_agent or config.agent_mode == "skip":
+        if config.agent_mode == "skip":
             notes.append("agent install skipped by config")
         else:
-            agent_installed, agent_mode, agent_note = _install_agent(
-                ssh,
-                install_root,
-                gateway_src=gateway_src,
-                mode=config.agent_mode,
+            try:
+                agent_installed, agent_mode, agent_note = _install_agent(
+                    ssh,
+                    install_root,
+                    gateway_src=gateway_src,
+                    mode=config.agent_mode,
+                )
+                if agent_note:
+                    notes.append(agent_note)
+            except ProvisionError as e:
+                # Agent is optional: data plane already probed green.
+                notes.append(f"agent install failed (data plane left running): {e}")
+                agent_installed = False
+                agent_mode = None
+    except Exception as e:
+        extra = ""
+        if backup_path and not config.keep_failed:
+            try:
+                _restore_backup(ssh, install_root, backup_path)
+                extra = f" (auto-rolled back to {backup_path})"
+            except ProvisionError as rb_err:
+                extra = (
+                    f" (auto-rollback failed: {rb_err}; previous tree at {backup_path})"
+                )
+        elif backup_path:
+            extra = (
+                f" (previous tree at {backup_path}; "
+                "re-run with rollback or omit --keep-failed)"
             )
-            if agent_note:
-                notes.append(agent_note)
-    except Exception:
-        if backup_path:
-            notes.append(f"provision failed; previous tree kept at {backup_path}")
-        raise
+        msg = f"{e}{extra}"
+        if isinstance(e, ProvisionError):
+            raise ProvisionError(msg) from e
+        raise ProvisionError(msg) from e
 
     return ProvisionResult(
         install_root=install_root,
@@ -127,9 +168,34 @@ def provision(ssh: SSHSession, config: ProvisionConfig) -> ProvisionResult:
     )
 
 
-def rollback_install(ssh: SSHSession, install_root: str, backup_path: str) -> None:
-    """Restore a backup directory created during provision."""
-    _restore_backup(ssh, install_root.rstrip("/"), backup_path)
+def rollback_install(
+    ssh: SSHSession,
+    install_root: str,
+    backup_path: Optional[str] = None,
+) -> str:
+    """Stop stack, restore backup. If backup_path is None, pick newest for root."""
+    install_root = install_root.rstrip("/") or DEFAULT_INSTALL_ROOT
+    if backup_path is None:
+        listed = list_remote_backups(ssh, install_root)
+        backup_path = latest_backup_path(listed, install_root)
+        if backup_path is None:
+            raise ProvisionError(
+                f"no backup found for {install_root} (expected {install_root}.bak-<epoch>)"
+            )
+    _restore_backup(ssh, install_root, backup_path)
+    return backup_path
+
+
+def list_remote_backups(ssh: SSHSession, install_root: str) -> list[str]:
+    """List ``INSTALL_ROOT.bak-*`` directories on the remote host."""
+    install_root = install_root.rstrip("/")
+    parent = _remote_parent(install_root)
+    base = install_root.rsplit("/", 1)[-1]
+    pattern = f"{parent}/{base}.bak-*"
+    result = ssh.run(f"ls -1d {shlex.quote(pattern)} 2>/dev/null || true", timeout=15.0)
+    paths = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+    # ls may echo the literal glob when nothing matches.
+    return [p for p in paths if re.search(r"\.bak-\d+$", p)]
 
 
 # ── preflight ─────────────────────────────────────────────────────────
@@ -146,8 +212,7 @@ def _preflight_docker(ssh: SSHSession) -> None:
 
 def _preflight_disk(ssh: SSHSession, install_root: str, min_free_bytes: int) -> None:
     parent = _remote_parent(install_root)
-    # -Pk: POSIX portable, 1K blocks.
-    result = ssh.run(f"df -Pk {shell_quote(parent)} | tail -1", timeout=15.0)
+    result = ssh.run(f"df -Pk {shlex.quote(parent)} | tail -1", timeout=15.0)
     if not result.ok:
         raise ProvisionError(
             f"disk preflight failed for {parent}: {result.stderr or result.stdout}"
@@ -170,7 +235,6 @@ def _parse_df_available_bytes(df_line: str) -> Optional[int]:
     parts = line.split()
     if len(parts) < 4:
         return None
-    # Filesystem Size Used Available Use% Mounted
     try:
         available_k = int(parts[3])
     except ValueError:
@@ -193,14 +257,14 @@ def _remote_parent(path: str) -> str:
 
 def _backup_existing(ssh: SSHSession, install_root: str) -> Optional[str]:
     check = ssh.run(
-        f"if [ -e {shell_quote(install_root)} ]; then echo EXISTS; fi",
+        f"if [ -e {shlex.quote(install_root)} ]; then echo EXISTS; fi",
         timeout=15.0,
     )
     if "EXISTS" not in check.stdout:
         return None
     bak = f"{install_root}.bak-{int(time.time())}"
     result = ssh.run(
-        f"mv {shell_quote(install_root)} {shell_quote(bak)}",
+        f"mv {shlex.quote(install_root)} {shlex.quote(bak)}",
         timeout=60.0,
     )
     if not result.ok:
@@ -210,10 +274,22 @@ def _backup_existing(ssh: SSHSession, install_root: str) -> Optional[str]:
     return bak
 
 
+def _compose_down_best_effort(ssh: SSHSession, install_root: str) -> None:
+    compose = f"{install_root}/docker-compose.yaml"
+    ssh.run(
+        f"if [ -f {shlex.quote(compose)} ]; then "
+        f"cd {shlex.quote(install_root)} && "
+        f"docker compose -f {shlex.quote(compose)} down --remove-orphans; fi",
+        timeout=180.0,
+    )
+
+
 def _restore_backup(ssh: SSHSession, install_root: str, backup_path: str) -> None:
-    ssh.run(f"rm -rf {shell_quote(install_root)}", timeout=120.0)
+    # Stop any containers still bound to the failed tree before deleting it.
+    _compose_down_best_effort(ssh, install_root)
+    ssh.run(f"rm -rf {shlex.quote(install_root)}", timeout=120.0)
     result = ssh.run(
-        f"mv {shell_quote(backup_path)} {shell_quote(install_root)}",
+        f"mv {shlex.quote(backup_path)} {shlex.quote(install_root)}",
         timeout=60.0,
     )
     if not result.ok:
@@ -221,6 +297,27 @@ def _restore_backup(ssh: SSHSession, install_root: str, backup_path: str) -> Non
             f"rollback failed restoring {backup_path} → {install_root}: "
             f"{result.stderr or result.stdout}"
         )
+    # Operator re-runs provision or compose up on the restored tree.
+
+
+def latest_backup_path(
+    candidates: Sequence[str], install_root: str
+) -> Optional[str]:
+    """Pick newest ``{install_root}.bak-<epoch>`` from candidates."""
+    prefix = install_root.rstrip("/") + ".bak-"
+    best: Optional[str] = None
+    best_ts = -1
+    for path in candidates:
+        if not path.startswith(prefix):
+            continue
+        suffix = path[len(prefix) :]
+        if not suffix.isdigit():
+            continue
+        ts = int(suffix)
+        if ts >= best_ts:
+            best_ts = ts
+            best = path
+    return best
 
 
 # ── images / compose ──────────────────────────────────────────────────
@@ -230,9 +327,9 @@ def _load_images(ssh: SSHSession, images_tar: Path) -> None:
     if not images_tar.is_file():
         raise ProvisionError(f"--with-images file not found: {images_tar}")
     remote = f"/tmp/iotgw-images-{int(time.time())}.tar"
-    ssh.upload_bytes(images_tar.read_bytes(), remote, mode=0o600)
+    ssh.upload_file(images_tar, remote, mode=0o600)
     result = ssh.run(
-        f"docker load -i {shell_quote(remote)}; ec=$?; rm -f {shell_quote(remote)}; exit $ec",
+        f"docker load -i {shlex.quote(remote)}; ec=$?; rm -f {shlex.quote(remote)}; exit $ec",
         timeout=600.0,
     )
     if not result.ok:
@@ -244,8 +341,8 @@ def _load_images(ssh: SSHSession, images_tar: Path) -> None:
 def _compose_up(ssh: SSHSession, install_root: str, *, timeout: float) -> None:
     compose = f"{install_root}/docker-compose.yaml"
     cmd = (
-        f"cd {shell_quote(install_root)} && "
-        f"docker compose -f {shell_quote(compose)} up -d --remove-orphans"
+        f"cd {shlex.quote(install_root)} && "
+        f"docker compose -f {shlex.quote(compose)} up -d --remove-orphans"
     )
     result = ssh.run(cmd, timeout=timeout)
     if not result.ok:
@@ -258,12 +355,31 @@ def _compose_up(ssh: SSHSession, install_root: str, *, timeout: float) -> None:
 # ── probes ─────────────────────────────────────────────────────────────
 
 
+def probe_http(url: str, timeout: float = 5.0) -> tuple[bool, str]:
+    """Stdlib HTTP probe (mirrors tools/render_config.probe_http)."""
+    try:
+        req = urllib.request.Request(url, method="GET")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            code = getattr(resp, "status", resp.getcode())
+            body = resp.read(256)
+            if 200 <= int(code) < 300:
+                return True, f"{url} -> {code} ({len(body)} bytes)"
+            return False, f"{url} -> HTTP {code}"
+    except urllib.error.HTTPError as e:
+        return False, f"{url} -> HTTP {e.code}"
+    except Exception as e:  # noqa: BLE001
+        return False, f"{url} -> {type(e).__name__}: {e}"
+
+
 def _run_probes(
     ssh: SSHSession,
     *,
     gateway_ip: str,
     monitoring_ip: str,
     timeout: float,
+    retries: int,
+    interval_s: float,
+    loki_retries: int,
 ) -> dict[str, str]:
     """Probe node-exporter + cAdvisor from operator; Loki ready via gateway SSH curl."""
     targets = {
@@ -271,10 +387,11 @@ def _run_probes(
         "cadvisor": f"http://{gateway_ip}:8080/metrics",
     }
     details: dict[str, str] = {}
-    render = load_render_config()
 
     for name, url in targets.items():
-        ok, detail = _wait_http(render.probe_http, url, timeout=timeout)
+        ok, detail = _wait_http(
+            url, timeout=timeout, retries=retries, interval_s=interval_s
+        )
         details[name] = detail
         if not ok:
             raise ProvisionError(
@@ -283,7 +400,13 @@ def _run_probes(
             )
 
     loki_url = f"http://{monitoring_ip}:3100/ready"
-    ok, detail = _wait_loki_from_gateway(ssh, loki_url, timeout=timeout)
+    ok, detail = _wait_loki_from_gateway(
+        ssh,
+        loki_url,
+        timeout=timeout,
+        retries=loki_retries,
+        interval_s=interval_s,
+    )
     details["loki_from_gateway"] = detail
     if not ok:
         raise ProvisionError(
@@ -292,26 +415,32 @@ def _run_probes(
     return details
 
 
-def _wait_http(probe_http, url: str, *, timeout: float) -> tuple[bool, str]:
+def _wait_http(
+    url: str, *, timeout: float, retries: int, interval_s: float
+) -> tuple[bool, str]:
     last = (False, f"{url} -> not attempted")
-    for _ in range(PROBE_RETRIES):
+    for _ in range(max(1, retries)):
         last = probe_http(url, timeout=timeout)
         if last[0]:
             return last
-        time.sleep(PROBE_INTERVAL_S)
+        time.sleep(interval_s)
     return last
 
 
 def _wait_loki_from_gateway(
-    ssh: SSHSession, loki_url: str, *, timeout: float
+    ssh: SSHSession,
+    loki_url: str,
+    *,
+    timeout: float,
+    retries: int,
+    interval_s: float,
 ) -> tuple[bool, str]:
-    # Probe from the gateway so NAT/portproxy paths are validated (not operator-local).
     curl = (
-        f"curl -fsS --max-time {int(max(1, timeout))} {shell_quote(loki_url)} "
+        f"curl -fsS --max-time {int(max(1, timeout))} {shlex.quote(loki_url)} "
         f"&& echo __LOKI_OK__"
     )
     last_detail = f"{loki_url} -> not attempted"
-    for _ in range(PROBE_RETRIES):
+    for _ in range(max(1, retries)):
         result = ssh.run(curl, timeout=timeout + 10.0)
         if result.ok and "__LOKI_OK__" in result.stdout:
             return True, f"{loki_url} -> ready (via gateway curl)"
@@ -319,11 +448,11 @@ def _wait_loki_from_gateway(
             f"{loki_url} -> exit {result.exit_code}: "
             f"{(result.stderr or result.stdout).strip()[:200]}"
         )
-        time.sleep(PROBE_INTERVAL_S)
+        time.sleep(interval_s)
     return False, last_detail
 
 
-# ── agent (last) ───────────────────────────────────────────────────────
+# ── agent (last, compose-only in v1) ───────────────────────────────────
 
 
 def _install_agent(
@@ -333,74 +462,41 @@ def _install_agent(
     gateway_src: Path,
     mode: str,
 ) -> tuple[bool, Optional[str], str]:
-    """Install agent last. Optional — missing agent files is not a hard failure."""
+    """Install agent last via compose overlay. Optional if files absent."""
+    if mode not in ("auto", "compose", "skip"):
+        raise ProvisionError(
+            f"unsupported agent_mode={mode!r}; v1 supports auto|compose|skip "
+            "(systemd deferred until venv provisioning exists)"
+        )
+    if mode == "skip":
+        return False, None, "agent install skipped by config"
+
     compose_overlay = Path(gateway_src) / "agent" / "docker-compose.agent.yaml"
-    unit_file = Path(gateway_src) / "agent" / "iot-gateway-agent.service"
     remote_overlay = f"{install_root}/agent/docker-compose.agent.yaml"
     remote_compose = f"{install_root}/docker-compose.yaml"
 
-    use_compose = mode in ("auto", "compose") and compose_overlay.is_file()
-    use_systemd = mode in ("auto", "systemd") and unit_file.is_file() and not use_compose
+    if not compose_overlay.is_file():
+        return False, None, "agent compose overlay not present; provision succeeded without agent"
 
-    if mode == "compose" and not compose_overlay.is_file():
-        return False, None, "agent compose overlay missing; skipped"
-    if mode == "systemd" and not unit_file.is_file():
-        return False, None, "agent systemd unit missing; skipped"
-    if not use_compose and not use_systemd:
-        return False, None, "agent files not present; provision succeeded without agent"
-
-    if use_compose:
-        # Overlay already uploaded with the bundle when agent/ was in gateway_src.
-        check = ssh.run(
-            f"test -f {shell_quote(remote_overlay)} && echo OK",
-            timeout=15.0,
-        )
-        if "OK" not in check.stdout:
-            return False, None, "agent overlay not on remote; skipped"
-        cmd = (
-            f"cd {shell_quote(install_root)} && "
-            f"docker compose -f {shell_quote(remote_compose)} "
-            f"-f {shell_quote(remote_overlay)} up -d agent"
-        )
-        result = ssh.run(cmd, timeout=300.0)
-        if not result.ok:
-            raise ProvisionError(
-                f"agent compose up failed ({result.exit_code}): "
-                f"{result.stderr or result.stdout}"
-            )
-        return True, "compose", "agent installed via docker compose overlay"
-
-    # systemd path: unit already under install_root/agent/ after upload
-    remote_unit_src = f"{install_root}/agent/iot-gateway-agent.service"
-    # Rewrite WorkingDirectory/ExecStart paths if INSTALL_ROOT ≠ /opt/iot-gateway
-    result = ssh.run(
-        f"sed 's|/opt/iot-gateway|{install_root}|g' "
-        f"{shell_quote(remote_unit_src)} > /etc/systemd/system/iot-gateway-agent.service "
-        f"&& systemctl daemon-reload "
-        f"&& systemctl enable --now iot-gateway-agent.service",
-        timeout=120.0,
+    check = ssh.run(
+        f"test -f {shlex.quote(remote_overlay)} && echo OK",
+        timeout=15.0,
     )
+    if "OK" not in check.stdout:
+        return False, None, "agent overlay not on remote; skipped"
+
+    cmd = (
+        f"cd {shlex.quote(install_root)} && "
+        f"docker compose -f {shlex.quote(remote_compose)} "
+        f"-f {shlex.quote(remote_overlay)} up -d agent"
+    )
+    result = ssh.run(cmd, timeout=300.0)
     if not result.ok:
         raise ProvisionError(
-            f"agent systemd install failed ({result.exit_code}): "
+            f"agent compose up failed ({result.exit_code}): "
             f"{result.stderr or result.stdout}"
         )
-    return True, "systemd", "agent installed via systemd unit"
-
-
-def latest_backup_path(candidates: Sequence[str]) -> Optional[str]:
-    """Pick the newest ``*.bak-<epoch>`` path from a list."""
-    best: Optional[str] = None
-    best_ts = -1
-    for path in candidates:
-        m = re.search(r"\.bak-(\d+)$", path)
-        if not m:
-            continue
-        ts = int(m.group(1))
-        if ts >= best_ts:
-            best_ts = ts
-            best = path
-    return best
+    return True, "compose", "agent installed via docker compose overlay"
 
 
 __all__ = [
@@ -410,6 +506,8 @@ __all__ = [
     "ProvisionError",
     "ProvisionResult",
     "latest_backup_path",
+    "list_remote_backups",
+    "probe_http",
     "provision",
     "rollback_install",
 ]
