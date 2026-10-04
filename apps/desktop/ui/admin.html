@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Admin</title>
+  <link rel="stylesheet" href="wizard.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>IoT Gateway Monitor — Admin</h1>
+      <div class="sub">Local unlock · Code Signing (K16) · no HSM / Store submission in v1</div>
+    </div>
+    <div>
+      <a href="wizard.html" style="color:var(--accent);margin-right:1rem;font-size:0.85rem">← Setup Wizard</a>
+      <span id="hdr-status"></span>
+    </div>
+  </header>
+  <main>
+    <section class="panel" id="panel-unlock">
+      <h2>Admin unlock</h2>
+      <p>Local PIN/password stored in the OS keyring. Non-admin installs never see Code Signing.</p>
+      <div class="row" id="row-set-pin">
+        <label for="pin-set">Set PIN</label>
+        <input id="pin-set" type="password" autocomplete="new-password" placeholder="min 4 chars" />
+        <button class="primary" id="btn-set-pin">Create PIN</button>
+      </div>
+      <div class="row" id="row-unlock">
+        <label for="pin-unlock">PIN</label>
+        <input id="pin-unlock" type="password" autocomplete="current-password" />
+        <button class="primary" id="btn-unlock">Unlock</button>
+        <button class="secondary" id="btn-lock" disabled>Lock</button>
+      </div>
+      <div id="unlock-msg"></div>
+    </section>
+
+    <section class="panel hidden" id="panel-signing">
+      <h2>Code Signing</h2>
+      <p>Sign CI/local <strong>unsigned</strong> build artifacts for distribution. Passphrases are never written to settings or audit_log.</p>
+
+      <h3 style="font-size:0.95rem;margin:1rem 0 0.5rem">1. Signing tools</h3>
+      <div class="row">
+        <button class="secondary" id="btn-tools">Detect tools</button>
+        <span id="tools-badge"></span>
+      </div>
+      <pre class="mono" id="tools-json"></pre>
+
+      <h3 style="font-size:0.95rem;margin:1rem 0 0.5rem">2. Signing identity</h3>
+      <div class="row">
+        <label for="plat">Platform</label>
+        <select id="plat">
+          <option value="auto">auto (from artifact)</option>
+          <option value="windows">windows (Authenticode)</option>
+          <option value="linux">linux (GPG detach)</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="pfx-path">PFX path</label>
+        <input id="pfx-path" placeholder="/secure/cert.pfx" style="min-width:22rem" />
+      </div>
+      <div class="row">
+        <label for="pfx-pass">PFX passphrase</label>
+        <input id="pfx-pass" type="password" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label for="thumb">Thumbprint</label>
+        <input id="thumb" placeholder="optional audit label" />
+      </div>
+      <div class="row">
+        <label for="gpg-key">GPG key id</label>
+        <input id="gpg-key" placeholder="0x… or email" />
+      </div>
+      <div class="row">
+        <label for="gpg-pass">GPG passphrase</label>
+        <input id="gpg-pass" type="password" autocomplete="off" />
+      </div>
+      <button class="secondary" id="btn-save-ident">Save identity (paths → settings; passphrases → keyring)</button>
+      <div id="ident-msg"></div>
+
+      <h3 style="font-size:0.95rem;margin:1rem 0 0.5rem">3. Artifacts</h3>
+      <div class="row">
+        <label for="build-folder">Build folder</label>
+        <input id="build-folder" placeholder="…/src-tauri/target/release/bundle" style="min-width:22rem" />
+        <button class="secondary" id="btn-scan">Scan</button>
+      </div>
+      <div id="artifact-list"></div>
+      <div class="row">
+        <label for="artifact-paths">Or paths (one per line)</label>
+      </div>
+      <textarea id="artifact-paths" placeholder="path/to/app.msi&#10;path/to/App.AppImage"></textarea>
+
+      <h3 style="font-size:0.95rem;margin:1rem 0 0.5rem">4. Sign + export</h3>
+      <div class="row">
+        <label for="export-dir">Export folder</label>
+        <input id="export-dir" placeholder="(default: app data / signed-export)" style="min-width:22rem" />
+      </div>
+      <div class="row">
+        <button class="primary" id="btn-sign">Sign artifacts</button>
+        <button class="secondary" id="btn-open-export" disabled>Open export folder</button>
+      </div>
+      <pre class="mono" id="sign-result"></pre>
+      <div id="sign-msg"></div>
+      <div class="note-box">
+        v1 scope: no Cloud HSM/KMS, no Store submission, no macOS notarization.
+        CI builds unsigned; admin signs here for ship. See
+        <code>apps/control-service/signing/README.md</code>.
+      </div>
+    </section>
+  </main>
+  <script src="admin.js"></script>
+</body>
+</html>

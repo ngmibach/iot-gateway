@@ -21,14 +21,18 @@ fi
 export PYTHONPATH="$DESKTOP:$CS${PYTHONPATH:+:$PYTHONPATH}"
 export IOTGW_DATA_DIR="${IOTGW_DATA_DIR:-$(mktemp -d /tmp/iotgw-desktop-smoke.XXXXXX)}"
 
-echo "== unit tests =="
+echo "== unit tests (desktop) =="
 "$PY" -m unittest discover -s "$DESKTOP/tests" -v
+
+echo "== unit tests (signing) =="
+"$PY" -m unittest discover -s "$CS/signing" -v
+"$PY" -m unittest discover -s "$CS/tests" -p 'test_signing*.py' -v
 
 echo "== detect-only =="
 "$PY" -m shell --detect-only | head -c 2000
 echo
 
-echo "== wizard server brief =="
+echo "== wizard + admin server brief =="
 "$PY" - <<'PY'
 import json, threading, time, urllib.request
 from shell.wizard_server import serve
@@ -37,8 +41,8 @@ port = srv.server_address[1]
 t = threading.Thread(target=srv.serve_forever, daemon=True)
 t.start()
 time.sleep(0.2)
-url = f"http://127.0.0.1:{port}/api/wizard/env"
-with urllib.request.urlopen(url, timeout=5) as r:
+base = f"http://127.0.0.1:{port}"
+with urllib.request.urlopen(base + "/api/wizard/env", timeout=5) as r:
     data = json.loads(r.read().decode())
 assert "docker" in data
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/actions.html", timeout=5) as r:
@@ -46,7 +50,12 @@ with urllib.request.urlopen(f"http://127.0.0.1:{port}/actions.html", timeout=5) 
 assert "Rotate server" in html and "Unregister" in html
 ctrl = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/wizard/control", timeout=5).read())
 assert ctrl.get("url")
-print("wizard ok on", port, "docker.present=", data["docker"]["present"], "actions ok")
+with urllib.request.urlopen(base + "/admin.html", timeout=5) as r:
+    assert b"Code Signing" in r.read()
+with urllib.request.urlopen(base + "/api/admin/status", timeout=5) as r:
+    st = json.loads(r.read().decode())
+assert "has_pin" in st
+print("wizard+actions+admin ok on", port, "docker.present=", data["docker"]["present"])
 srv.shutdown()
 PY
 

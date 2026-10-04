@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from . import detect, ssh_setup
+from . import admin_auth, detect, keyring_store, ssh_setup
 from .launcher import ProcessManager, open_in_browser, wait_http
 from .paths import (
     CONTROL_HOST,
@@ -26,13 +26,14 @@ from .paths import (
     WIZARD_PORT,
     control_service_dir,
     desktop_ui_dir,
+    ensure_data_dir,
     load_settings,
     save_settings,
 )
 
 logger = logging.getLogger(__name__)
 
-# Ensure control-service packages importable for nic/checklist/actions.
+# Ensure control-service packages importable for nic/checklist/actions/signing.
 _CS = str(control_service_dir())
 if _CS not in sys.path:
     sys.path.insert(0, _CS)
@@ -43,6 +44,7 @@ class WizardState:
         self.manager = ProcessManager()
         self.firewall_confirmed = False
         self.lock = threading.Lock()
+        self.admin = admin_auth.AdminGate()
 
 
 STATE = WizardState()
@@ -65,6 +67,10 @@ def _lab_status_dict(st: Any) -> dict[str, Any]:
     from dataclasses import asdict
 
     return asdict(st)
+
+
+def _admin_token(handler: BaseHTTPRequestHandler) -> str | None:
+    return handler.headers.get("X-Admin-Session") or None
 
 
 def _json_response(handler: BaseHTTPRequestHandler, code: int, body: Any) -> None:
@@ -447,6 +453,59 @@ def _handle_api(
 
         if method == "POST" and path == "/api/lab/fake-sensors/stop":
             _json_response(handler, 200, _lab_status_dict(_lab_manager().stop()))
+        # --- Admin unlock + Code Signing (K16) ---
+        if method == "GET" and path == "/api/admin/status":
+            _json_response(handler, 200, STATE.admin.status(_admin_token(handler)))
+            return
+
+        if method == "POST" and path == "/api/admin/pin/set":
+            body = _read_json(handler)
+            pin = str(body.get("pin") or "")
+            # First-time set is open; changing PIN requires an unlocked session.
+            if STATE.admin.status()["has_pin"]:
+                try:
+                    STATE.admin.require(_admin_token(handler))
+                except PermissionError as e:
+                    _json_response(handler, 403, {"error": str(e)})
+                    return
+            try:
+                token = STATE.admin.set_pin(pin, unlock=True)
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
+            _json_response(
+                handler,
+                200,
+                {"ok": True, "session": token, **STATE.admin.status(token)},
+            )
+            return
+
+        if method == "POST" and path == "/api/admin/unlock":
+            body = _read_json(handler)
+            try:
+                token = STATE.admin.unlock(str(body.get("pin") or ""))
+            except ValueError as e:
+                _json_response(handler, 403, {"error": str(e)})
+                return
+            _json_response(
+                handler,
+                200,
+                {"ok": True, "session": token, **STATE.admin.status(token)},
+            )
+            return
+
+        if method == "POST" and path == "/api/admin/lock":
+            STATE.admin.lock()
+            _json_response(handler, 200, {"ok": True, **STATE.admin.status(None)})
+            return
+
+        if path.startswith("/api/admin/signing"):
+            try:
+                STATE.admin.require(_admin_token(handler))
+            except PermissionError as e:
+                _json_response(handler, 403, {"error": str(e)})
+                return
+            _handle_admin_signing(handler, method, path)
             return
 
         _json_response(handler, 404, {"error": f"unknown api {method} {path}"})
@@ -504,6 +563,154 @@ def _proxy_control(
             502,
             {"error": f"control-service unreachable: {e}"},
         )
+def _handle_admin_signing(
+    handler: BaseHTTPRequestHandler,
+    method: str,
+    path: str,
+) -> None:
+    """Code Signing tab APIs — require admin unlock (checked by caller)."""
+    from pathlib import Path
+
+    from registry.registry import Registry  # type: ignore[import-not-found]
+    from signing.service import (  # type: ignore[import-not-found]
+        SignRequest,
+        SigningIdentity,
+        list_signable_artifacts,
+        sign_artifacts,
+    )
+    from signing.tools import detect_signing_tools  # type: ignore[import-not-found]
+
+    if method == "GET" and path == "/api/admin/signing/tools":
+        _json_response(handler, 200, detect_signing_tools().as_dict())
+        return
+
+    if method == "GET" and path == "/api/admin/signing/identity":
+        settings = load_settings()
+        ident = settings.get("admin_signing") or {}
+        # Never return stored passphrases
+        _json_response(
+            handler,
+            200,
+            {
+                "pfx_path": ident.get("pfx_path"),
+                "thumbprint": ident.get("thumbprint"),
+                "gpg_key_id": ident.get("gpg_key_id"),
+                "platform": ident.get("platform") or "auto",
+            },
+        )
+        return
+
+    if method == "POST" and path == "/api/admin/signing/identity":
+        body = _read_json(handler)
+        settings = load_settings()
+        ident = {
+            "platform": str(body.get("platform") or "auto"),
+            "pfx_path": (str(body["pfx_path"]).strip() if body.get("pfx_path") else None),
+            "thumbprint": (
+                str(body["thumbprint"]).strip() if body.get("thumbprint") else None
+            ),
+            "gpg_key_id": (
+                str(body["gpg_key_id"]).strip() if body.get("gpg_key_id") else None
+            ),
+        }
+        settings["admin_signing"] = ident
+        save_settings(settings)
+        # Optional: stash passphrases in keyring (never in settings.json)
+        if body.get("pfx_passphrase"):
+            keyring_store.set_secret(
+                "signing-pfx", str(body["pfx_passphrase"]), kind="signing"
+            )
+        if body.get("gpg_passphrase"):
+            keyring_store.set_secret(
+                "signing-gpg", str(body["gpg_passphrase"]), kind="signing"
+            )
+        _json_response(handler, 200, {"ok": True, "identity": ident})
+        return
+
+    if method == "POST" and path == "/api/admin/signing/list-artifacts":
+        body = _read_json(handler)
+        folder = str(body.get("folder") or "").strip()
+        if not folder:
+            _json_response(handler, 400, {"error": "folder required"})
+            return
+        try:
+            items = list_signable_artifacts(Path(folder))
+        except FileNotFoundError as e:
+            _json_response(handler, 404, {"error": str(e)})
+            return
+        _json_response(handler, 200, {"artifacts": items})
+        return
+
+    if method == "POST" and path == "/api/admin/signing/sign":
+        body = _read_json(handler)
+        settings = load_settings()
+        saved = settings.get("admin_signing") or {}
+
+        pfx_pass = body.get("pfx_passphrase")
+        if pfx_pass is None:
+            pfx_pass = keyring_store.get_secret("signing-pfx", kind="signing")
+        gpg_pass = body.get("gpg_passphrase")
+        if gpg_pass is None:
+            gpg_pass = keyring_store.get_secret("signing-gpg", kind="signing")
+
+        identity = SigningIdentity(
+            platform=str(body.get("platform") or saved.get("platform") or "auto"),
+            pfx_path=body.get("pfx_path") or saved.get("pfx_path"),
+            pfx_passphrase=pfx_pass,
+            thumbprint=body.get("thumbprint") or saved.get("thumbprint"),
+            gpg_key_id=body.get("gpg_key_id") or saved.get("gpg_key_id"),
+            gpg_passphrase=gpg_pass,
+        )
+        artifacts = body.get("artifacts") or []
+        if not isinstance(artifacts, list) or not artifacts:
+            _json_response(handler, 400, {"error": "artifacts list required"})
+            return
+        export_dir = body.get("export_dir")
+        if not export_dir:
+            export_dir = str(ensure_data_dir() / "signed-export")
+
+        result = sign_artifacts(
+            SignRequest(
+                artifacts=[str(a) for a in artifacts],
+                identity=identity,
+                export_dir=str(export_dir),
+                actor="admin",
+            )
+        )
+        # Persist audit via registry.sqlite (no secrets in detail)
+        reg_path = ensure_data_dir() / "registry.sqlite"
+        reg = Registry(str(reg_path))
+        try:
+            row = reg.audit(
+                "code_sign" if result.ok else "code_sign_failed",
+                actor="admin",
+                detail=result.audit_detail,
+            )
+            audit_id = row.get("id")
+        finally:
+            reg.close()
+
+        payload = result.as_dict()
+        payload["audit_id"] = audit_id
+        _json_response(handler, 200 if result.ok else 400, payload)
+        return
+
+    if method == "POST" and path == "/api/admin/signing/open-export":
+        body = _read_json(handler)
+        folder = str(body.get("folder") or "").strip()
+        if not folder:
+            _json_response(handler, 400, {"error": "folder required"})
+            return
+        path_obj = Path(folder)
+        if not path_obj.is_dir():
+            _json_response(handler, 404, {"error": f"not a directory: {folder}"})
+            return
+        # file:// open via browser helper
+        open_in_browser(path_obj.resolve().as_uri())
+        _json_response(handler, 200, {"ok": True, "folder": str(path_obj.resolve())})
+        return
+
+    _json_response(handler, 404, {"error": f"unknown api {method} {path}"})
 
 
 class WizardHandler(BaseHTTPRequestHandler):

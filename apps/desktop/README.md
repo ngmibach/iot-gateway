@@ -8,6 +8,9 @@ Setup Wizard + Actions chrome + process launcher for the Python control service 
 |-------|------|
 | `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API (+ optional Streamlit) |
 | `ui/` | Setup Wizard + **Actions** + native Monitoring + optional Lab panel (`lab.html`) |
+
+| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API + Streamlit, **admin unlock** |
+| `ui/` | Setup Wizard + **Admin / Code Signing** pages (also Tauri `frontendDist`) |
 | `src-tauri/` | Tauri 2 scaffold — Linux AppImage / Windows MSI·NSIS packaging stubs |
 
 **Windows networking**
@@ -64,7 +67,17 @@ cargo tauri build
 # Artifacts under src-tauri/target/release/bundle/
 ```
 
-`tauri.conf.json` bundle targets: `appimage`, `msi`, `nsis`. Replace `src-tauri/icons/icon.png` with brand assets before shipping; Admin Code Signing tab (later PR) signs the outputs.
+`tauri.conf.json` bundle targets: `appimage`, `msi`, `nsis`. Replace `src-tauri/icons/icon.png` with brand assets before shipping; sign outputs via **Admin → Code Signing** (see `apps/control-service/signing/README.md`).
+
+## Admin Code Signing (K16)
+
+1. Open `http://127.0.0.1:9138/admin.html` (or Wizard → Admin).
+2. Set/unlock local admin PIN (OS keyring).
+3. Load `.pfx` / GPG identity (passphrases → keyring; never audit_log).
+4. Scan build folder or paste `.msi`/`.exe`/`.AppImage`/`.deb` paths → Sign.
+5. Export folder includes signed artifacts + `SHA256SUMS`.
+
+Requires `osslsigncode` or `signtool` (Windows) and/or `gpg` (Ubuntu) on PATH.
 
 ### Windows localhostForwarding
 

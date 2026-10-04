@@ -172,3 +172,38 @@ class LabFakeSensorsStatus(BaseModel):
     compose_ps: str = ""
     staged_root: Optional[str] = None
     detail: str = ""
+
+class SigningToolsOut(BaseModel):
+    osslsigncode: Optional[str] = None
+    signtool: Optional[str] = None
+    gpg: Optional[str] = None
+    windows_ready: bool = False
+    linux_ready: bool = False
+
+
+class SignArtifactsRequest(BaseModel):
+    artifacts: list[str] = Field(..., min_length=1)
+    platform: str = "auto"
+    pfx_path: Optional[str] = None
+    pfx_passphrase: Optional[str] = None
+    thumbprint: Optional[str] = None
+    gpg_key_id: Optional[str] = None
+    gpg_passphrase: Optional[str] = None
+    export_dir: Optional[str] = None
+    actor: str = "admin"
+
+
+class SignArtifactsResponse(BaseModel):
+    ok: bool
+    signed_paths: list[str] = Field(default_factory=list)
+    source_paths: list[str] = Field(default_factory=list)
+    checksums_path: Optional[str] = None
+    export_dir: Optional[str] = None
+    tool_used: Optional[str] = None
+    identity_fingerprint: Optional[str] = None
+    error: Optional[str] = None
+    audit_id: Optional[int] = None
+
+
+class ListArtifactsRequest(BaseModel):
+    folder: str = Field(..., min_length=1)
