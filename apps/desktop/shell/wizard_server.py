@@ -46,6 +46,34 @@ class WizardState:
 
 
 STATE = WizardState()
+_LAB_MANAGER = None
+
+
+def _lab_manager():
+    """Lazy LabFakeSensorManager under app data (optional demos)."""
+    global _LAB_MANAGER
+    if _LAB_MANAGER is None:
+        from lab.lifecycle import LabFakeSensorManager  # type: ignore[import-not-found]
+
+        from .paths import ensure_data_dir
+
+        _LAB_MANAGER = LabFakeSensorManager(ensure_data_dir() / "lab")
+    return _LAB_MANAGER
+
+
+def _lab_status_dict(st: Any) -> dict[str, Any]:
+    return {
+        "running": st.running,
+        "gateway_ip": st.gateway_ip,
+        "sensors": list(st.sensors),
+        "duration_minutes": st.duration_minutes,
+        "started_at": st.started_at,
+        "stops_at": st.stops_at,
+        "warning": st.warning,
+        "compose_ps": st.compose_ps,
+        "staged_root": st.staged_root,
+        "detail": st.detail,
+    }
 
 
 def _json_response(handler: BaseHTTPRequestHandler, code: int, body: Any) -> None:
@@ -365,6 +393,61 @@ def _handle_api(
             url = str(body.get("url") or f"http://{CONTROL_HOST}:{STREAMLIT_PORT}")
             open_in_browser(url)
             _json_response(handler, 200, {"ok": True, "url": url})
+            return
+
+        # --- Lab (optional fake_sensor; not production) ---
+        if method == "GET" and path == "/api/lab/defaults":
+            settings = load_settings()
+            from lab.lifecycle import (  # type: ignore[import-not-found]
+                DEFAULT_DURATION_MINUTES,
+                STORAGE_OVERFLOW_WARNING,
+            )
+
+            _json_response(
+                handler,
+                200,
+                {
+                    "gateway_ip": settings.get("gateway_ip") or "",
+                    "duration_minutes": DEFAULT_DURATION_MINUTES,
+                    "warning": STORAGE_OVERFLOW_WARNING,
+                },
+            )
+            return
+
+        if method == "GET" and path == "/api/lab/fake-sensors/status":
+            _json_response(handler, 200, _lab_status_dict(_lab_manager().status()))
+            return
+
+        if method == "POST" and path == "/api/lab/fake-sensors/start":
+            body = _read_json(handler)
+            gw = str(body.get("gateway_ip") or "").strip()
+            if not gw:
+                _json_response(handler, 400, {"error": "gateway_ip required"})
+                return
+            sensors = body.get("sensors")
+            if isinstance(sensors, str):
+                sensors = [s.strip() for s in sensors.split(",") if s.strip()]
+            try:
+                st = _lab_manager().start(
+                    gateway_ip=gw,
+                    duration_minutes=int(body.get("duration_minutes") or 10),
+                    sensors=sensors,
+                    build=bool(body.get("build", True)),
+                )
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
+            except (FileNotFoundError, RuntimeError) as e:
+                _json_response(handler, 502, {"error": str(e)})
+                return
+            settings = load_settings()
+            settings["gateway_ip"] = gw
+            save_settings(settings)
+            _json_response(handler, 200, _lab_status_dict(st))
+            return
+
+        if method == "POST" and path == "/api/lab/fake-sensors/stop":
+            _json_response(handler, 200, _lab_status_dict(_lab_manager().stop()))
             return
 
         _json_response(handler, 404, {"error": f"unknown api {method} {path}"})

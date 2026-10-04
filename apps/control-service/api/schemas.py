@@ -144,3 +144,29 @@ class RotateCAResponse(BaseModel):
     # Only redistribute when ok=True (reload_failed keeps tokens but UI must warn).
     redistribute: bool = False
     devices: list[DeviceBundleToken] = Field(default_factory=list)
+
+class LabFakeSensorsStartRequest(BaseModel):
+    """Optional Lab demo — not part of production install."""
+
+    gateway_ip: str = Field(..., min_length=1)
+    duration_minutes: int = Field(default=10, ge=1, le=60)
+    sensors: Optional[list[str]] = None
+    build: bool = True
+
+    @field_validator("gateway_ip")
+    @classmethod
+    def _strip_gw(cls, v: str) -> str:
+        return v.strip()
+
+
+class LabFakeSensorsStatus(BaseModel):
+    running: bool
+    gateway_ip: Optional[str] = None
+    sensors: list[str] = Field(default_factory=list)
+    duration_minutes: Optional[int] = None
+    started_at: Optional[float] = None
+    stops_at: Optional[float] = None
+    warning: str = ""
+    compose_ps: str = ""
+    staged_root: Optional[str] = None
+    detail: str = ""

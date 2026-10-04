@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Lab (fake_sensor)</title>
+  <link rel="stylesheet" href="wizard.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Lab — fake_sensor</h1>
+      <div class="sub">Optional demos only · not part of production install</div>
+    </div>
+    <div>
+      <a href="wizard.html" style="color:var(--accent);font-size:0.85rem">← Setup Wizard</a>
+      <span id="hdr-status" style="margin-left:0.75rem"></span>
+    </div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Storage overflow warning</h2>
+      <div class="note-box" id="warn-box" style="border-color:var(--warn);color:var(--warn)">
+        fake_sensor must run only for a <strong>short period</strong>. Prolonged use can overflow
+        gateway/monitoring storage (logs, Loki, Mosquitto). The Lab auto-stops after the duration you set
+        (max 60 minutes).
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Start / stop</h2>
+      <p>Templates <code>HOST=&lt;gateway IP&gt;</code> into a staged copy of <code>fake_sensor/</code>, then runs a short-lived local compose project (<code>iotgw-lab-fake-sensor</code>).</p>
+      <div class="row">
+        <label for="gateway-ip">Gateway IP</label>
+        <input id="gateway-ip" placeholder="192.168.1.50" />
+      </div>
+      <div class="row">
+        <label for="duration">Duration (min)</label>
+        <input id="duration" type="number" min="1" max="60" value="10" style="min-width:6rem" />
+      </div>
+      <div class="row">
+        <label for="sensors">Sensors</label>
+        <input id="sensors" value="sensor1,sensor2,sensor3,sensor4" title="Comma-separated sensor1..sensor9" />
+      </div>
+      <div class="row">
+        <label><input type="checkbox" id="build" checked /> Rebuild images</label>
+      </div>
+      <div class="row">
+        <button class="primary" id="btn-start">Start (short-lived)</button>
+        <button class="danger" id="btn-stop">Stop now</button>
+        <button class="secondary" id="btn-refresh">Refresh status</button>
+      </div>
+      <div id="msg"></div>
+      <pre class="mono" id="status-json"></pre>
+    </section>
+  </main>
+  <script src="lab.js"></script>
+</body>
+</html>
