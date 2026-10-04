@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Iterator
 from unittest.mock import patch
@@ -54,12 +55,11 @@ class QueryApiTests(unittest.TestCase):
             prometheus_url="http://prom.test:9090",
         )
 
-        from contextlib import contextmanager
-
         @contextmanager
         def open_ssh(_gw: dict[str, Any]) -> Iterator[_FakeSSH]:
             yield _FakeSSH()
 
+        self.open_ssh = open_ssh
         self.app = create_app(
             settings=self.settings,
             registry=self.registry,
@@ -87,6 +87,7 @@ class QueryApiTests(unittest.TestCase):
             {"metric": {"deviceId": "sensor_a"}, "values": [["1", "1"]]},
             {"metric": {"deviceId": "sensor_b"}, "values": [["1", "2"]]},
             {"metric": {"device_id": "sensor_a"}, "value": ["1", "3"]},
+            {"metric": {"job": "x"}, "values": [["1", "9"]]},  # unlabeled → drop
         ]
         out = Q.filter_series_by_device(series, allowed={"sensor_a"})
         self.assertEqual(len(out), 2)
@@ -95,25 +96,104 @@ class QueryApiTests(unittest.TestCase):
             series,
         )
 
-    def test_monitor_devices_filter(self) -> None:
-        r = self.client.get("/api/v1/query/monitor-devices", params={"gateway_id": "gw1"})
+    def test_sparkline_floats_skips_bad(self) -> None:
+        self.assertEqual(
+            Q.sparkline_floats([["1", "1.5"], ["2", "nope"], ["3", "2"]]),
+            [1.5, 2.0],
+        )
+
+    def test_sensors_filter_empty_registry_shows_all(self) -> None:
+        db = Path(self._tmp.name) / "empty.sqlite"
+        reg = Registry(str(db))
+        reg.upsert_gateway(
+            id="gw_empty",
+            host="10.0.0.1",
+            ssh_user="pi",
+            install_root="/opt",
+            fingerprint="fp",
+        )
+        app = create_app(
+            settings=Settings(
+                host="127.0.0.1",
+                port=9137,
+                data_dir=Path(self._tmp.name),
+                registry_path=db,
+                loki_url="http://loki.test:3100",
+                prometheus_url="http://prom.test:9090",
+            ),
+            registry=reg,
+            open_ssh=self.open_ssh,
+        )
+        client = TestClient(app)
+
+        def fake_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {
+                "status": "success",
+                "data": {
+                    "result": [
+                        {
+                            "metric": {"deviceId": "raw1", "stage": "x"},
+                            "values": [["1", "x"]],
+                        }
+                    ]
+                },
+            }
+
+        with patch("api.query._proxy_get", side_effect=fake_proxy):
+            r = client.get(
+                "/api/v1/query/summaries/sensors",
+                params={"gateway_id": "gw_empty"},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertFalse(r.json()["filter_active"])
+        self.assertEqual(len(r.json()["stages"]), 1)
+
+    def test_sensors_filter_all_disabled_empty_view(self) -> None:
+        self.registry.upsert_device(
+            gateway_id="gw1", id="sensor_a", monitor_enabled=0
+        )
+
+        def fake_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {
+                "status": "success",
+                "data": {
+                    "result": [
+                        {
+                            "metric": {"deviceId": "sensor_a", "stage": "heat"},
+                            "values": [["1", "heat"]],
+                        },
+                        {
+                            "metric": {"deviceId": "sensor_b", "stage": "cool"},
+                            "values": [["1", "cool"]],
+                        },
+                    ]
+                },
+            }
+
+        with patch("api.query._proxy_get", side_effect=fake_proxy):
+            r = self.client.get(
+                "/api/v1/query/summaries/sensors",
+                params={"gateway_id": "gw1"},
+            )
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
         self.assertTrue(body["filter_active"])
-        self.assertEqual(body["device_ids"], ["sensor_a"])
+        self.assertEqual(body["monitored_device_ids"], [])
+        self.assertEqual(body["stages"], [])
 
-        r2 = self.client.get(
-            "/api/v1/query/monitor-devices",
-            params={"gateway_id": "gw1", "show_all": True},
+    def test_sensors_bad_gateway_404(self) -> None:
+        r = self.client.get(
+            "/api/v1/query/summaries/sensors",
+            params={"gateway_id": "missing"},
         )
-        self.assertFalse(r2.json()["filter_active"])
-        self.assertEqual(r2.json()["device_ids"], [])
+        self.assertEqual(r.status_code, 404)
 
     def test_query_loki_range_proxy(self) -> None:
         fake = {
             "status": "success",
             "data": {"resultType": "matrix", "result": []},
         }
+        captured: dict[str, Any] = {}
 
         class _Resp:
             status_code = 200
@@ -133,30 +213,20 @@ class QueryApiTests(unittest.TestCase):
                 return None
 
             def get(self, url: str, params: dict | None = None) -> _Resp:
-                self.url = url
-                self.params = params
+                captured["url"] = url
+                captured["params"] = params
                 return _Resp()
 
-        with patch("api.query.httpx.Client", _Client) as _:
-            # Re-patch by capturing instance via side effect
-            captured: dict[str, Any] = {}
-
-            class _Capturing(_Client):
-                def get(self, url: str, params: dict | None = None) -> _Resp:
-                    captured["url"] = url
-                    captured["params"] = params
-                    return _Resp()
-
-            with patch("api.query.httpx.Client", _Capturing):
-                r = self.client.get(
-                    "/api/v1/query/loki",
-                    params={
-                        "query": '{job="x"}',
-                        "start": "1",
-                        "end": "2",
-                        "limit": 10,
-                    },
-                )
+        with patch("api.query.httpx.Client", _Client):
+            r = self.client.get(
+                "/api/v1/query/loki",
+                params={
+                    "query": '{job="x"}',
+                    "start": "1",
+                    "end": "2",
+                    "limit": 10,
+                },
+            )
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(r.json()["status"], "success")
         self.assertIn("/loki/api/v1/query_range", captured["url"])
@@ -250,7 +320,6 @@ class QueryApiTests(unittest.TestCase):
                         ]
                     },
                 }
-            # temperature / pressure series
             return {
                 "status": "success",
                 "data": {
@@ -288,6 +357,19 @@ class QueryApiTests(unittest.TestCase):
         self.assertFalse(r2.json()["filter_active"])
         self.assertEqual(len(r2.json()["stages"]), 2)
 
+    def test_summary_gateway_soft_fail(self) -> None:
+        def boom(url: str, params: dict[str, Any]) -> Any:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=502, detail="down")
+
+        with patch("api.query._proxy_get", side_effect=boom):
+            r = self.client.get("/api/v1/query/summaries/gateway")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["metrics"]["total_sensor_messages"], 0)
+        self.assertTrue(body["warnings"])
+
     def test_summary_gateway_scalars(self) -> None:
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:
             q = str(params.get("query", ""))
@@ -312,7 +394,6 @@ class QueryApiTests(unittest.TestCase):
                     "status": "success",
                     "data": {"result": [{"metric": {}, "value": [1, "3"]}]},
                 }
-            # Loki scalars / delay
             if "unwrap delay" in q:
                 return {
                     "status": "success",
@@ -320,12 +401,11 @@ class QueryApiTests(unittest.TestCase):
                         "result": [
                             {
                                 "metric": {"deviceId": "sensor_a"},
-                                "values": [["1", "0.01"], ["2", "0.02"]],
+                                "values": [["1", "0.01"], ["2", "bad"], ["3", "0.02"]],
                             }
                         ]
                     },
                 }
-            # count / rate queries → single scalar
             return {
                 "status": "success",
                 "data": {"result": [{"metric": {}, "values": [["1", "5"]]}]},
@@ -338,12 +418,12 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(m["total_sensor_messages"], 5)
         self.assertEqual(m["allowed_ips"], 3)
         self.assertEqual(r.json()["connected_sensors"][0]["device_id"], "sensor_a")
-        self.assertEqual(r.json()["delay_by_device"][0]["sparkline"][-1], 0.02)
+        self.assertEqual(r.json()["delay_by_device"][0]["sparkline"], [0.01, 0.02])
 
     def test_summary_raspi(self) -> None:
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:
             q = str(params.get("query", ""))
-            if "query_range" in url or "rate(node_cpu" in q and "start" in (params or {}):
+            if "query_range" in url:
                 return {
                     "status": "success",
                     "data": {
@@ -355,7 +435,6 @@ class QueryApiTests(unittest.TestCase):
                         ]
                     },
                 }
-            # Instant scalars — pick by expression fragment
             val = "1"
             if "MemTotal" in q and "MemAvailable" in q:
                 val = "500000000"
@@ -373,7 +452,7 @@ class QueryApiTests(unittest.TestCase):
                 val = "64000000000"
             elif "container_last_seen" in q:
                 val = "7"
-            elif q.startswith("up"):
+            elif q.startswith("up") or 'up{' in q:
                 val = "1"
             return {
                 "status": "success",
@@ -399,7 +478,6 @@ class QueryApiTests(unittest.TestCase):
             loki_url="http://loki.test:3100",
             prometheus_url="http://prom.test:9090",
         )
-        from contextlib import contextmanager
 
         @contextmanager
         def open_ssh(_gw: dict[str, Any]) -> Iterator[_FakeSSH]:
@@ -409,12 +487,17 @@ class QueryApiTests(unittest.TestCase):
             settings=settings, registry=self.registry, open_ssh=open_ssh
         )
         client = TestClient(app)
-        r = client.get("/api/v1/query/monitor-devices")
+        r = client.get("/api/v1/query/summaries/sensors", params={"gateway_id": "gw1"})
         self.assertEqual(r.status_code, 401)
-        r2 = client.get(
-            "/api/v1/query/monitor-devices",
-            headers={"X-API-Token": "secret"},
-        )
+        with patch(
+            "api.query._proxy_get",
+            return_value={"status": "success", "data": {"result": []}},
+        ):
+            r2 = client.get(
+                "/api/v1/query/summaries/sensors",
+                params={"gateway_id": "gw1"},
+                headers={"X-API-Token": "secret"},
+            )
         self.assertEqual(r2.status_code, 200)
 
 

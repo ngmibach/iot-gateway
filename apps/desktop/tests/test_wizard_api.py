@@ -117,6 +117,60 @@ class WizardApiTests(unittest.TestCase):
         body = json.loads(ctx.exception.read().decode("utf-8"))
         self.assertIn("pin", body.get("error", "").lower())
 
+    def test_services_start_default_skips_streamlit(self) -> None:
+        from shell import wizard_server as ws
+
+        calls: list[str] = []
+
+        class _FakeMgr:
+            def start_control_service(self, **kwargs):  # noqa: ANN003
+                calls.append("control")
+
+                class _P:
+                    url = "http://127.0.0.1:9137"
+
+                return _P()
+
+            def start_streamlit(self, **kwargs):  # noqa: ANN003
+                calls.append("streamlit")
+
+                class _P:
+                    url = "http://127.0.0.1:8501"
+
+                return _P()
+
+            def status(self):
+                return {
+                    "control": {"running": True},
+                    "streamlit": {"running": False},
+                }
+
+        with mock.patch.object(ws.STATE, "manager", _FakeMgr()):
+            with mock.patch.object(ws, "wait_http", return_value=True):
+                out = self._post("/api/wizard/services/start", {})
+        self.assertIn("control", calls)
+        self.assertNotIn("streamlit", calls)
+        self.assertTrue(out["control"]["healthy"])
+        self.assertIsNone(out["streamlit"]["url"])
+
+        calls.clear()
+        with mock.patch.object(ws.STATE, "manager", _FakeMgr()):
+            with mock.patch.object(ws, "wait_http", return_value=True):
+                out2 = self._post("/api/wizard/services/start", {"streamlit": True})
+        self.assertIn("streamlit", calls)
+        self.assertEqual(out2["streamlit"]["url"], "http://127.0.0.1:8501")
+
+    def test_open_streamlit_requires_running(self) -> None:
+        req = urllib.request.Request(
+            self.base + "/api/wizard/open-streamlit",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+
 
 if __name__ == "__main__":
     unittest.main()

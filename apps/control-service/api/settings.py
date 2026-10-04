@@ -49,16 +49,8 @@ class Settings:
             "true",
             "yes",
         )
-        loki = (
-            os.environ.get("LOKI_URL")
-            or os.environ.get("IOTGW_LOKI_URL")
-            or "http://127.0.0.1:3100"
-        ).strip()
-        prom = (
-            os.environ.get("PROMETHEUS_URL")
-            or os.environ.get("IOTGW_PROMETHEUS_URL")
-            or "http://127.0.0.1:9090"
-        ).strip()
+        loki = (os.environ.get("LOKI_URL") or "http://127.0.0.1:3100").strip()
+        prom = (os.environ.get("PROMETHEUS_URL") or "http://127.0.0.1:9090").strip()
         return cls(
             host=os.environ.get("IOTGW_CONTROL_HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=int(os.environ.get("IOTGW_CONTROL_PORT", "9137") or "9137"),

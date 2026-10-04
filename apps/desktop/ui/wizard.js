@@ -224,10 +224,15 @@
   }
 
   async function openStreamlit() {
-    await api("/api/wizard/open-streamlit", {
-      method: "POST",
-      body: JSON.stringify({ url: "http://127.0.0.1:8501" }),
-    });
+    try {
+      await api("/api/wizard/open-streamlit", {
+        method: "POST",
+        body: JSON.stringify({ url: "http://127.0.0.1:8501" }),
+      });
+    } catch (e) {
+      $("svc-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+      throw e;
+    }
   }
 
   function wire() {

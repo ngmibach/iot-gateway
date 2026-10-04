@@ -6,7 +6,6 @@ monitoring/build/streamlit/modules/dashboards/{gateway,raspi,sensors}.py.
 
 from __future__ import annotations
 
-import re
 from typing import Optional
 
 # ── Gateway Activities (gateway.py) ──────────────────────────────────────────
@@ -93,27 +92,11 @@ SENSORS_PRESSURE_CHAMBER = (
 
 
 def prep_loki(expr: str, *, duration: str = "1h") -> str:
-    expr = expr.replace("\r\n", "\n").replace("[{range}]", f"[{duration}]")
-    expr = expr.replace("$__range", duration)
-    expr = re.sub(r"\[\$__interval\]", "[5m]", expr)
-    return expr
+    return expr.replace("\r\n", "\n").replace("[{range}]", f"[{duration}]")
 
 
 def prep_prom(expr: str, *, node: str = "gateway", job: str = "node") -> str:
-    expr = expr.replace("\r\n", "\n")
-    expr = expr.replace("$node", node).replace("$job", job)
-    expr = re.sub(r"\[\$__rate_interval\]", "[5m]", expr)
-    expr = re.sub(r"\[\$__interval\]", "[5m]", expr)
-    return expr
-
-
-def device_id_filter_logql(device_ids: list[str]) -> str:
-    """Build a Loki label matcher for deviceId when filtering monitored devices."""
-    if not device_ids:
-        return ""
-    # Escape regex special chars in ids; join with |.
-    parts = [re.escape(d) for d in device_ids]
-    return f', deviceId=~"{"|".join(parts)}"'
+    return expr.replace("\r\n", "\n").replace("$node", node).replace("$job", job)
 
 
 def filter_series_by_device(
@@ -122,9 +105,10 @@ def filter_series_by_device(
     allowed: Optional[set[str]],
     label_keys: tuple[str, ...] = ("deviceId", "device_id"),
 ) -> list[dict]:
-    """Drop Prometheus/Loki series whose device label is not in ``allowed``.
+    """Drop series whose device label is not in ``allowed``.
 
-    When ``allowed`` is None (no registry filter), return ``result`` unchanged.
+    When ``allowed`` is None, return ``result`` unchanged.
+    When filtering, series without a device label are dropped.
     """
     if allowed is None:
         return result
@@ -138,6 +122,17 @@ def filter_series_by_device(
             if metric.get(k):
                 did = str(metric[k])
                 break
-        if did is None or did in allowed:
+        if did is not None and did in allowed:
             out.append(series)
     return out
+
+
+def sparkline_floats(values: list, *, limit: int = 30) -> list[float]:
+    """Convert Loki/Prom value pairs to floats; skip non-numeric points."""
+    spark: list[float] = []
+    for pair in values[-limit:]:
+        try:
+            spark.append(float(pair[1]))
+        except (TypeError, ValueError, IndexError):
+            continue
+    return spark

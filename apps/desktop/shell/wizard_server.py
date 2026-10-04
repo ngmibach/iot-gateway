@@ -8,8 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 import threading
+import urllib.error
+import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
@@ -302,7 +305,7 @@ def _handle_api(
 
         if method == "POST" and path == "/api/wizard/services/start":
             body = _read_json(handler)
-            # Phase-1 default: control service only; Streamlit opt-in.
+            # Omit streamlit → False so API clients match the native-Monitoring default.
             start_st = bool(body.get("streamlit", False))
             with STATE.lock:
                 ctrl = STATE.manager.start_control_service()
@@ -333,7 +336,6 @@ def _handle_api(
                         "error": st_error,
                         "status": STATE.manager.status()["streamlit"],
                     },
-                    "monitoring_url": f"http://{CONTROL_HOST}:{WIZARD_PORT}/monitoring.html",
                 },
             )
             return
@@ -349,6 +351,17 @@ def _handle_api(
 
         if method == "POST" and path == "/api/wizard/open-streamlit":
             body = _read_json(handler)
+            st_status = STATE.manager.status().get("streamlit") or {}
+            if not st_status.get("running"):
+                _json_response(
+                    handler,
+                    400,
+                    {
+                        "error": "Streamlit is not running — start services with streamlit:true first",
+                        "status": st_status,
+                    },
+                )
+                return
             url = str(body.get("url") or f"http://{CONTROL_HOST}:{STREAMLIT_PORT}")
             open_in_browser(url)
             _json_response(handler, 200, {"ok": True, "url": url})
@@ -360,12 +373,66 @@ def _handle_api(
         _json_response(handler, 500, {"error": str(e)})
 
 
+def _proxy_control(
+    handler: BaseHTTPRequestHandler,
+    method: str,
+    path: str,
+    *,
+    query: str = "",
+) -> None:
+    """Same-origin proxy to control-service; injects IOTGW_API_TOKEN when set."""
+    target = f"http://{CONTROL_HOST}:{CONTROL_PORT}{path}"
+    if query:
+        target = f"{target}?{query}"
+    headers: dict[str, str] = {}
+    ctype = handler.headers.get("Content-Type")
+    if ctype:
+        headers["Content-Type"] = ctype
+    token = os.environ.get("IOTGW_API_TOKEN", "").strip()
+    if token:
+        headers["X-API-Token"] = token
+    body = b""
+    if method in ("POST", "PUT", "PATCH", "DELETE"):
+        length = int(handler.headers.get("Content-Length") or "0")
+        if length > 0:
+            body = handler.rfile.read(length)
+    req = urllib.request.Request(target, data=body or None, headers=headers, method=method)
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read()
+            handler.send_response(resp.status)
+            ct = resp.headers.get("Content-Type", "application/json")
+            handler.send_header("Content-Type", ct)
+            handler.send_header("Content-Length", str(len(raw)))
+            handler.send_header("Cache-Control", "no-store")
+            handler.end_headers()
+            handler.wfile.write(raw)
+    except urllib.error.HTTPError as e:
+        raw = e.read()
+        handler.send_response(e.code)
+        handler.send_header(
+            "Content-Type", e.headers.get("Content-Type", "application/json")
+        )
+        handler.send_header("Content-Length", str(len(raw)))
+        handler.end_headers()
+        handler.wfile.write(raw)
+    except urllib.error.URLError as e:
+        _json_response(
+            handler,
+            502,
+            {"error": f"control-service unreachable: {e}"},
+        )
+
+
 class WizardHandler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args: Any) -> None:
         logger.info("%s - " + fmt, self.address_string(), *args)
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            _proxy_control(self, "GET", parsed.path, query=parsed.query)
+            return
         if parsed.path.startswith("/api/"):
             _handle_api(self, "GET", parsed.path, query=parsed.query)
             return
@@ -373,6 +440,9 @@ class WizardHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            _proxy_control(self, "POST", parsed.path, query=parsed.query)
+            return
         if parsed.path.startswith("/api/"):
             _handle_api(self, "POST", parsed.path, query=parsed.query)
             return

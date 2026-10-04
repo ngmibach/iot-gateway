@@ -92,24 +92,35 @@ def _monitored_ids(
 ) -> Optional[set[str]]:
     """Return allowed device ids, or None when filter should not apply.
 
-    Filter applies when the registry has at least one monitor_enabled=1 row
-    for the gateway (or any gateway if gid omitted) and show_all is False.
+    - ``show_all`` → None (raw Loki view).
+    - Unknown ``gateway_id`` → 404.
+    - No device rows for the selected gateway(s) → None (first-run explore).
+    - Devices exist → set of ``monitor_enabled=1`` ids (may be empty).
     """
     if show_all:
         return None
+
+    if gateway_id:
+        gw = registry.get_gateway(gateway_id)
+        if gw is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"gateway {gateway_id!r} not found",
+            )
+        gateways = [gw]
+    else:
+        gateways = registry.list_gateways()
+
+    any_devices = False
     ids: set[str] = set()
-    gateways = (
-        [registry.get_gateway(gateway_id)]
-        if gateway_id
-        else registry.list_gateways()
-    )
     for gw in gateways:
-        if not gw:
-            continue
-        for row in registry.list_devices(gw["id"], monitor_enabled=1):
-            ids.add(str(row["id"]))
-    if not ids:
-        # Empty registry → no filter (show all Loki deviceIds).
+        rows = registry.list_devices(gw["id"])
+        if rows:
+            any_devices = True
+        for row in rows:
+            if int(row.get("monitor_enabled", 1) or 0) == 1:
+                ids.add(str(row["id"]))
+    if not any_devices:
         return None
     return ids
 
@@ -158,22 +169,6 @@ def query_prometheus(
     return _proxy_get(f"{prom}/api/v1/query", params)
 
 
-@router.get("/query/monitor-devices")
-def monitor_devices(
-    gateway_id: Optional[str] = None,
-    show_all: bool = False,
-    registry: Registry = Depends(get_registry),
-) -> dict[str, Any]:
-    """Device ids used by Monitoring Sensors filter (monitor_enabled=1)."""
-    allowed = _monitored_ids(registry, gateway_id, show_all=show_all)
-    return {
-        "gateway_id": gateway_id,
-        "show_all": show_all,
-        "filter_active": allowed is not None,
-        "device_ids": sorted(allowed) if allowed is not None else [],
-    }
-
-
 @router.get("/query/summaries/gateway")
 def summary_gateway(
     range: str = Query(default="1h", alias="range"),
@@ -183,24 +178,33 @@ def summary_gateway(
     loki, prom = _backend_urls(state)
     start_ns, end_ns = _ns_window(range)
     duration = range
+    warnings: list[str] = []
 
     def loki_scalar(expr: str) -> float:
-        q = Q.prep_loki(expr, duration=duration)
-        data = _proxy_get(
-            f"{loki}/loki/api/v1/query_range",
-            {
-                "query": q,
-                "start": start_ns,
-                "end": end_ns,
-                "limit": 100,
-                "direction": "backward",
-            },
-        )
-        return _extract_scalar(data)
+        try:
+            q = Q.prep_loki(expr, duration=duration)
+            data = _proxy_get(
+                f"{loki}/loki/api/v1/query_range",
+                {
+                    "query": q,
+                    "start": start_ns,
+                    "end": end_ns,
+                    "limit": 100,
+                    "direction": "backward",
+                },
+            )
+            return _extract_scalar(data)
+        except HTTPException as e:
+            warnings.append(f"loki: {e.detail}")
+            return 0.0
 
     def prom_scalar(expr: str) -> float:
-        data = _proxy_get(f"{prom}/api/v1/query", {"query": expr})
-        return _extract_scalar(data)
+        try:
+            data = _proxy_get(f"{prom}/api/v1/query", {"query": expr})
+            return _extract_scalar(data)
+        except HTTPException as e:
+            warnings.append(f"prometheus: {e.detail}")
+            return 0.0
 
     total = int(loki_scalar(Q.GATEWAY_TOTAL_SENSOR_MSGS))
     msgs_min = loki_scalar(Q.GATEWAY_MSGS_PER_MIN)
@@ -210,10 +214,7 @@ def summary_gateway(
         + loki_scalar(Q.GATEWAY_DENIED_MOSQUITTO)
     )
     ids_alerts = int(loki_scalar(Q.GATEWAY_IDS_ALERTS))
-    try:
-        allowed_ips = int(prom_scalar(Q.GATEWAY_ALLOWED_IP_COUNT))
-    except HTTPException:
-        allowed_ips = 0
+    allowed_ips = int(prom_scalar(Q.GATEWAY_ALLOWED_IP_COUNT))
 
     connected: list[dict[str, str]] = []
     try:
@@ -232,10 +233,9 @@ def summary_gateway(
                     "source_ip": str(m.get("source_ip") or ""),
                 }
             )
-    except HTTPException:
-        pass
+    except HTTPException as e:
+        warnings.append(f"connected_sensors: {e.detail}")
 
-    # Delay sparkline: last values per deviceId
     delay_series: list[dict[str, Any]] = []
     try:
         q = Q.prep_loki(Q.GATEWAY_DELAY_BY_DEVICE, duration=duration)
@@ -251,8 +251,7 @@ def summary_gateway(
         )
         for stream in data.get("data", {}).get("result", []) or []:
             metric = stream.get("metric") or {}
-            values = stream.get("values") or []
-            spark = [float(v[1]) for v in values[-30:]]
+            spark = Q.sparkline_floats(stream.get("values") or [])
             delay_series.append(
                 {
                     "device_id": metric.get("deviceId") or "?",
@@ -260,8 +259,8 @@ def summary_gateway(
                     "sparkline": spark,
                 }
             )
-    except HTTPException:
-        pass
+    except HTTPException as e:
+        warnings.append(f"delay: {e.detail}")
 
     return {
         "range": range,
@@ -274,6 +273,7 @@ def summary_gateway(
         },
         "connected_sensors": connected,
         "delay_by_device": delay_series,
+        "warnings": warnings,
     }
 
 
@@ -285,11 +285,16 @@ def summary_raspi(
 ) -> dict[str, Any]:
     """Host (Raspi) metrics summary for native Monitoring tab."""
     _, prom = _backend_urls(state)
+    warnings: list[str] = []
 
     def prom_scalar(expr: str) -> float:
-        q = Q.prep_prom(expr, node=node, job=job)
-        data = _proxy_get(f"{prom}/api/v1/query", {"query": q})
-        return _extract_scalar(data)
+        try:
+            q = Q.prep_prom(expr, node=node, job=job)
+            data = _proxy_get(f"{prom}/api/v1/query", {"query": q})
+            return _extract_scalar(data)
+        except HTTPException as e:
+            warnings.append(f"prometheus: {e.detail}")
+            return 0.0
 
     cpu = prom_scalar(Q.RASPI_CPU_USAGE)
     cores = prom_scalar(Q.RASPI_CPU_CORES)
@@ -298,16 +303,9 @@ def summary_raspi(
     load1 = prom_scalar(Q.RASPI_LOAD1)
     fs_avail = prom_scalar(Q.RASPI_FS_AVAIL)
     fs_size = prom_scalar(Q.RASPI_FS_SIZE)
-    try:
-        containers = int(prom_scalar(Q.RASPI_ACTIVE_CONTAINERS))
-    except HTTPException:
-        containers = 0
-    try:
-        up = prom_scalar(Q.RASPI_UP)
-    except HTTPException:
-        up = 0.0
+    containers = int(prom_scalar(Q.RASPI_ACTIVE_CONTAINERS))
+    up = prom_scalar(Q.RASPI_UP)
 
-    # Short range sparkline for CPU (last ~30m)
     end = int(time.time())
     start = end - 1800
     cpu_spark: list[float] = []
@@ -322,10 +320,10 @@ def summary_raspi(
             {"query": q, "start": start, "end": end, "step": "60s"},
         )
         for r in data.get("data", {}).get("result", []) or []:
-            cpu_spark = [float(v[1]) * 100 for v in (r.get("values") or [])[-30:]]
+            cpu_spark = [v * 100 for v in Q.sparkline_floats(r.get("values") or [])]
             break
-    except HTTPException:
-        pass
+    except HTTPException as e:
+        warnings.append(f"cpu_sparkline: {e.detail}")
 
     return {
         "node": node,
@@ -346,6 +344,7 @@ def summary_raspi(
             "active_containers": containers,
         },
         "cpu_sparkline_pct": cpu_spark,
+        "warnings": warnings,
     }
 
 
@@ -357,10 +356,11 @@ def summary_sensors(
     state: AppState = Depends(get_state),
     registry: Registry = Depends(get_registry),
 ) -> dict[str, Any]:
-    """Sensors Reading summary; filters to monitor_enabled=1 when registry non-empty."""
+    """Sensors Reading summary; filters to monitor_enabled=1 when devices exist."""
     loki, _ = _backend_urls(state)
     start_ns, end_ns = _ns_window(range)
     allowed = _monitored_ids(registry, gateway_id, show_all=show_all)
+    warnings: list[str] = []
 
     def loki_range(expr: str) -> Any:
         q = Q.prep_loki(expr, duration=range)
@@ -394,8 +394,8 @@ def summary_sensors(
                     "stage": stage,
                 }
             )
-    except HTTPException:
-        pass
+    except HTTPException as e:
+        warnings.append(f"stages: {e.detail}")
 
     def series_sparks(expr: str, label: str) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
@@ -407,8 +407,7 @@ def summary_sensors(
             )
             for stream in result:
                 metric = stream.get("metric") or {}
-                values = stream.get("values") or []
-                spark = [float(v[1]) for v in values[-30:]]
+                spark = Q.sparkline_floats(stream.get("values") or [])
                 out.append(
                     {
                         "device_id": metric.get("deviceId") or "?",
@@ -417,8 +416,8 @@ def summary_sensors(
                         "sparkline": spark,
                     }
                 )
-        except HTTPException:
-            pass
+        except HTTPException as e:
+            warnings.append(f"{label}: {e.detail}")
         return out
 
     temps = (
@@ -438,4 +437,5 @@ def summary_sensors(
         "stages": stages,
         "temperatures": temps,
         "pressures": pressures,
+        "warnings": warnings,
     }

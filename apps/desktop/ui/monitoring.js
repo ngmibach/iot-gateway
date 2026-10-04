@@ -5,25 +5,15 @@
     { id: "raspi", label: "Host" },
     { id: "sensors", label: "Sensors" },
   ];
-  const CONTROL = "http://127.0.0.1:9137";
+  // Same-origin via wizard proxy (/api/v1 → control-service + IOTGW_API_TOKEN).
   let tab = "gateway";
   let timer = null;
 
   const $ = (id) => document.getElementById(id);
 
-  function apiToken() {
-    try {
-      return localStorage.getItem("iotgw_api_token") || "";
-    } catch (_) {
-      return "";
-    }
-  }
-
   async function control(path, opts) {
     const headers = { "Content-Type": "application/json", ...(opts && opts.headers) };
-    const tok = apiToken();
-    if (tok) headers["X-API-Token"] = tok;
-    const res = await fetch(CONTROL + path, { ...opts, headers });
+    const res = await fetch(path, { ...opts, headers });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
       const detail = data.detail || data.error || res.statusText;
@@ -67,7 +57,7 @@
     el.innerHTML = items
       .map(
         ([label, value]) =>
-          `<div class="metric-card"><div class="label">${label}</div><div class="value">${value}</div></div>`
+          `<div class="metric-card"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`
       )
       .join("");
   }
@@ -189,13 +179,13 @@
     if (gid) q.set("gateway_id", gid);
     const data = await control(`/api/v1/query/summaries/sensors?${q}`);
     $("sensors-filter-note").textContent = data.filter_active
-      ? `Filtered to monitor_enabled devices: ${(data.monitored_device_ids || []).join(", ") || "(none)"}`
+      ? `Filtered to monitor_enabled devices: ${(data.monitored_device_ids || []).join(", ") || "(none enabled — empty view)"}`
       : showAll
         ? "Showing all Loki deviceIds (filter off)."
-        : "No monitor_enabled devices in registry — showing all.";
+        : "No devices in registry — showing all (first-run explore).";
     metricCards(
       $("sensors-stages"),
-      (data.stages || []).map((s) => [s.device_id, escapeHtml(String(s.stage))])
+      (data.stages || []).map((s) => [s.device_id, String(s.stage)])
     );
     if (!(data.stages || []).length) {
       $("sensors-stages").innerHTML = `<div class="muted">No stage data</div>`;
