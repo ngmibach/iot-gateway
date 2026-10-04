@@ -61,6 +61,30 @@ def _backup_if_exists(ssh: "SSHClient", path: str) -> Optional[str]:
     return None
 
 
+def _restore_backups(
+    ssh: "SSHClient",
+    bak: dict[str, Optional[str]],
+    paths: GatewayPaths,
+) -> None:
+    dest_map = {
+        "ca_crt": paths.ca_crt,
+        "ca_key": paths.ca_key,
+        "server_crt": paths.server_crt,
+        "server_key": paths.server_key,
+        "server_pem": paths.server_pem,
+    }
+    for name, bak_path in bak.items():
+        if not bak_path:
+            continue
+        dest = dest_map.get(name)
+        if dest is None:
+            continue
+        try:
+            ssh.restore_backup(dest, bak_path)
+        except Exception:
+            pass
+
+
 def _install_server_files(
     ssh: "SSHClient",
     paths: GatewayPaths,
@@ -90,6 +114,85 @@ def _restart_tls_frontends(ssh: "SSHClient", paths: GatewayPaths) -> dict[str, s
     return {"mosquitto": "restart", "haproxy": mode}
 
 
+def _resolve_device_ids(
+    device_ids: Sequence[str] | None,
+    registry: "Registry | None",
+    gateway_id: str | None,
+) -> list[str]:
+    """Require an explicit device source so CA rotate cannot silently skip clients."""
+    if device_ids is not None:
+        return [d for d in device_ids if d]
+    if registry is not None and gateway_id is not None:
+        return [d["id"] for d in registry.list_devices(gateway_id)]
+    raise ValueError("rotate_ca requires device_ids=... or registry+gateway_id")
+
+
+def _commit_registry_reissues(
+    registry: "Registry",
+    gateway_id: str,
+    reissued: list["DeviceReissue"],
+    *,
+    gateway_ip: str,
+) -> None:
+    """Write cert metadata + audit only after every device was reissued."""
+    for item in reissued:
+        expires: Any = None
+        if item.not_valid_after is not None:
+            expires = int(item.not_valid_after.timestamp())
+        registry.upsert_device(
+            gateway_id,
+            item.device_id,
+            cert_expires_at=expires,
+            cert_fingerprint=item.fingerprint_sha256,
+        )
+        registry.audit(
+            "rotate_ca_reissue_device",
+            gateway_id=gateway_id,
+            device_id=item.device_id,
+            detail={"fingerprint": item.fingerprint_sha256},
+        )
+    registry.audit(
+        "rotate_ca",
+        gateway_id=gateway_id,
+        detail={
+            "gateway_ip": gateway_ip,
+            "device_count": len(reissued),
+            "san": f"IP:{gateway_ip}",
+        },
+    )
+
+
+def _snapshot_device_certs(
+    registry: "Registry",
+    gateway_id: str,
+    device_ids: Sequence[str],
+) -> dict[str, tuple[Any, Any]]:
+    snap: dict[str, tuple[Any, Any]] = {}
+    for device_id in device_ids:
+        row = registry.get_device(gateway_id, device_id)
+        if row is None:
+            continue
+        snap[device_id] = (row["cert_expires_at"], row["cert_fingerprint"])
+    return snap
+
+
+def _revert_device_certs(
+    registry: "Registry",
+    gateway_id: str,
+    snapshot: dict[str, tuple[Any, Any]],
+) -> None:
+    for device_id, (expires, fingerprint) in snapshot.items():
+        try:
+            registry.upsert_device(
+                gateway_id,
+                device_id,
+                cert_expires_at=expires,
+                cert_fingerprint=fingerprint,
+            )
+        except Exception:
+            pass
+
+
 @dataclass
 class RotateServerResult:
     ok: bool
@@ -100,6 +203,8 @@ class RotateServerResult:
     not_valid_after: Optional[datetime] = None
     fingerprint_sha256: Optional[str] = None
     details: dict[str, Any] = field(default_factory=dict)
+    # TODO(control-api): optional registry+gateway_id audit / gateway meta_json
+    # expiry when Actions API wires rotate-server (gateways have no cert columns).
 
 
 @dataclass
@@ -115,6 +220,14 @@ class DeviceReissue:
 
 @dataclass
 class RotateCAResult:
+    """Break-glass CA rotate outcome.
+
+    Contract: only ``ok=True`` means redistribute ``devices`` bundles.
+    ``status="reload_failed"`` keeps new CA/server/device material on disk
+    (and registry, when provided) but TLS frontends may still serve the old
+    trust store — do **not** redistribute until mosquitto/haproxy reload.
+    """
+
     ok: bool
     status: str = "ok"
     message: str = ""
@@ -205,18 +318,7 @@ def rotate_server_cert(
             },
         )
     except Exception as exc:
-        for name, bak_path in bak.items():
-            if not bak_path:
-                continue
-            dest = {
-                "server_crt": paths.server_crt,
-                "server_key": paths.server_key,
-                "server_pem": paths.server_pem,
-            }[name]
-            try:
-                ssh.restore_backup(dest, bak_path)
-            except Exception:
-                pass
+        _restore_backups(ssh, bak, paths)
         return RotateServerResult(
             ok=False,
             status="failed",
@@ -339,13 +441,20 @@ def rotate_ca(
 ) -> RotateCAResult:
     """Break-glass: new CA + server (IP SAN) + reissue all registry devices.
 
-    Requires ``confirm_break_glass=True``. Client keys use the CSR/sign flow
-    (``generate_client_key_and_csr`` + ``sign_csr_on_gateway``). Caller must
-    redistribute returned device bundles; registry cert metadata is updated
-    when ``registry`` + ``gateway_id`` are provided.
+    Requires ``confirm_break_glass=True`` and an explicit device source
+    (``device_ids=...``, including ``[]`` for an empty gateway, **or**
+    ``registry`` + ``gateway_id``). Client keys use the CSR/sign flow.
+
+    Registry cert metadata is written only after every device reissue
+    succeeds. On mid-reissue failure, gateway files are restored and the
+    registry is left untouched. TLS reload failure returns
+    ``ok=False, status="reload_failed"`` — do not redistribute bundles yet
+    (see ``RotateCAResult``).
     """
     bak: dict[str, Optional[str]] = {}
     paths = _paths(install_root)
+    registry_snapshot: dict[str, tuple[Any, Any]] = {}
+    registry_committed = False
     try:
         if not confirm_break_glass:
             raise ValueError(
@@ -353,14 +462,7 @@ def rotate_ca(
             )
         gateway_ip = _validate_gateway_ip(gateway_ip)
         _reject_admin(ca_passphrase, reject=reject_default_admin_passphrase)
-
-        ids: list[str]
-        if device_ids is not None:
-            ids = [d for d in device_ids if d]
-        elif registry is not None and gateway_id is not None:
-            ids = [d["id"] for d in registry.list_devices(gateway_id)]
-        else:
-            ids = []
+        ids = _resolve_device_ids(device_ids, registry, gateway_id)
 
         bak = {
             "ca_crt": _backup_if_exists(ssh, paths.ca_crt),
@@ -403,57 +505,45 @@ def rotate_ca(
             server_key_pem=server_mat.private_key_pem,
         )
 
+        # Collect all reissues before touching registry (Issue 1).
         reissued: list[DeviceReissue] = []
         for device_id in ids:
             mat = (device_key_material or {}).get(device_id)
-            item = _reissue_device(
-                ssh,
-                paths,
-                device_id,
-                ca_passphrase,
-                days=client_days,
-                reject_default_admin_passphrase=reject_default_admin_passphrase,
-                key_material=mat,
-            )
-            reissued.append(item)
-            if registry is not None and gateway_id is not None:
-                expires: Any = None
-                if item.not_valid_after is not None:
-                    expires = int(item.not_valid_after.timestamp())
-                registry.upsert_device(
-                    gateway_id,
+            reissued.append(
+                _reissue_device(
+                    ssh,
+                    paths,
                     device_id,
-                    cert_expires_at=expires,
-                    cert_fingerprint=item.fingerprint_sha256,
+                    ca_passphrase,
+                    days=client_days,
+                    reject_default_admin_passphrase=reject_default_admin_passphrase,
+                    key_material=mat,
                 )
-                registry.audit(
-                    "rotate_ca_reissue_device",
-                    gateway_id=gateway_id,
-                    device_id=device_id,
-                    detail={"fingerprint": item.fingerprint_sha256},
-                )
+            )
 
         if registry is not None and gateway_id is not None:
-            registry.audit(
-                "rotate_ca",
-                gateway_id=gateway_id,
-                detail={
-                    "gateway_ip": gateway_ip,
-                    "device_count": len(reissued),
-                    "san": f"IP:{gateway_ip}",
-                },
+            registry_snapshot = _snapshot_device_certs(registry, gateway_id, ids)
+            _commit_registry_reissues(
+                registry,
+                gateway_id,
+                reissued,
+                gateway_ip=gateway_ip,
             )
+            registry_committed = True
 
         ca_crt = ssh.read_bytes(paths.ca_crt)
         try:
             services = _restart_tls_frontends(ssh, paths)
         except Exception as exc:
+            # Files (+ registry) already match the new CA; do not roll back.
+            # Callers must not redistribute until TLS frontends reload.
             return RotateCAResult(
-                ok=True,
-                status="degraded",
+                ok=False,
+                status="reload_failed",
                 message=(
-                    "CA/server/device certs written but service reload failed: "
-                    f"{exc}"
+                    "CA/server/device certs written but TLS reload failed; "
+                    "do not redistribute bundles until mosquitto/haproxy "
+                    f"reload succeeds: {exc}"
                 ),
                 ca_crt_pem=ca_crt,
                 server_crt_pem=server_signed.client_crt_pem,
@@ -464,6 +554,7 @@ def rotate_ca(
                     "device_ids": ids,
                     "backups": bak,
                     "services": "failed",
+                    "redistribute": False,
                 },
             )
         return RotateCAResult(
@@ -478,23 +569,13 @@ def rotate_ca(
                 "device_ids": ids,
                 "backups": bak,
                 "services": services,
+                "redistribute": True,
             },
         )
     except Exception as exc:
-        for name, bak_path in bak.items():
-            if not bak_path:
-                continue
-            dest = {
-                "ca_crt": paths.ca_crt,
-                "ca_key": paths.ca_key,
-                "server_crt": paths.server_crt,
-                "server_key": paths.server_key,
-                "server_pem": paths.server_pem,
-            }[name]
-            try:
-                ssh.restore_backup(dest, bak_path)
-            except Exception:
-                pass
+        _restore_backups(ssh, bak, paths)
+        if registry_committed and registry is not None and gateway_id is not None:
+            _revert_device_certs(registry, gateway_id, registry_snapshot)
         return RotateCAResult(
             ok=False,
             status="failed",

@@ -112,10 +112,29 @@ def _openssl_handler(
     ca_key: rsa.RSAPrivateKey,
     ca_crt_pem: bytes,
     gateway_ip: str = GATEWAY_IP,
+    fail_x509_on: int | None = None,
+    fail_restart: bool = False,
 ):
-    """Simulate gateway openssl: genrsa / req -x509 / x509 -req (+ SAN)."""
+    """Simulate gateway openssl: genrsa / req -x509 / x509 -req (+ SAN).
+
+    ``fail_x509_on``: 1-based count of ``openssl x509 -req`` calls to fail.
+    ``fail_restart``: raise on mosquitto/haproxy restart commands.
+    """
+    state = {"x509_count": 0}
 
     def run_handler(cmd: str) -> CommandResult:
+        if fail_restart and (
+            "restart mosquitto" in cmd
+            or "restart haproxy" in cmd
+            or "docker kill -s HUP" in cmd
+        ):
+            return CommandResult(
+                argv=cmd,
+                exit_code=1,
+                stdout="",
+                stderr="simulated reload failure",
+            )
+
         parts = cmd.split()
         if "openssl genrsa" in cmd:
             out = parts[parts.index("-out") + 1].strip("'")
@@ -143,10 +162,17 @@ def _openssl_handler(
                     assert isinstance(loaded, rsa.RSAPrivateKey)
                     new_key = loaded
             ssh.files[out] = _self_signed_ca(new_key)
-            # Keep handler ca_crt in sync when installing via rotate later.
             return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
 
         if "openssl x509 -req" in cmd:
+            state["x509_count"] += 1
+            if fail_x509_on is not None and state["x509_count"] == fail_x509_on:
+                return CommandResult(
+                    argv=cmd,
+                    exit_code=1,
+                    stdout="",
+                    stderr="simulated sign failure",
+                )
             out = parts[parts.index("-out") + 1].strip("'")
             in_path = parts[parts.index("-in") + 1].strip("'")
             csr_pem = ssh.files[in_path]
@@ -277,6 +303,28 @@ class TestRotateServerCert(unittest.TestCase):
         self.assertTrue(any("-extfile" in c for c in ssh.commands))
         self.assertFalse(any("passin pass:" in c for c in ssh.commands))
 
+    def test_rotate_server_reload_failure_degraded(self) -> None:
+        ssh = FakeSSH(_base_files(self.ca_key, self.ca_crt))
+        ssh._run_handler = _openssl_handler(
+            ssh,
+            ca_key=self.ca_key,
+            ca_crt_pem=self.ca_crt,
+            fail_restart=True,
+        )
+        mat = generate_client_key_and_csr(cn=GATEWAY_IP, org_unit="Broker")
+        result = rotate_server_cert(
+            ssh,  # type: ignore[arg-type]
+            gateway_ip=GATEWAY_IP,
+            ca_passphrase="not-admin",
+            key_material=mat,
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(result.status, "degraded")
+        self.assertIn("service reload failed", result.message)
+        # New server cert stays installed (no rollback).
+        self.assertIn(b"BEGIN CERTIFICATE", ssh.read_bytes(f"{ROOT}/certs/server.crt"))
+        self.assertNotEqual(ssh.read_bytes(f"{ROOT}/certs/server.pem"), b"old-pem")
+
 
 class TestRotateCA(unittest.TestCase):
     def setUp(self) -> None:
@@ -291,8 +339,20 @@ class TestRotateCA(unittest.TestCase):
             install_root=ROOT,
             fingerprint="abc",
         )
-        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.1")
-        self.registry.upsert_device("gw1", "sensor2", ip="10.0.0.2")
+        self.registry.upsert_device(
+            "gw1",
+            "sensor1",
+            ip="10.0.0.1",
+            cert_fingerprint="old-fp-1",
+            cert_expires_at=111,
+        )
+        self.registry.upsert_device(
+            "gw1",
+            "sensor2",
+            ip="10.0.0.2",
+            cert_fingerprint="old-fp-2",
+            cert_expires_at=222,
+        )
 
     def tearDown(self) -> None:
         self.registry.close()
@@ -309,6 +369,34 @@ class TestRotateCA(unittest.TestCase):
         )
         self.assertFalse(result.ok)
         self.assertIn("break-glass", result.message)
+
+    def test_requires_device_source(self) -> None:
+        ssh = FakeSSH(_base_files(self.ca_key, self.ca_crt))
+        result = rotate_ca(
+            ssh,  # type: ignore[arg-type]
+            gateway_ip=GATEWAY_IP,
+            ca_passphrase="not-admin",
+            confirm_break_glass=True,
+        )
+        self.assertFalse(result.ok)
+        self.assertIn("device_ids", result.message)
+        # Explicit empty list remains the intentional no-device escape hatch.
+        ssh2 = FakeSSH(_base_files(self.ca_key, self.ca_crt))
+        ssh2._run_handler = _openssl_handler(
+            ssh2, ca_key=self.ca_key, ca_crt_pem=self.ca_crt
+        )
+        empty = rotate_ca(
+            ssh2,  # type: ignore[arg-type]
+            gateway_ip=GATEWAY_IP,
+            ca_passphrase="not-admin",
+            confirm_break_glass=True,
+            device_ids=[],
+            server_key_material=generate_client_key_and_csr(
+                cn=GATEWAY_IP, org_unit="Broker"
+            ),
+        )
+        self.assertTrue(empty.ok, empty.message)
+        self.assertEqual(empty.devices, [])
 
     def test_rotate_ca_reissues_registry_devices(self) -> None:
         ssh = FakeSSH(_base_files(self.ca_key, self.ca_crt))
@@ -335,6 +423,7 @@ class TestRotateCA(unittest.TestCase):
         self.assertEqual({d.device_id for d in result.devices}, {"sensor1", "sensor2"})
         self.assertIsNotNone(result.ca_crt_pem)
         self.assertIsNotNone(result.server_crt_pem)
+        self.assertTrue(result.details.get("redistribute"))
 
         runs = ssh.commands
         self.assertTrue(any("-passout file:/tmp/iotgw-ca-pass-" in c for c in runs))
@@ -358,6 +447,7 @@ class TestRotateCA(unittest.TestCase):
             row = self.registry.get_device("gw1", device_id)
             assert row is not None
             self.assertIsNotNone(row["cert_fingerprint"])
+            self.assertNotEqual(row["cert_fingerprint"], f"old-fp-{device_id[-1]}")
             self.assertIsNotNone(row["cert_expires_at"])
 
         audit = self.registry.list_audit(gateway_id="gw1")
@@ -369,6 +459,93 @@ class TestRotateCA(unittest.TestCase):
             self.assertIn(b"BEGIN CERTIFICATE", item.client_crt_pem)
             self.assertIn(b"BEGIN RSA PRIVATE KEY", item.client_key_pem)
             self.assertTrue(item.cert_bundle)
+
+    def test_mid_reissue_failure_restores_files_and_skips_registry(self) -> None:
+        """Fail on 3rd x509 -req (server + sensor1 ok, sensor2 fails)."""
+        files = _base_files(self.ca_key, self.ca_crt)
+        old_ca = files[f"{ROOT}/certs/ca.crt"]
+        old_pem = files[f"{ROOT}/certs/server.pem"]
+        ssh = FakeSSH(files)
+        # 1=server, 2=sensor1, 3=sensor2
+        ssh._run_handler = _openssl_handler(
+            ssh,
+            ca_key=self.ca_key,
+            ca_crt_pem=self.ca_crt,
+            fail_x509_on=3,
+        )
+        mats = {
+            "sensor1": generate_client_key_and_csr("sensor1"),
+            "sensor2": generate_client_key_and_csr("sensor2"),
+        }
+        result = rotate_ca(
+            ssh,  # type: ignore[arg-type]
+            gateway_ip=GATEWAY_IP,
+            ca_passphrase="not-admin",
+            confirm_break_glass=True,
+            registry=self.registry,
+            gateway_id="gw1",
+            server_key_material=generate_client_key_and_csr(
+                cn=GATEWAY_IP, org_unit="Broker"
+            ),
+            device_key_material=mats,
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.devices, [])
+        # Gateway files restored to pre-rotate backups.
+        self.assertEqual(ssh.read_text(f"{ROOT}/certs/ca.crt"), old_ca)
+        self.assertEqual(ssh.read_text(f"{ROOT}/certs/server.pem"), old_pem)
+        # Registry fingerprints untouched (deferred commit).
+        for device_id, fp, exp in (
+            ("sensor1", "old-fp-1", 111),
+            ("sensor2", "old-fp-2", 222),
+        ):
+            row = self.registry.get_device("gw1", device_id)
+            assert row is not None
+            self.assertEqual(row["cert_fingerprint"], fp)
+            self.assertEqual(row["cert_expires_at"], exp)
+        audit_actions = {a["action"] for a in self.registry.list_audit(gateway_id="gw1")}
+        self.assertNotIn("rotate_ca", audit_actions)
+        self.assertNotIn("rotate_ca_reissue_device", audit_actions)
+
+    def test_reload_failure_ok_false_no_redistribute(self) -> None:
+        ssh = FakeSSH(_base_files(self.ca_key, self.ca_crt))
+        ssh._run_handler = _openssl_handler(
+            ssh,
+            ca_key=self.ca_key,
+            ca_crt_pem=self.ca_crt,
+            fail_restart=True,
+        )
+        mats = {
+            "sensor1": generate_client_key_and_csr("sensor1"),
+            "sensor2": generate_client_key_and_csr("sensor2"),
+        }
+        result = rotate_ca(
+            ssh,  # type: ignore[arg-type]
+            gateway_ip=GATEWAY_IP,
+            ca_passphrase="not-admin",
+            confirm_break_glass=True,
+            registry=self.registry,
+            gateway_id="gw1",
+            server_key_material=generate_client_key_and_csr(
+                cn=GATEWAY_IP, org_unit="Broker"
+            ),
+            device_key_material=mats,
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.status, "reload_failed")
+        self.assertFalse(result.details.get("redistribute"))
+        self.assertIn("do not redistribute", result.message)
+        self.assertEqual(len(result.devices), 2)
+        # New material kept on disk + registry (matches files).
+        self.assertNotEqual(
+            ssh.read_bytes(f"{ROOT}/certs/ca.crt"),
+            self.ca_crt,
+        )
+        for device_id in ("sensor1", "sensor2"):
+            row = self.registry.get_device("gw1", device_id)
+            assert row is not None
+            self.assertNotEqual(row["cert_fingerprint"], f"old-fp-{device_id[-1]}")
 
     def test_rotate_ca_rejects_admin(self) -> None:
         ssh = FakeSSH(_base_files(self.ca_key, self.ca_crt))
