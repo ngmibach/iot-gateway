@@ -1,2 +1,3 @@
-paramiko>=3.4
+# SSH transport for provisioner / action playbooks.
+paramiko>=3.4,<4
 cryptography>=42.0
