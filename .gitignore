@@ -12,3 +12,7 @@ gateway/logs/gateway-state.log
 *.key
 *.csr
 *.pem
+
+__pycache__/
+*.py[cod]
+*.sqlite
