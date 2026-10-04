@@ -1,4 +1,8 @@
-"""SQLite DDL for registry.sqlite."""
+"""SQLite DDL for registry.sqlite.
+
+Column names follow DESIGN-packaged-app.md (data_json / ts / detail_json).
+audit_log also keeps device_id + actor for action attribution.
+"""
 
 SCHEMA_SQL = """
 CREATE TABLE IF NOT EXISTS gateways (
@@ -30,7 +34,7 @@ CREATE TABLE IF NOT EXISTS devices (
 );
 
 CREATE TABLE IF NOT EXISTS imported_allowlist_ips (
-  gateway_id TEXT NOT NULL,
+  gateway_id TEXT NOT NULL REFERENCES gateways(id),
   ip TEXT NOT NULL,
   linked_device_id TEXT,
   PRIMARY KEY (gateway_id, ip)
@@ -40,30 +44,24 @@ CREATE TABLE IF NOT EXISTS state_snapshots (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp INTEGER NOT NULL,
   state_type TEXT NOT NULL,
-  payload TEXT NOT NULL
+  data_json TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS audit_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
-  timestamp INTEGER NOT NULL,
+  ts INTEGER NOT NULL,
   action TEXT NOT NULL,
   gateway_id TEXT,
   device_id TEXT,
-  detail TEXT,
+  detail_json TEXT,
   actor TEXT
 );
-
-CREATE INDEX IF NOT EXISTS idx_devices_gateway
-  ON devices (gateway_id);
 
 CREATE INDEX IF NOT EXISTS idx_devices_monitor
   ON devices (gateway_id, monitor_enabled);
 
-CREATE INDEX IF NOT EXISTS idx_allowlist_gateway
-  ON imported_allowlist_ips (gateway_id);
-
 CREATE INDEX IF NOT EXISTS idx_audit_ts
-  ON audit_log (timestamp DESC);
+  ON audit_log (ts DESC);
 
 CREATE INDEX IF NOT EXISTS idx_snapshots_type_ts
   ON state_snapshots (state_type, timestamp DESC);
