@@ -14,6 +14,7 @@ from provisioner.provision import (
     ProvisionError,
     _parse_df_available_bytes,
     latest_backup_path,
+    list_remote_backups,
     provision,
     rollback_install,
 )
@@ -99,6 +100,58 @@ class BackupPathTests(unittest.TestCase):
             "/opt/iot-gateway.bak-250",
         )
         self.assertIsNone(latest_backup_path(paths, "/opt/missing"))
+
+    def test_list_remote_backups_uses_find_name(self) -> None:
+        ssh = FakeSSH()
+        ssh.when(
+            "find ",
+            CommandResult(
+                0,
+                "/opt/iot-gateway.bak-100\n/opt/iot-gateway.bak-250\n/opt/other.bak-999\n",
+                "",
+            ),
+        )
+        found = list_remote_backups(ssh, DEFAULT_INSTALL_ROOT)
+        self.assertEqual(
+            found,
+            [
+                "/opt/iot-gateway.bak-100",
+                "/opt/iot-gateway.bak-250",
+                "/opt/other.bak-999",
+            ],
+        )
+        cmd = ssh.commands[0]
+        self.assertIn("find ", cmd)
+        self.assertIn("-name ", cmd)
+        # Glob must be its own quoted -name arg, not glued into a quoted path* pattern.
+        self.assertIn("iot-gateway.bak-*", cmd)
+        self.assertNotIn("/opt/iot-gateway.bak-*", cmd)
+        self.assertTrue(
+            latest_backup_path(found, DEFAULT_INSTALL_ROOT)
+            == "/opt/iot-gateway.bak-250"
+        )
+
+    def test_rollback_discovers_newest_backup(self) -> None:
+        ssh = FakeSSH()
+        ssh.when(
+            "find ",
+            CommandResult(
+                0,
+                "/opt/iot-gateway.bak-100\n/opt/iot-gateway.bak-250\n",
+                "",
+            ),
+        )
+        ssh.when("docker compose", CommandResult(0, "", ""))
+        ssh.when("rm -rf", CommandResult(0, "", ""))
+        ssh.when("mv ", CommandResult(0, "", ""))
+        restored = rollback_install(ssh, DEFAULT_INSTALL_ROOT, backup_path=None)
+        self.assertEqual(restored, "/opt/iot-gateway.bak-250")
+        self.assertTrue(
+            any(
+                c.startswith("mv ") and "/opt/iot-gateway.bak-250" in c
+                for c in ssh.commands
+            )
+        )
 
 
 class BundleStageTests(unittest.TestCase):

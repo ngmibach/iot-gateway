@@ -191,10 +191,14 @@ def list_remote_backups(ssh: SSHSession, install_root: str) -> list[str]:
     install_root = install_root.rstrip("/")
     parent = _remote_parent(install_root)
     base = install_root.rsplit("/", 1)[-1]
-    pattern = f"{parent}/{base}.bak-*"
-    result = ssh.run(f"ls -1d {shlex.quote(pattern)} 2>/dev/null || true", timeout=15.0)
+    # Quote path + -name separately so the glob is not literalized by shlex.quote.
+    name_pat = f"{base}.bak-*"
+    result = ssh.run(
+        f"find {shlex.quote(parent)} -maxdepth 1 -type d -name {shlex.quote(name_pat)} "
+        f"2>/dev/null || true",
+        timeout=15.0,
+    )
     paths = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
-    # ls may echo the literal glob when nothing matches.
     return [p for p in paths if re.search(r"\.bak-\d+$", p)]
 
 
