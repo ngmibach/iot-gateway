@@ -1,70 +1,125 @@
-"""Sanitized support-bundle export (no secrets / PEMs / keyring material)."""
+"""Sanitized support-bundle export (no secrets / private PEMs / keyring material)."""
 
 from __future__ import annotations
 
-import io
 import json
 import os
 import re
-import tarfile
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Mapping, Optional
-
-# Values for these keys are always replaced (case-insensitive, nested).
-SECRET_KEY_FRAGMENTS = (
-    "password",
-    "passwd",
-    "passphrase",
-    "secret",
-    "token",
-    "api_key",
-    "apikey",
-    "private_key",
-    "privkey",
-    "ssh_key",
-    "ca_pass",
-    "keyring",
-    "credential",
-    "auth_header",
-    "authorization",
-)
+from typing import Any, Mapping, Optional, Sequence
 
 REDACTED = "[REDACTED]"
 
-_PEM_RE = re.compile(
-    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----"
-    r"|-----BEGIN CERTIFICATE-----.*?-----END CERTIFICATE-----"
-    r"|-----BEGIN ENCRYPTED PRIVATE KEY-----.*?-----END ENCRYPTED PRIVATE KEY-----",
+# Exact key names that look secret-ish but are safe diagnostics.
+_SECRET_KEY_ALLOWLIST = frozenset(
+    {
+        "password_auth_enabled",
+    }
+)
+
+# Whole-key names treated as secrets (after lower/underscore normalize).
+_SECRET_KEYS_EXACT = frozenset(
+    {
+        "password",
+        "passwd",
+        "passphrase",
+        "secret",
+        "token",
+        "api_key",
+        "apikey",
+        "private_key",
+        "privkey",
+        "ssh_key",
+        "ca_pass",
+        "ca_passphrase",
+        "keyring",
+        "credential",
+        "credentials",
+        "auth_header",
+        "authorization",
+        "basic_auth",
+        "signing_key",
+        "client_secret",
+        "api_token",
+        "ssh_password",
+    }
+)
+
+# Suffixes that mark a key as secret (e.g. mqtt_password, refresh_token).
+_SECRET_KEY_SUFFIXES = (
+    "_password",
+    "_passwd",
+    "_passphrase",
+    "_secret",
+    "_token",
+    "_api_key",
+    "_apikey",
+    "_private_key",
+    "_privkey",
+    "_credential",
+    "_credentials",
+    "_basic_auth",
+    "_signing_key",
+    "_ca_pass",
+)
+
+# Private key PEM only — public certificates stay for TLS debugging.
+_PEM_PRIVATE_RE = re.compile(
+    r"-----BEGIN [^-]*PRIVATE KEY-----.*?-----END [^-]*PRIVATE KEY-----",
     re.DOTALL | re.IGNORECASE,
 )
 
-_BEARER_RE = re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE)
+_BEARER_RE = re.compile(r"(Bearer\s+)\S+", re.IGNORECASE)
 _PASS_ARGV_RE = re.compile(
-    r"(-pass(?:in|out)\s+(?:pass|file):)\S+",
+    r"(-pass(?:in|out)\s+(?:pass|file|env):)\S+",
     re.IGNORECASE,
+)
+
+# Value-aware: \b so password_auth_enabled=1 is not matched as password=.
+_ASSIGN_SECRET_RE = re.compile(
+    r"(?i)\b(password|passwd|passphrase|token|secret|api[_-]?key|apikey)"
+    r"\b\s*[=:]\s*\S+"
+)
+_IOTGW_ENV_SECRET_RE = re.compile(
+    r"(?i)\b(IOTGW_(?:API_TOKEN|SSH_PASSWORD|CA_PASSPHRASE|SSH_KEY))\s*=\s*\S+"
 )
 
 
 def _key_is_secret(key: str) -> bool:
     lowered = key.lower().replace("-", "_")
-    # Paths/filenames are safe to export; file *contents* are not in settings.
-    if lowered.endswith("_path") or lowered.endswith("_file") or lowered.endswith("_dir"):
+    if lowered in _SECRET_KEY_ALLOWLIST:
+        return False
+    # Paths/filenames are safe to export; file contents are not in settings.
+    if lowered.endswith(("_path", "_file", "_dir")):
         return any(
-            frag in lowered
-            for frag in ("password", "passwd", "passphrase", "token", "secret")
-        )
-    return any(frag in lowered for frag in SECRET_KEY_FRAGMENTS)
+            lowered == s or lowered.endswith(s)
+            for s in (
+                "_password",
+                "_passwd",
+                "_passphrase",
+                "_token",
+                "_secret",
+            )
+        ) or lowered in {"password", "passwd", "passphrase", "token", "secret"}
+    if lowered in _SECRET_KEYS_EXACT:
+        return True
+    return any(lowered.endswith(suf) for suf in _SECRET_KEY_SUFFIXES)
 
 
 def redact_string(text: str) -> str:
-    """Strip PEMs and common secret argv / bearer forms from free text."""
+    """Strip private PEMs and common secret argv / env / assignment forms."""
     if not text:
         return text
-    out = _PEM_RE.sub(REDACTED, text)
+    out = _PEM_PRIVATE_RE.sub(REDACTED, text)
     out = _BEARER_RE.sub(rf"\1{REDACTED}", out)
     out = _PASS_ARGV_RE.sub(rf"\1{REDACTED}", out)
+    out = _IOTGW_ENV_SECRET_RE.sub(lambda m: f"{m.group(1)}={REDACTED}", out)
+    out = _ASSIGN_SECRET_RE.sub(
+        lambda m: f"{m.group(1)}={REDACTED}",
+        out,
+    )
     return out
 
 
@@ -93,7 +148,6 @@ def redact_value(value: Any, *, key: str | None = None) -> Any:
     if isinstance(value, str):
         parsed = _maybe_parse_json(value)
         if parsed is not None:
-            # Re-serialize so nested secret keys inside detail_json are wiped
             return json.dumps(
                 redact_value(parsed), ensure_ascii=False, separators=(",", ":")
             )
@@ -102,24 +156,19 @@ def redact_value(value: Any, *, key: str | None = None) -> Any:
 
 
 def settings_public(settings: Any) -> dict[str, Any]:
-    """Serialize Settings-like object with secrets removed."""
+    """Serialize Settings dataclass or mapping with secrets removed."""
     if hasattr(settings, "__dataclass_fields__"):
         raw = {f: getattr(settings, f) for f in settings.__dataclass_fields__}
     elif isinstance(settings, Mapping):
         raw = dict(settings)
     else:
-        raw = {
-            k: getattr(settings, k)
-            for k in dir(settings)
-            if not k.startswith("_") and not callable(getattr(settings, k, None))
-        }
-    # Paths → str for JSON
+        raise TypeError(
+            "settings_public expects a dataclass or mapping, "
+            f"got {type(settings).__name__}"
+        )
     out: dict[str, Any] = {}
     for k, v in raw.items():
-        if isinstance(v, Path):
-            out[k] = str(v)
-        else:
-            out[k] = v
+        out[k] = str(v) if isinstance(v, Path) else v
     return redact_value(out)  # type: ignore[return-value]
 
 
@@ -143,7 +192,7 @@ def collect_bundle_payload(
         "meta": {
             "created_at": created,
             "format": "iotgw-support-bundle/v1",
-            "note": "Secrets, PEMs, and keyring material are redacted.",
+            "note": "Secrets, private PEMs, and keyring material are redacted.",
         },
         "settings": settings_public(settings) if settings is not None else {},
         "gateways": [],
@@ -167,8 +216,6 @@ def collect_bundle_payload(
                 continue
             try:
                 devices.extend(registry.list_devices(gid))
-            except TypeError:
-                devices.extend(registry.list_devices(gateway_id=gid))
             except Exception as exc:  # pragma: no cover
                 payload.setdefault("devices_errors", []).append(
                     {"gateway_id": gid, "error": str(exc)}
@@ -179,13 +226,11 @@ def collect_bundle_payload(
         except Exception as exc:  # pragma: no cover
             payload["audit_error"] = str(exc)
             audit = []
-        # Drop any PEM / secret leakage that may have landed in detail_json
         payload["audit_log"] = redact_value(audit)
 
     log_text = control_logs
     if log_text is None and log_path is not None and Path(log_path).is_file():
         try:
-            # Cap size so bundles stay small
             raw = Path(log_path).read_text(encoding="utf-8", errors="replace")
             if len(raw) > 512_000:
                 raw = raw[-512_000:]
@@ -208,15 +253,8 @@ def write_support_bundle(
     control_logs: Optional[str] = None,
     log_path: Optional[Path] = None,
     extra: Optional[Mapping[str, Any]] = None,
-    fmt: str = "zip",
 ) -> Path:
-    """Write a sanitized support archive to ``dest`` (``.zip`` or ``.tar.gz``).
-
-    Returns the path written. Contents:
-    - ``meta.json`` / ``settings.json`` / ``registry.json`` / ``gateway_status.json``
-    - ``audit_log.json``
-    - ``control.log`` (redacted) when available
-    """
+    """Write a sanitized support ``.zip`` to ``dest``. Returns the path written."""
     dest_path = Path(dest)
     payload = collect_bundle_payload(
         settings=settings,
@@ -244,61 +282,37 @@ def write_support_bundle(
         files["control.log"] = str(payload["control_logs"]).encode("utf-8")
 
     dest_path.parent.mkdir(parents=True, exist_ok=True)
-    fmt_norm = fmt.lower().strip()
-    if fmt_norm in ("tar", "tar.gz", "tgz"):
-        if not str(dest_path).endswith((".tar.gz", ".tgz")):
-            dest_path = dest_path.with_suffix(dest_path.suffix + ".tar.gz")
-        with tarfile.open(dest_path, "w:gz") as tar:
-            for name, data in files.items():
-                info = tarfile.TarInfo(name=name)
-                info.size = len(data)
-                info.mtime = int(time.time())
-                tar.addfile(info, io.BytesIO(data))
-    else:
-        if dest_path.suffix.lower() != ".zip":
-            dest_path = dest_path.with_suffix(".zip")
-        with zipfile.ZipFile(dest_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-            for name, data in files.items():
-                zf.writestr(name, data)
-
+    if dest_path.suffix.lower() != ".zip":
+        dest_path = dest_path.with_suffix(".zip")
+    with zipfile.ZipFile(dest_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        for name, data in files.items():
+            zf.writestr(name, data)
     return dest_path
 
 
-def bundle_contains_forbidden(archive: Path | str) -> list[str]:
-    """Return list of forbidden substrings found (for tests / CI checks)."""
+def bundle_contains_forbidden(
+    archive: Path | str,
+    *,
+    forbidden_substrings: Optional[Sequence[str]] = None,
+) -> list[str]:
+    """Return forbidden markers found in zip members (for tests / CI)."""
     path = Path(archive)
-    hits: list[str] = []
-    forbidden = (
+    markers = list(forbidden_substrings) if forbidden_substrings is not None else [
         "BEGIN PRIVATE KEY",
         "BEGIN RSA PRIVATE KEY",
         "BEGIN ENCRYPTED PRIVATE KEY",
-        "BEGIN CERTIFICATE",
-    )
-    data = path.read_bytes()
-    # Also open members so binary zip local headers don't matter
+        "BEGIN OPENSSH PRIVATE KEY",
+    ]
     texts: list[str] = []
     if zipfile.is_zipfile(path):
         with zipfile.ZipFile(path) as zf:
             for name in zf.namelist():
                 texts.append(zf.read(name).decode("utf-8", errors="replace"))
-    elif tarfile.is_tarfile(path):
-        with tarfile.open(path, "r:*") as tar:
-            for m in tar.getmembers():
-                if not m.isfile():
-                    continue
-                f = tar.extractfile(m)
-                if f is not None:
-                    texts.append(f.read().decode("utf-8", errors="replace"))
     else:
-        texts.append(data.decode("utf-8", errors="replace"))
+        texts.append(path.read_bytes().decode("utf-8", errors="replace"))
 
     blob = "\n".join(texts)
-    for marker in forbidden:
-        if marker in blob:
-            hits.append(marker)
-    # Plain secret values that should never appear after redaction when tests
-    # inject known markers — callers check those separately.
-    return hits
+    return [m for m in markers if m in blob]
 
 
 def default_bundle_path(data_dir: Path | str | None = None) -> Path:

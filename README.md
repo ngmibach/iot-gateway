@@ -90,7 +90,7 @@ Release binaries (Windows `.msi`/`.exe`, Ubuntu AppImage/`.deb`) are **built uns
 
 ## Gitea control plane — deprecated / optional
 
-Day-2 mutations (register, ACL, allow-list, clear logs) go through the **control service over SSH**. Gitea + runner + seed remain in `monitoring/docker-compose.yaml` only under the Compose profile `legacy-gitea` for brownfield labs. Prefer `USE_LEGACY_GITEA=0` (default) in Streamlit.
+Day-2 mutations (register, ACL, allow-list, clear logs) go through the **control service over SSH**. Gitea + runner + seed remain in `monitoring/docker-compose.yaml` only under the Compose profile `legacy-gitea` for brownfield labs. Leave `USE_LEGACY_GITEA` unset (legacy only enables for `1`/`true`/`yes`).
 
 ```shell
 # Only if you intentionally need the old Actions runner:

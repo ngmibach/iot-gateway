@@ -61,7 +61,7 @@ class LinuxHappyPathMockedTests(unittest.TestCase):
 
 
 class LinuxRegisterApiIntegrationTests(unittest.TestCase):
-    """Register via FastAPI after a mocked provision (still no live SSH)."""
+    """Register via FastAPI with mocked playbook (no live SSH)."""
 
     def setUp(self) -> None:
         self._tmp = tempfile.TemporaryDirectory()
@@ -85,8 +85,8 @@ class LinuxRegisterApiIntegrationTests(unittest.TestCase):
         )
 
         @contextmanager
-        def open_ssh(_gw: dict[str, Any]) -> Iterator[FakeSSH]:
-            yield FakeSSH()
+        def open_ssh(_gw: dict[str, Any]) -> Iterator[Any]:
+            yield object()
 
         self.app = create_app(
             settings=self.settings,
@@ -96,15 +96,7 @@ class LinuxRegisterApiIntegrationTests(unittest.TestCase):
         )
         self.client = TestClient(self.app)
 
-    def test_api_register_after_mock_provision(self) -> None:
-        # Provision is a separate SSH concern; API path registers into registry.
-        prov = mock_provision(
-            FakeSSH(),
-            gateway_ip="192.168.1.50",
-            monitoring_ip="192.168.1.20",
-        )
-        self.assertTrue(prov.ok)
-
+    def test_api_register_upserts_device(self) -> None:
         fake = RegisterResult(
             ok=True,
             status="ok",
