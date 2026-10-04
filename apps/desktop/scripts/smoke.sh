@@ -13,7 +13,11 @@ if [[ -z "$PY" ]]; then
   fi
 fi
 # Absolute path so subshells (cd control-service) still find the interpreter.
-PY="$(cd "$(dirname "$PY")" && pwd)/$(basename "$PY")"
+if [[ "$PY" == */* ]]; then
+  PY="$(cd "$(dirname "$PY")" && pwd)/$(basename "$PY")"
+else
+  PY="$(command -v "$PY")"
+fi
 export PYTHONPATH="$DESKTOP:$CS${PYTHONPATH:+:$PYTHONPATH}"
 export IOTGW_DATA_DIR="${IOTGW_DATA_DIR:-$(mktemp -d /tmp/iotgw-desktop-smoke.XXXXXX)}"
 

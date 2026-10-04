@@ -13,7 +13,16 @@ from actions.validate import validate_ip_or_cidr, validate_topic, validate_user_
 from registry.registry import Registry
 
 from .cert_cache import CertBundleCache
-from .deps import AppState, get_cert_cache, get_registry, get_state, open_ssh_for, require_token
+from .deps import (
+    AppState,
+    get_cert_cache,
+    get_registry,
+    get_state,
+    http_400,
+    open_ssh_for,
+    require_gateway,
+    require_token,
+)
 from .schemas import (
     DeviceOut,
     GatewayOut,
@@ -64,20 +73,6 @@ def _expires_unix(iso: str | None) -> int | None:
         return None
 
 
-def _require_gateway(registry: Registry, gid: str) -> dict[str, Any]:
-    gw = registry.get_gateway(gid)
-    if gw is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"gateway {gid!r} not found",
-        )
-    return gw
-
-
-def _http_400(exc: ValueError) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
-
-
 @router.get("/gateways", response_model=list[GatewayOut])
 def list_gateways(registry: Registry = Depends(get_registry)) -> list[GatewayOut]:
     out: list[GatewayOut] = []
@@ -103,7 +98,7 @@ def list_devices(
     monitor_enabled: Optional[bool] = Query(default=None),
     registry: Registry = Depends(get_registry),
 ) -> list[DeviceOut]:
-    _require_gateway(registry, gid)
+    require_gateway(registry, gid)
     flag = None if monitor_enabled is None else (1 if monitor_enabled else 0)
     return [_device_out(r) for r in registry.list_devices(gid, monitor_enabled=flag)]
 
@@ -120,7 +115,7 @@ def post_register_device(
     registry: Registry = Depends(get_registry),
     cert_cache: CertBundleCache = Depends(get_cert_cache),
 ) -> RegisterDeviceResponse:
-    gw = _require_gateway(registry, gid)
+    gw = require_gateway(registry, gid)
     existing = registry.get_device(gid, body.user_id)
     idempotent = existing is not None
 
@@ -142,7 +137,7 @@ def post_register_device(
         if topic_r is not None:
             topic_r = validate_topic(topic_r)
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
 
     try:
         with open_ssh_for(state, gw) as ssh:
@@ -157,7 +152,7 @@ def post_register_device(
                 ca_passphrase=ca_pass,
             )
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
     except Exception as exc:  # noqa: BLE001 — transport / remote failures
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -214,11 +209,11 @@ def delete_device(
     state: AppState = Depends(get_state),
     registry: Registry = Depends(get_registry),
 ) -> dict[str, Any]:
-    gw = _require_gateway(registry, gid)
+    gw = require_gateway(registry, gid)
     try:
         device_id = validate_user_id(device_id)
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
 
     row = registry.get_device(gid, device_id)
     if row is None:
@@ -237,7 +232,7 @@ def delete_device(
                 install_root=gw["install_root"],
             )
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -269,7 +264,7 @@ def download_cert_bundle(
     cert_cache: CertBundleCache = Depends(get_cert_cache),
 ) -> Response:
     """One-time download; auth is the opaque token (no API token header)."""
-    _require_gateway(registry, gid)
+    require_gateway(registry, gid)
     blob = cert_cache.pop(token, gateway_id=gid, device_id=device_id)
     if blob is None:
         raise HTTPException(

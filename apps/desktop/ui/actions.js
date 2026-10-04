@@ -1,13 +1,5 @@
 /* Native Actions chrome — talks to FastAPI control service (:9137). */
 (function () {
-  const TABS = [
-    { id: "register", label: "Register" },
-    { id: "devices", label: "Devices" },
-    { id: "unregister", label: "Unregister" },
-    { id: "rotate-server", label: "Rotate server" },
-    { id: "rotate-ca", label: "Rotate CA" },
-  ];
-
   const $ = (id) => document.getElementById(id);
 
   function escapeHtml(s) {
@@ -82,24 +74,23 @@
     });
   }
 
-  function buildTabs() {
-    const nav = $("action-tabs");
-    nav.innerHTML = "";
-    TABS.forEach((t, i) => {
-      const b = document.createElement("button");
-      b.textContent = t.label;
-      b.dataset.action = t.id;
-      b.addEventListener("click", () => showTab(t.id));
-      if (i === 0) b.classList.add("active");
-      nav.appendChild(b);
+  function wireTabs() {
+    document.querySelectorAll("#action-tabs button").forEach((btn) => {
+      btn.addEventListener("click", () => showTab(btn.dataset.action));
     });
   }
 
-  function renderDownloadCards(container, gatewayId, items, { warn } = {}) {
+  function renderDownloadCards(container, gatewayId, items, { safekeep } = {}) {
     container.classList.remove("hidden");
-    const warnHtml = warn
-      ? `<div class="note-box danger">${escapeHtml(warn)}</div>`
-      : `<div class="note-box">One-time download (≤5 min). Token is wiped after first GET.</div>`;
+    const ttlNote =
+      '<div class="note-box">One-time download (≤5 min). Token is wiped after first GET — download now to keep a copy.</div>';
+    const warnHtml = safekeep
+      ? `<div class="note-box danger">Do NOT install on devices yet — TLS frontends may still serve the old CA (reload_failed). Download for safekeeping only.</div>${ttlNote}`
+      : ttlNote;
+    const cta = safekeep
+      ? "Download for safekeeping only (do not install on devices yet)"
+      : "Download cert bundle";
+    const btnClass = safekeep ? "btn-dl safekeep" : "btn-dl";
     const cards = (items || [])
       .map((it) => {
         const url =
@@ -111,7 +102,7 @@
         return `<div class="download-card">
           <strong>${escapeHtml(it.device_id)}</strong>
           ${fp}
-          <div><a class="btn-dl" href="${url}" download="${escapeHtml(it.device_id)}-cert-bundle.zip">Download cert bundle</a></div>
+          <div><a class="${btnClass}" href="${url}" download="${escapeHtml(it.device_id)}-cert-bundle.zip">${escapeHtml(cta)}</a></div>
           <div class="mono" style="margin-top:0.35rem">${escapeHtml(url)}</div>
         </div>`;
       })
@@ -250,9 +241,11 @@
       `/api/v1/gateways/${encodeURIComponent(gid)}/actions/rotate-server-cert`,
       { body }
     );
-    $("rs-msg").innerHTML = `<div class="okmsg">Server cert rotated for ${escapeHtml(data.gateway_ip)} (status=${escapeHtml(data.status)}). fp=${escapeHtml(data.fingerprint_sha256 || "")}</div>`;
+    const statusClass = data.status === "ok" ? "okmsg" : "warnmsg";
+    $("rs-msg").innerHTML = `<div class="${statusClass}">Server cert rotated for ${escapeHtml(data.gateway_ip)} (status=${escapeHtml(data.status)}). fp=${escapeHtml(data.fingerprint_sha256 || "")}</div>`;
     if (data.message) {
-      $("rs-msg").innerHTML += `<div class="note-box">${escapeHtml(data.message)}</div>`;
+      const noteClass = data.status === "ok" ? "note-box" : "note-box danger";
+      $("rs-msg").innerHTML += `<div class="${noteClass}">${escapeHtml(data.message)}</div>`;
     }
   }
 
@@ -278,15 +271,13 @@
     $("rca-msg").innerHTML = `<div class="${okClass}">status=${escapeHtml(data.status)} redistribute=${data.redistribute} — ${escapeHtml(data.message || "")}</div>`;
     if (data.devices && data.devices.length) {
       renderDownloadCards($("rca-download"), gid, data.devices, {
-        warn: data.redistribute
-          ? null
-          : "Do NOT redistribute yet — TLS frontends may still serve the old CA (reload_failed).",
+        safekeep: !data.redistribute,
       });
     }
   }
 
   function wire() {
-    buildTabs();
+    wireTabs();
     showTab("register");
     $("btn-ping").addEventListener("click", () => ping().catch(showErr));
     $("btn-load-gw").addEventListener("click", () => refreshGateways().catch(showErr));

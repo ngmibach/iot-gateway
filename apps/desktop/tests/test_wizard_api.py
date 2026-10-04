@@ -62,7 +62,7 @@ class WizardApiTests(unittest.TestCase):
         data = self._get("/api/wizard/control")
         self.assertIn("url", data)
         self.assertTrue(data["url"].startswith("http://127.0.0.1:"))
-        self.assertEqual(data.get("actions_path"), "/actions.html")
+        self.assertNotIn("actions_path", data)
 
     def test_checklist_no_auto_apply(self) -> None:
         # Force a fake WSL IP via settings + detect mock

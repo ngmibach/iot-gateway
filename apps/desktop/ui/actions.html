@@ -36,7 +36,13 @@
       <div id="ctrl-msg"></div>
     </section>
 
-    <nav class="tabs" id="action-tabs"></nav>
+    <nav class="tabs" id="action-tabs">
+      <button type="button" data-action="register" class="active">Register</button>
+      <button type="button" data-action="devices">Devices</button>
+      <button type="button" data-action="unregister">Unregister</button>
+      <button type="button" data-action="rotate-server">Rotate server</button>
+      <button type="button" data-action="rotate-ca">Rotate CA</button>
+    </nav>
 
     <section class="panel action-panel" data-action="register" id="panel-register">
       <h2>Register device</h2>
@@ -118,8 +124,8 @@
         <input id="rca-ip" placeholder="blank → registry host if IP" />
       </div>
       <div class="row">
-        <label for="rca-ca">CA passphrase *</label>
-        <input id="rca-ca" type="password" autocomplete="off" />
+        <label for="rca-ca">CA passphrase</label>
+        <input id="rca-ca" type="password" autocomplete="off" placeholder="blank → IOTGW_CA_PASSPHRASE" />
       </div>
       <div class="row">
         <input type="checkbox" id="rca-confirm" />

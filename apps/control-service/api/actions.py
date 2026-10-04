@@ -11,7 +11,16 @@ from certs.rotate import rotate_ca, rotate_server_cert
 from registry.registry import Registry
 
 from .cert_cache import CertBundleCache
-from .deps import AppState, get_cert_cache, get_registry, get_state, open_ssh_for, require_token
+from .deps import (
+    AppState,
+    get_cert_cache,
+    get_registry,
+    get_state,
+    http_400,
+    open_ssh_for,
+    require_gateway,
+    require_token,
+)
 from .schemas import (
     DeviceBundleToken,
     RotateCARequest,
@@ -21,20 +30,6 @@ from .schemas import (
 )
 
 router = APIRouter(dependencies=[Depends(require_token)])
-
-
-def _require_gateway(registry: Registry, gid: str) -> dict[str, Any]:
-    gw = registry.get_gateway(gid)
-    if gw is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"gateway {gid!r} not found",
-        )
-    return gw
-
-
-def _http_400(exc: ValueError) -> HTTPException:
-    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 def _resolve_gateway_ip(gw: dict[str, Any], override: Optional[str]) -> str:
@@ -73,12 +68,12 @@ def post_rotate_server_cert(
     registry: Registry = Depends(get_registry),
 ) -> RotateServerResponse:
     """Re-issue server cert with IP SAN; keep existing CA."""
-    gw = _require_gateway(registry, gid)
+    gw = require_gateway(registry, gid)
     ca_pass = _ca_pass(body.ca_passphrase, state)
     try:
         gateway_ip = _resolve_gateway_ip(gw, body.gateway_ip)
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
 
     try:
         with open_ssh_for(state, gw) as ssh:
@@ -90,7 +85,7 @@ def post_rotate_server_cert(
                 days=body.days,
             )
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -123,7 +118,6 @@ def post_rotate_server_cert(
         gateway_ip=gateway_ip,
         not_valid_after=expires,
         fingerprint_sha256=result.fingerprint_sha256,
-        details=result.details,
     )
 
 
@@ -139,7 +133,7 @@ def post_rotate_ca(
     cert_cache: CertBundleCache = Depends(get_cert_cache),
 ) -> RotateCAResponse:
     """Break-glass: new CA + server + reissue device client certs."""
-    gw = _require_gateway(registry, gid)
+    gw = require_gateway(registry, gid)
     if not body.confirm_break_glass:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -149,7 +143,7 @@ def post_rotate_ca(
     try:
         gateway_ip = _resolve_gateway_ip(gw, body.gateway_ip)
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
 
     try:
         with open_ssh_for(state, gw) as ssh:
@@ -164,7 +158,7 @@ def post_rotate_ca(
                 install_root=gw["install_root"],
             )
     except ValueError as exc:
-        raise _http_400(exc) from exc
+        raise http_400(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -172,7 +166,7 @@ def post_rotate_ca(
         ) from exc
 
     # reload_failed → ok=False: still mint one-time tokens but redistribute=False.
-    if not result.ok and result.status not in ("reload_failed",):
+    if not result.ok and result.status != "reload_failed":
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=result.message or "rotate_ca failed",
@@ -195,13 +189,11 @@ def post_rotate_ca(
             )
         )
 
-    redistribute = bool(result.ok)
     return RotateCAResponse(
         ok=result.ok,
         status=result.status,
         message=result.message,
         gateway_ip=gateway_ip,
-        redistribute=redistribute,
+        redistribute=bool(result.ok),
         devices=tokens,
-        details=result.details,
     )

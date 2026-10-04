@@ -119,7 +119,6 @@ class RotateServerResponse(BaseModel):
     gateway_ip: str
     not_valid_after: Optional[str] = None
     fingerprint_sha256: Optional[str] = None
-    details: dict[str, Any] = Field(default_factory=dict)
 
 
 class RotateCARequest(BaseModel):
@@ -145,4 +144,3 @@ class RotateCAResponse(BaseModel):
     # Only redistribute when ok=True (reload_failed keeps tokens but UI must warn).
     redistribute: bool = False
     devices: list[DeviceBundleToken] = Field(default_factory=list)
-    details: dict[str, Any] = Field(default_factory=dict)

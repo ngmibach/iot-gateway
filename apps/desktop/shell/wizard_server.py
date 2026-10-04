@@ -103,7 +103,6 @@ def _handle_api(
                 {
                     "url": url,
                     "api_token": token,
-                    "actions_path": "/actions.html",
                 },
             )
             return

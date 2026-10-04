@@ -91,3 +91,17 @@ def open_ssh_for(
 ) -> ContextManager[Any]:
     factory = state.open_ssh or default_open_ssh(state.settings)
     return factory(gateway)
+
+
+def require_gateway(registry: Registry, gid: str) -> dict[str, Any]:
+    gw = registry.get_gateway(gid)
+    if gw is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"gateway {gid!r} not found",
+        )
+    return gw
+
+
+def http_400(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))

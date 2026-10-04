@@ -203,8 +203,7 @@ class RotateServerResult:
     not_valid_after: Optional[datetime] = None
     fingerprint_sha256: Optional[str] = None
     details: dict[str, Any] = field(default_factory=dict)
-    # TODO(control-api): optional registry+gateway_id audit / gateway meta_json
-    # expiry when Actions API wires rotate-server (gateways have no cert columns).
+    # gateways table has no cert columns yet — expiry lives on the result / audit only.
 
 
 @dataclass
@@ -505,7 +504,7 @@ def rotate_ca(
             server_key_pem=server_mat.private_key_pem,
         )
 
-        # Collect all reissues before touching registry (Issue 1).
+        # Commit registry only after every device reissue succeeds.
         reissued: list[DeviceReissue] = []
         for device_id in ids:
             mat = (device_key_material or {}).get(device_id)
