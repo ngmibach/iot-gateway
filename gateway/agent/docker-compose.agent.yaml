@@ -2,12 +2,14 @@
 # Usage from gateway/:
 #   docker compose -f docker-compose.yaml -f agent/docker-compose.agent.yaml up -d agent
 #
-# Host networking so mDNS and :9138 are reachable on the LAN.
+# Paths below are relative to the project directory (gateway/) when the overlay
+# is merged with docker-compose.yaml. Host networking so mDNS and :9138 are
+# reachable on the LAN. Stack status stays on SSH compose-ps / Prometheus.
 
 services:
   agent:
     build:
-      context: .
+      context: ./agent
       dockerfile: Dockerfile
     container_name: iot-gateway-agent
     network_mode: host
@@ -16,8 +18,3 @@ services:
       - TZ=Asia/Ho_Chi_Minh
       - AGENT_HOST=0.0.0.0
       - AGENT_PORT=9138
-      - INSTALL_ROOT=/opt/iot-gateway
-    volumes:
-      # Best-effort docker compose ps against the gateway stack
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ..:/opt/iot-gateway:ro

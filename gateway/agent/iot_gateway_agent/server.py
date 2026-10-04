@@ -25,17 +25,23 @@ def make_handler(
         def log_message(self, fmt: str, *args: Any) -> None:
             logger.debug("%s - %s", self.address_string(), fmt % args)
 
-        def _send_json(self, code: int, payload: dict[str, Any]) -> None:
+        def _send_json(self, code: int, payload: dict[str, Any], *, allow: str | None = None) -> None:
             body = _json_bytes(payload)
             self.send_response(code)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            if allow is not None:
+                self.send_header("Allow", allow)
             self.end_headers()
             self.wfile.write(body)
 
-        def _send_error_json(self, code: int, message: str) -> None:
-            self._send_json(code, {"error": message})
+        def _reject_mutation(self) -> None:
+            self._send_json(
+                405,
+                {"error": "read-only agent; mutations via SSH"},
+                allow="GET, HEAD",
+            )
 
         def do_GET(self) -> None:  # noqa: N802 — BaseHTTPRequestHandler API
             path = urlparse(self.path).path.rstrip("/") or "/"
@@ -45,22 +51,26 @@ def make_handler(
             if path == "/v1/info":
                 self._send_json(200, info_fn())
                 return
-            if path in ("/", "/health"):
-                self._send_json(200, health_fn())
+            self._send_json(404, {"error": "not found"})
+
+        def do_HEAD(self) -> None:  # noqa: N802
+            # Mirror GET routing without a body.
+            path = urlparse(self.path).path.rstrip("/") or "/"
+            if path in ("/v1/health", "/v1/info"):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Allow", "GET, HEAD")
+                self.end_headers()
                 return
-            self._send_error_json(404, "not found")
+            self.send_response(404)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
 
-        def do_POST(self) -> None:  # noqa: N802
-            self._send_error_json(405, "read-only agent; mutations via SSH")
-
-        def do_PUT(self) -> None:  # noqa: N802
-            self._send_error_json(405, "read-only agent; mutations via SSH")
-
-        def do_DELETE(self) -> None:  # noqa: N802
-            self._send_error_json(405, "read-only agent; mutations via SSH")
-
-        def do_PATCH(self) -> None:  # noqa: N802
-            self._send_error_json(405, "read-only agent; mutations via SSH")
+        do_POST = _reject_mutation
+        do_PUT = _reject_mutation
+        do_DELETE = _reject_mutation
+        do_PATCH = _reject_mutation
 
     return AgentHandler
 
@@ -72,5 +82,4 @@ def create_server(
     info_fn: Callable[[], dict[str, Any]],
 ) -> ThreadingHTTPServer:
     handler = make_handler(health_fn, info_fn)
-    server = ThreadingHTTPServer((host, port), handler)
-    return server
+    return ThreadingHTTPServer((host, port), handler)

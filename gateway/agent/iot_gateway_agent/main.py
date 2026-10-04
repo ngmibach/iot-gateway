@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import sys
+import threading
 
 from . import AGENT_PORT, __version__
 from .health import build_health, build_info
@@ -31,11 +32,6 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         type=int,
         default=int(os.environ.get("AGENT_PORT", AGENT_PORT)),
         help=f"Listen port (default: {AGENT_PORT} or AGENT_PORT)",
-    )
-    parser.add_argument(
-        "--install-root",
-        default=os.environ.get("INSTALL_ROOT"),
-        help="Gateway install root for docker compose ps (INSTALL_ROOT)",
     )
     parser.add_argument(
         "--no-mdns",
@@ -71,22 +67,21 @@ def main(argv: list[str] | None = None) -> int:
     else:
         logger.info("mDNS disabled via --no-mdns")
 
-    install_root = args.install_root
-
     def health_fn():
-        return build_health(mdns_enabled=mdns_enabled, install_root=install_root)
+        return build_health(mdns_enabled=mdns_enabled, port=args.port)
 
     def info_fn():
-        return build_info()
+        return build_info(port=args.port)
 
     server = create_server(args.host, args.port, health_fn, info_fn)
 
-    def _shutdown(signum: int, _frame: object) -> None:
+    def _request_shutdown(signum: int, _frame: object) -> None:
+        # shutdown() waits for serve_forever to exit — must not run on this thread.
         logger.info("signal %s; shutting down", signum)
-        server.shutdown()
+        threading.Thread(target=server.shutdown, daemon=True).start()
 
-    signal.signal(signal.SIGTERM, _shutdown)
-    signal.signal(signal.SIGINT, _shutdown)
+    signal.signal(signal.SIGTERM, _request_shutdown)
+    # Leave SIGINT as default KeyboardInterrupt so Ctrl+C unwinds serve_forever.
 
     logger.info(
         "iot-gateway-agent %s listening on %s:%s (mdns=%s)",
@@ -97,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     try:
         server.serve_forever()
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt; shutting down")
     finally:
         server.server_close()
         stop_mdns(mdns_handle)

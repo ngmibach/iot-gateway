@@ -11,12 +11,12 @@ from . import AGENT_PORT, HEALTH_PATH, MQTT_TLS_PORT, SERVICE_TYPE, __version__
 logger = logging.getLogger(__name__)
 
 
-def _txt_records() -> dict[str, str]:
+def _txt_records(port: int) -> dict[str, str]:
     return {
         "path": HEALTH_PATH,
         "ver": __version__,
         "mqtts": str(MQTT_TLS_PORT),
-        "agent": str(AGENT_PORT),
+        "agent": str(port),
     }
 
 
@@ -43,21 +43,28 @@ def start_mdns(port: int = AGENT_PORT) -> tuple[Any | None, bool]:
     except OSError:
         ipv4 = "127.0.0.1"
 
+    txt = _txt_records(port)
     service_name = f"{hostname}.{SERVICE_TYPE}"
     info = ServiceInfo(
         SERVICE_TYPE,
         service_name,
         addresses=[socket.inet_aton(ipv4)],
         port=port,
-        properties=_txt_records(),
+        properties=txt,
         server=f"{hostname}.local.",
     )
 
+    zc = None
     try:
         zc = Zeroconf()
         zc.register_service(info)
     except Exception as exc:  # noqa: BLE001 — never fail the agent for mDNS
         logger.warning("mDNS registration failed (%s); continuing without it", exc)
+        if zc is not None:
+            try:
+                zc.close()
+            except Exception:  # noqa: BLE001
+                pass
         return None, False
 
     logger.info(
@@ -65,7 +72,7 @@ def start_mdns(port: int = AGENT_PORT) -> tuple[Any | None, bool]:
         service_name,
         ipv4,
         port,
-        _txt_records(),
+        txt,
     )
     return (zc, info), True
 
