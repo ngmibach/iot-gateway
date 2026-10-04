@@ -1,0 +1,84 @@
+"""Smoke the Setup Wizard HTTP API (no live SSH / Docker daemon required)."""
+
+from __future__ import annotations
+
+import json
+import os
+import tempfile
+import threading
+import unittest
+import urllib.request
+from unittest import mock
+
+from shell.wizard_server import serve
+
+
+class WizardApiTests(unittest.TestCase):
+    def setUp(self) -> None:
+        self._td = tempfile.TemporaryDirectory()
+        self.addCleanup(self._td.cleanup)
+        self.env = mock.patch.dict(os.environ, {"IOTGW_DATA_DIR": self._td.name})
+        self.env.start()
+        self.addCleanup(self.env.stop)
+        # Bind ephemeral port
+        self.server = serve("127.0.0.1", 0, open_browser=False)
+        self.port = self.server.server_address[1]
+        self.base = f"http://127.0.0.1:{self.port}"
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+        self.addCleanup(self._shutdown)
+
+    def _shutdown(self) -> None:
+        self.server.shutdown()
+        self.server.server_close()
+
+    def _get(self, path: str) -> dict:
+        with urllib.request.urlopen(self.base + path, timeout=5) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def _post(self, path: str, body: dict) -> dict:
+        req = urllib.request.Request(
+            self.base + path,
+            data=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+
+    def test_env_and_static(self) -> None:
+        env = self._get("/api/wizard/env")
+        self.assertIn("docker", env)
+        with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
+            html = resp.read().decode("utf-8")
+        self.assertIn("Setup Wizard", html)
+
+    def test_checklist_no_auto_apply(self) -> None:
+        # Force a fake WSL IP via settings + detect mock
+        from shell.paths import load_settings, save_settings
+
+        s = load_settings()
+        s["wsl2_ip"] = "172.28.1.5"
+        s["monitoring_ip"] = "192.168.1.20"
+        save_settings(s)
+        data = self._get("/api/wizard/checklist")
+        self.assertTrue(data.get("applicable"))
+        self.assertFalse(data.get("auto_apply"))
+        cmds = [i["command"] for i in data["items"] if i.get("command")]
+        self.assertTrue(any("portproxy" in c for c in cmds))
+        self.assertTrue(any("advfirewall" in c for c in cmds))
+        # Confirm does not execute anything — just flips flag
+        conf = self._post("/api/wizard/checklist/confirm", {})
+        self.assertTrue(conf["confirmed"])
+
+    def test_nic_select_persists(self) -> None:
+        out = self._post(
+            "/api/wizard/nics/select",
+            {"monitoring_ip": "10.0.0.5", "nic_name": "eth0"},
+        )
+        self.assertTrue(out["ok"])
+        self.assertEqual(out["settings"]["monitoring_ip"], "10.0.0.5")
+
+
+if __name__ == "__main__":
+    unittest.main()

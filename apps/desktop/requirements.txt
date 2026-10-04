@@ -1,0 +1,6 @@
+# Phase-0 desktop shell (Setup Wizard + process launcher)
+keyring>=25.0
+# Control-service / Streamlit are launched as sibling processes; install their
+# deps from apps/control-service/requirements.txt and monitoring/build/streamlit.
+# Optional: pywebview for native WebView embed when cargo/Tauri is unavailable.
+# pywebview>=5.0

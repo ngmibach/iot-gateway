@@ -16,4 +16,6 @@ __pycache__/
 *.sqlite
 apps/control-service/telemetry/.smoke-stack/
 apps/control-service/.venv/
+apps/desktop/.venv/
+apps/desktop/src-tauri/target/
 .venv/

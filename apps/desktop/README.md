@@ -1,0 +1,89 @@
+# IoT Gateway Monitor — desktop (Phase-0)
+
+Setup Wizard + process launcher for the Python control service (`127.0.0.1:9137`) and Streamlit UI (`127.0.0.1:8501`). Tauri 2 hosts the wizard and can WebView-navigate to Streamlit.
+
+## What ships in Phase-0
+
+| Piece | Role |
+|-------|------|
+| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API + Streamlit |
+| `ui/` | Setup Wizard pages (also Tauri `frontendDist`) |
+| `src-tauri/` | Tauri 2 scaffold — Linux AppImage / Windows MSI·NSIS packaging stubs |
+
+**Windows networking**
+
+- UI ports `:9137` / `:8501` → Windows **`localhostForwarding`** only (`.wslconfig`). **No** `netsh portproxy` for these.
+- Loki `:3100` → Setup Wizard shows copyable `netsh` portproxy + firewall commands; user runs elevated and confirms. App never auto-applies firewall rules.
+
+## Quick start (Python shell — no Rust required)
+
+```bash
+# From repo root
+python3 -m venv apps/desktop/.venv
+apps/desktop/.venv/bin/pip install -r apps/desktop/requirements.txt \
+  -r apps/control-service/requirements.txt
+# Optional Streamlit embed:
+# apps/desktop/.venv/bin/pip install -r monitoring/build/streamlit/requirements.txt
+
+export PYTHONPATH=apps/desktop:apps/control-service
+export IOTGW_DATA_DIR="${IOTGW_DATA_DIR:-$HOME/.local/share/iot-gateway-monitor}"
+
+# Detection only
+apps/desktop/.venv/bin/python -m shell --detect-only
+
+# Wizard UI on http://127.0.0.1:9138/wizard.html
+apps/desktop/.venv/bin/python -m shell --no-browser
+# Then open the URL; use step 5 to start API + Streamlit, or:
+apps/desktop/.venv/bin/python -m shell --start-services --no-browser
+```
+
+Smoke:
+
+```bash
+apps/desktop/scripts/smoke.sh
+```
+
+## Tauri build (`cargo tauri build`)
+
+Prereqs: Rust stable, Node (for `@tauri-apps/cli` optional), platform WebView (WebKitGTK on Linux, WebView2 on Windows).
+
+```bash
+# Install CLI once
+cargo install tauri-cli --version "^2"
+
+cd apps/desktop
+# Dev: starts Python wizard (beforeDevCommand) + Tauri window on ui/
+cargo tauri dev
+
+# Release bundles: AppImage (Linux), MSI/NSIS (Windows)
+cargo tauri build
+# Artifacts under src-tauri/target/release/bundle/
+```
+
+`tauri.conf.json` bundle targets: `appimage`, `msi`, `nsis`. Replace `src-tauri/icons/icon.png` with brand assets before shipping; Admin Code Signing tab (later PR) signs the outputs.
+
+### Windows localhostForwarding
+
+If the WebView cannot reach `http://127.0.0.1:9137` / `:8501` while services run inside WSL2, set in `%UserProfile%\.wslconfig`:
+
+```ini
+[wsl2]
+localhostForwarding=true
+```
+
+Then `wsl --shutdown` and relaunch. Do **not** fall back to portproxy for UI ports.
+
+## Layout
+
+```
+apps/desktop/
+  README.md
+  requirements.txt
+  shell/           # python -m shell
+  ui/              # wizard.html + assets
+  src-tauri/       # Tauri 2
+  tests/
+  scripts/smoke.sh
+```
+
+App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGatewayMonitor\` (`settings.json`, `known_hosts`, `ssh/`, keyring fallback file if no OS backend).

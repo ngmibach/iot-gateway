@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Setup Wizard</title>
+  <link rel="stylesheet" href="wizard.css" />
+</head>
+<body>
+  <header>
+    <div>
+      <h1>IoT Gateway Monitor — Setup Wizard</h1>
+      <div class="sub">Phase-0 · Docker/WSL · NIC · SSH pin · firewall checklist · Streamlit</div>
+    </div>
+    <div id="hdr-status"></div>
+  </header>
+  <main>
+    <nav class="steps" id="step-tabs"></nav>
+
+    <section class="panel step" data-step="0" id="step-engine">
+      <h2>1. Container engine</h2>
+      <p>You will not run docker compose yourself — the app manages containers. A container engine is still required.</p>
+      <div class="row">
+        <button class="secondary" id="btn-refresh-env">Re-detect</button>
+        <span id="docker-badge"></span>
+      </div>
+      <pre class="mono" id="env-json"></pre>
+      <div class="note-box" id="docker-hint"></div>
+    </section>
+
+    <section class="panel step hidden" data-step="1" id="step-nic">
+      <h2>2. MONITORING_IP / NIC</h2>
+      <p>Select the LAN IPv4 Promtail should push to. On WSL2 NAT, pick a <strong>Windows host</strong> address — never the WSL 172.x eth0 IP.</p>
+      <div class="row">
+        <label for="nic-select">NIC / IP</label>
+        <select id="nic-select"></select>
+        <button class="secondary" id="btn-refresh-nics">Refresh</button>
+      </div>
+      <div class="row">
+        <label for="gateway-ip">Gateway IP (optional)</label>
+        <input id="gateway-ip" placeholder="192.168.1.50" />
+      </div>
+      <div class="row">
+        <label for="net-mode">Windows net mode</label>
+        <select id="net-mode">
+          <option value="">auto</option>
+          <option value="nat">nat (WSL2 default)</option>
+          <option value="mirrored">mirrored</option>
+        </select>
+      </div>
+      <button class="primary" id="btn-save-nic">Save MONITORING_IP</button>
+      <div id="nic-msg"></div>
+    </section>
+
+    <section class="panel step hidden" data-step="2" id="step-ssh">
+      <h2>3. SSH host-key pin + ed25519 key</h2>
+      <p>Pin the gateway host key, then install an app-generated ed25519 pubkey (one-time password). Password is stored via OS keyring ref.</p>
+      <div class="row">
+        <label for="ssh-host">Host</label>
+        <input id="ssh-host" placeholder="192.168.1.50" />
+      </div>
+      <div class="row">
+        <label for="ssh-port">Port</label>
+        <input id="ssh-port" type="number" value="22" style="min-width:6rem" />
+      </div>
+      <div class="row">
+        <label for="ssh-user">Username</label>
+        <input id="ssh-user" placeholder="ubuntu" />
+      </div>
+      <div class="row">
+        <label for="ssh-pass">Password (one-time)</label>
+        <input id="ssh-pass" type="password" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label for="ssh-gid">Gateway id</label>
+        <input id="ssh-gid" placeholder="gateway" value="gateway" />
+      </div>
+      <div class="row">
+        <button class="secondary" id="btn-fetch-hk">Fetch host key</button>
+        <button class="primary" id="btn-pin-hk" disabled>Pin fingerprint</button>
+        <button class="primary" id="btn-install-key" disabled>Install ed25519 key</button>
+      </div>
+      <div id="hk-info" class="mono"></div>
+      <div id="ssh-msg"></div>
+    </section>
+
+    <section class="panel step hidden" data-step="3" id="step-fw">
+      <h2>4. Windows firewall / portproxy (guided checklist)</h2>
+      <p><strong>K18:</strong> Display only — the app will <em>not</em> auto-apply these. Loki <code>:3100</code> only. Do not portproxy <code>:9137</code> / <code>:8501</code>.</p>
+      <div class="note-box" id="localhost-note"></div>
+      <div id="checklist-wrap"></div>
+      <div class="row">
+        <button class="secondary" id="btn-refresh-cl">Refresh checklist</button>
+        <button class="primary" id="btn-confirm-cl">I have run these</button>
+      </div>
+      <div id="cl-msg"></div>
+    </section>
+
+    <section class="panel step hidden" data-step="4" id="step-launch">
+      <h2>5. Launch control service + Streamlit</h2>
+      <p>Starts FastAPI on <code>127.0.0.1:9137</code> and Streamlit on <code>127.0.0.1:8501</code>. Tauri WebView (or browser) embeds Streamlit.</p>
+      <div class="row">
+        <button class="primary" id="btn-start-svc">Start services</button>
+        <button class="secondary" id="btn-open-st">Open Streamlit</button>
+        <button class="danger" id="btn-stop-svc">Stop</button>
+      </div>
+      <pre class="mono" id="svc-status"></pre>
+      <div id="svc-msg"></div>
+    </section>
+
+    <div class="nav">
+      <button class="secondary" id="btn-prev">Back</button>
+      <button class="primary" id="btn-next">Next</button>
+    </div>
+  </main>
+  <script src="wizard.js"></script>
+</body>
+</html>

@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "IoT Gateway Monitor",
+  "version": "0.1.0",
+  "identifier": "com.iotgateway.monitor",
+  "build": {
+    "frontendDist": "../ui",
+    "devUrl": "http://127.0.0.1:9138",
+    "beforeDevCommand": "PYTHONPATH=..:../../control-service python -m shell --no-browser",
+    "beforeBuildCommand": ""
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "IoT Gateway Monitor",
+        "width": 1100,
+        "height": 800,
+        "resizable": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["appimage", "msi", "nsis"],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "linux": {
+      "appimage": {
+        "bundleMediaFramework": false
+      }
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "longDescription": "Phase-0: Setup Wizard + WebView to Streamlit on 127.0.0.1:8501; control API on :9137 via localhostForwarding on Windows (not portproxy).",
+    "shortDescription": "IoT Gateway monitoring control plane"
+  },
+  "plugins": {
+    "shell": {
+      "open": true
+    }
+  }
+}
