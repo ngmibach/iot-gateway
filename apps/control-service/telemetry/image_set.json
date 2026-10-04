@@ -1,0 +1,25 @@
+{
+  "description": "Minimum image set for field kits / offline provision (--with-images).",
+  "monitoring": [
+    "grafana/loki:latest",
+    "prom/prometheus:latest"
+  ],
+  "gateway": [
+    "eclipse-mosquitto:latest",
+    "prom/node-exporter:latest",
+    "gcr.io/cadvisor/cadvisor:latest",
+    "grafana/promtail:latest"
+  ],
+  "gateway_build_contexts": [
+    "haproxy",
+    "nodered",
+    "ids",
+    "promtail",
+    "sync-config",
+    "connected-sensors",
+    "agent"
+  ],
+  "optional_monitoring": [
+    "grafana/grafana:12.2"
+  ]
+}
