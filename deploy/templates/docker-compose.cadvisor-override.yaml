@@ -1,7 +1,0 @@
-# Optional compose override snippet — pin cAdvisor listen port.
-# Merge with: docker compose -f docker-compose.yaml -f docker-compose.cadvisor-override.yaml up -d
-# Render {{CADVISOR_PORT}} via tools/render_config.py (default 8080).
-services:
-  cadvisor:
-    command:
-      - '--port={{CADVISOR_PORT}}'

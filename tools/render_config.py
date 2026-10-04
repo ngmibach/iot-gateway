@@ -5,58 +5,60 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Mapping
 
-DEFAULTS: dict[str, str] = {
-    "CADVISOR_PORT": "8080",
-    "AGENT_PORT": "9138",
-    "INSTALL_ROOT": "/opt/iot-gateway",
-}
-
-PLACEHOLDER_RE = re.compile(r"\{\{([A-Z0-9_]+)\}\}")
+# Placeholders used by deploy/templates today.
+KNOWN_KEYS = ("GATEWAY_IP", "MONITORING_IP")
 
 
 def load_values(args: argparse.Namespace) -> dict[str, str]:
-    values = dict(DEFAULTS)
+    values: dict[str, str] = {}
     if args.values_json:
         raw = json.loads(Path(args.values_json).read_text(encoding="utf-8"))
         if not isinstance(raw, dict):
-            raise SystemExit(f"--values-json must be a JSON object: {args.values_json}")
-        values.update({str(k): str(v) for k, v in raw.items()})
+            raise ValueError(f"--values-json must be a JSON object: {args.values_json}")
+        for key, val in raw.items():
+            if val is None:
+                continue
+            text = str(val).strip()
+            if text == "":
+                continue
+            values[str(key)] = text
     for key, val in (
         ("GATEWAY_IP", args.gateway_ip),
         ("MONITORING_IP", args.monitoring_ip),
-        ("INSTALL_ROOT", args.install_root),
-        ("SERVER_CN", args.server_cn),
-        ("CADVISOR_PORT", args.cadvisor_port),
-        ("AGENT_PORT", args.agent_port),
     ):
-        if val is not None:
-            values[key] = str(val)
-    # SERVER_CN defaults to GATEWAY_IP when unset
-    if "SERVER_CN" not in values and "GATEWAY_IP" in values:
-        values["SERVER_CN"] = values["GATEWAY_IP"]
+        if val is not None and str(val).strip() != "":
+            values[key] = str(val).strip()
     return values
 
 
+def _remaining_placeholders(text: str) -> list[str]:
+    found: set[str] = set()
+    start = 0
+    while True:
+        i = text.find("{{", start)
+        if i < 0:
+            break
+        j = text.find("}}", i + 2)
+        if j < 0:
+            break
+        found.add(text[i + 2 : j])
+        start = j + 2
+    return sorted(found)
+
+
 def render_text(template: str, values: Mapping[str, str]) -> str:
-    missing: set[str] = set()
-
-    def repl(match: re.Match[str]) -> str:
-        key = match.group(1)
-        if key not in values:
-            missing.add(key)
-            return match.group(0)
-        return values[key]
-
-    out = PLACEHOLDER_RE.sub(repl, template)
-    if missing:
-        raise KeyError(f"missing template values: {', '.join(sorted(missing))}")
+    out = template
+    for key, val in values.items():
+        out = out.replace("{{" + key + "}}", val)
+    leftover = _remaining_placeholders(out)
+    if leftover:
+        raise KeyError(f"missing template values: {', '.join(leftover)}")
     return out
 
 
@@ -93,14 +95,9 @@ def probe_http(url: str, timeout: float = 5.0) -> tuple[bool, str]:
         return False, f"{url} -> {type(e).__name__}: {e}"
 
 
-def probe_metrics(host: str, port: int, path: str = "/metrics", timeout: float = 5.0) -> tuple[bool, str]:
-    return probe_http(f"http://{host}:{port}{path}", timeout=timeout)
-
-
 def cmd_render(args: argparse.Namespace) -> int:
     values = load_values(args)
-    required = {"GATEWAY_IP", "MONITORING_IP"}
-    missing = sorted(k for k in required if k not in values or not values[k])
+    missing = sorted(k for k in KNOWN_KEYS if k not in values)
     if missing:
         print(f"error: required values missing: {', '.join(missing)}", file=sys.stderr)
         return 2
@@ -111,13 +108,12 @@ def cmd_render(args: argparse.Namespace) -> int:
 
 
 def cmd_probe(args: argparse.Namespace) -> int:
-    targets = args.url or []
+    targets = list(args.url or [])
     if args.gateway_ip:
-        port = int(args.cadvisor_port or DEFAULTS["CADVISOR_PORT"])
         targets.extend(
             [
                 f"http://{args.gateway_ip}:9100/metrics",
-                f"http://{args.gateway_ip}:{port}/metrics",
+                f"http://{args.gateway_ip}:8080/metrics",
             ]
         )
     if args.monitoring_ip:
@@ -152,17 +148,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--values-json", help="JSON object of template values")
     r.add_argument("--gateway-ip")
     r.add_argument("--monitoring-ip")
-    r.add_argument("--install-root")
-    r.add_argument("--server-cn")
-    r.add_argument("--cadvisor-port", default=None)
-    r.add_argument("--agent-port", default=None)
     r.set_defaults(func=cmd_render)
 
     pr = sub.add_parser("probe", help="Probe HTTP /metrics or Loki ready endpoints")
     pr.add_argument("--url", action="append", default=[], help="Explicit URL to GET (repeatable)")
-    pr.add_argument("--gateway-ip", help="Also probe :9100/metrics and :CADVISOR_PORT/metrics")
+    pr.add_argument("--gateway-ip", help="Also probe :9100/metrics and :8080/metrics")
     pr.add_argument("--monitoring-ip", help="Also probe :3100/ready")
-    pr.add_argument("--cadvisor-port", default=DEFAULTS["CADVISOR_PORT"])
     pr.add_argument("--timeout", type=float, default=5.0)
     pr.set_defaults(func=cmd_probe)
 
@@ -174,10 +165,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         return args.func(args)
-    except KeyError as e:
-        print(f"error: {e}", file=sys.stderr)
-        return 2
-    except (OSError, json.JSONDecodeError) as e:
+    except (KeyError, ValueError, OSError, json.JSONDecodeError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 2
 

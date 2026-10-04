@@ -1,4 +1,4 @@
-# Generated — do not edit by hand. Render with tools/render_config.py.
+# Template — render with tools/render_config.py; do not deploy unrendered.
 server:
   http_listen_port: 9080
   grpc_listen_port: 0

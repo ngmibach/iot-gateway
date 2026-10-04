@@ -86,7 +86,7 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock:ro
     network_mode: host
     restart: unless-stopped
-    # Pin listen port; Prometheus scrapes {{GATEWAY_IP}}:8080 (was drifting to 8081).
+    # Pin listen port; Prometheus scrapes <gateway-ip>:8080 (see deploy/templates/prometheus.yml).
     command:
       - '--port=8080'
 

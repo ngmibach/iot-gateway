@@ -1,4 +1,4 @@
-# Generated — do not edit by hand. Render with tools/render_config.py.
+# Template — render with tools/render_config.py; do not deploy unrendered.
 global:
   scrape_interval: 15s
 
@@ -12,7 +12,7 @@ scrape_configs:
 
   - job_name: 'cadvisor'
     static_configs:
-      - targets: ['{{GATEWAY_IP}}:{{CADVISOR_PORT}}']
+      - targets: ['{{GATEWAY_IP}}:8080']
         labels:
           instance: 'gateway'
 
