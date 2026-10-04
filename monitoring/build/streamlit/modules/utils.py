@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import requests
 import pandas as pd
@@ -7,16 +8,29 @@ import plotly.graph_objects as go
 import re
 
 # ═══════════════════════════════════════════════════════════════════
-#  RUNTIME CONTEXT
+#  RUNTIME CONTEXT — env / settings; no docker-bridge hard-codes
 # ═══════════════════════════════════════════════════════════════════
-LOKI_URL = "http://172.17.0.1:3100"
-PROMETHEUS_URL = "http://172.17.0.1:9090"
+LOKI_URL = os.environ.get("LOKI_URL", "http://127.0.0.1:3100").rstrip("/")
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:9090").rstrip("/")
 
-GITEA_URL = "http://172.17.0.1:5000"
-GITEA_OWNER = "admin"
-GITEA_REPO = "actions"
-GITEA_USER = "admin"
-GITEA_PASS = "admin"
+CONTROL_SERVICE_URL = os.environ.get(
+    "CONTROL_SERVICE_URL", "http://127.0.0.1:9137"
+).rstrip("/")
+CONTROL_API_TOKEN = os.environ.get("IOTGW_API_TOKEN", "").strip() or None
+# Legacy Gitea path off by default (Phase-0 → FastAPI SSH actions).
+USE_LEGACY_GITEA = os.environ.get("USE_LEGACY_GITEA", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
+
+GITEA_URL = os.environ.get("GITEA_URL", "http://127.0.0.1:5000").rstrip("/")
+GITEA_OWNER = os.environ.get("GITEA_OWNER", "admin")
+GITEA_REPO = os.environ.get("GITEA_REPO", "actions")
+GITEA_USER = os.environ.get("GITEA_USER", "admin")
+GITEA_PASS = os.environ.get("GITEA_PASS", "admin")
+
+GATEWAY_ID = os.environ.get("IOTGW_GATEWAY_ID", "").strip() or None
 
 start_ns = 0
 end_ns = 0
@@ -28,8 +42,9 @@ prom_step_str = "60s"
 start_dt = None
 end_dt = None
 selected_date = None
-node_instance = "172.17.0.1:9100"
-job_name = "node"
+# Prefer env; else registry-driven via control service (see resolve_node_instance).
+node_instance = os.environ.get("NODE_INSTANCE", "gateway")
+job_name = os.environ.get("PROM_JOB", "node")
 
 # ───────────────────────── Query helpers ─────────────────────────
 def _prep_loki(expr: str) -> str:
@@ -335,13 +350,152 @@ def section(label: str):
 
 
 # ═══════════════════════════════════════════════════════════════════
-#  Gitea Actions / Control Plane helpers
+#  Control service (FastAPI) + optional legacy Gitea helpers
 # ═══════════════════════════════════════════════════════════════════
+def _control_headers() -> dict:
+    headers = {"Accept": "application/json", "Content-Type": "application/json"}
+    if CONTROL_API_TOKEN:
+        headers["X-API-Token"] = CONTROL_API_TOKEN
+    return headers
+
+
+def control_list_gateways(timeout: float = 10.0) -> dict:
+    """GET /api/v1/gateways — returns {success, gateways|error}."""
+    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    try:
+        resp = requests.get(
+            f"{base}/api/v1/gateways",
+            headers=_control_headers(),
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            return {"success": True, "gateways": resp.json()}
+        return {
+            "success": False,
+            "status_code": resp.status_code,
+            "error": (resp.text or resp.reason)[:600],
+        }
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+def resolve_node_instance(fallback: str | None = None) -> str:
+    """NODE_INSTANCE from env, else primary gateway via control registry."""
+    env = os.environ.get("NODE_INSTANCE", "").strip()
+    if env:
+        return env
+    # Short timeout so Streamlit sidebar startup stays snappy when API is down.
+    result = control_list_gateways(timeout=1.5)
+    if result.get("success"):
+        gateways = result.get("gateways") or []
+        if gateways:
+            ni = (gateways[0] or {}).get("node_instance")
+            if ni:
+                return str(ni)
+    return fallback or "gateway"
+
+
+def control_register_device(
+    gateway_id: str,
+    *,
+    user_id: str,
+    password: str,
+    ip: str,
+    topic_read: str | None = None,
+    topic_readwrite: str | None = None,
+    ca_passphrase: str | None = None,
+    monitor_enabled: bool = True,
+    timeout: float = 120.0,
+) -> dict:
+    """POST /api/v1/gateways/{gid}/devices — SSH register + registry upsert."""
+    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    payload = {
+        "user_id": user_id,
+        "password": password,
+        "ip": ip,
+        "monitor_enabled": monitor_enabled,
+    }
+    if topic_read:
+        payload["topic_read"] = topic_read
+    if topic_readwrite:
+        payload["topic_readwrite"] = topic_readwrite
+    if ca_passphrase:
+        payload["ca_passphrase"] = ca_passphrase
+    try:
+        resp = requests.post(
+            f"{base}/api/v1/gateways/{gateway_id}/devices",
+            json=payload,
+            headers=_control_headers(),
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            return {"success": True, "status_code": resp.status_code, **data}
+        return {
+            "success": False,
+            "status_code": resp.status_code,
+            "error": (resp.text or resp.reason)[:600],
+        }
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+def control_list_devices(gateway_id: str, timeout: float = 15.0) -> dict:
+    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    try:
+        resp = requests.get(
+            f"{base}/api/v1/gateways/{gateway_id}/devices",
+            headers=_control_headers(),
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            return {"success": True, "devices": resp.json()}
+        return {
+            "success": False,
+            "status_code": resp.status_code,
+            "error": (resp.text or resp.reason)[:600],
+        }
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+def control_delete_device(
+    gateway_id: str,
+    device_id: str,
+    *,
+    remove_ip: bool = False,
+    timeout: float = 60.0,
+) -> dict:
+    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    try:
+        resp = requests.delete(
+            f"{base}/api/v1/gateways/{gateway_id}/devices/{device_id}",
+            params={"remove_ip": str(remove_ip).lower()},
+            headers=_control_headers(),
+            timeout=timeout,
+        )
+        if resp.status_code == 200:
+            return {"success": True, **resp.json()}
+        return {
+            "success": False,
+            "status_code": resp.status_code,
+            "error": (resp.text or resp.reason)[:600],
+        }
+    except Exception as ex:
+        return {"success": False, "error": str(ex)}
+
+
+def control_cert_bundle_url(gateway_id: str, device_id: str, token: str) -> str:
+    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    return (
+        f"{base}/api/v1/gateways/{gateway_id}/devices/{device_id}/cert-bundle"
+        f"?token={token}"
+    )
+
+
 def gitea_dispatch_workflow(workflow_file: str, inputs: dict | None = None, ref: str = "main") -> dict:
-    """Dispatch a workflow_run using Gitea's workflow_dispatch API.
-    Returns a dict with success flag and details.
-    """
-    base = (GITEA_URL or "http://172.17.0.1:5000").rstrip("/")
+    """Dispatch a workflow_run using Gitea's workflow_dispatch API (legacy)."""
+    base = (GITEA_URL or "http://127.0.0.1:5000").rstrip("/")
     url = f"{base}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/actions/workflows/{workflow_file}/dispatches"
 
     payload = {"ref": ref}
@@ -368,7 +522,8 @@ def gitea_dispatch_workflow(workflow_file: str, inputs: dict | None = None, ref:
             }
     except Exception as ex:
         return {"success": False, "error": str(ex)}
-    
+
+
 def extract_ssl_alert_reason(log_line: str) -> str:
     """Extract only the human-readable alert part like'"""
     match = re.search(r'tlsv1 alert (.+?)(?:\)|$)', log_line)

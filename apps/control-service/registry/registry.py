@@ -35,7 +35,8 @@ class Registry:
         if parent:
             os.makedirs(parent, exist_ok=True)
         self.path = path
-        self._conn = sqlite3.connect(path, timeout=30)
+        # FastAPI runs sync routes in a worker thread pool; allow shared conn.
+        self._conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(SCHEMA_SQL)

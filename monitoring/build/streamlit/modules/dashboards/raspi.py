@@ -209,7 +209,7 @@ def render_raspi():
         now = int(_time.time())
         short_start = now - 10 * 60
         step = "15s"
-        base = (PROMETHEUS_URL or "http://172.17.0.1:9090").rstrip("/")
+        base = (PROMETHEUS_URL or "http://127.0.0.1:9090").rstrip("/")
         for metric_name, leg_prefix in [("node_disk_written_bytes_total", "w"), ("node_disk_read_bytes_total", "r")]:
             expr = _prep_prom(f'rate({metric_name}{{instance="$node",job="$job",device=~"mmcblk.*|sd.*|nvme.*|root"}}[2m])')
             r = _req.get(

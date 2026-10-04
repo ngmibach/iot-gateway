@@ -15,3 +15,5 @@ __pycache__/
 *.py[cod]
 *.sqlite
 apps/control-service/telemetry/.smoke-stack/
+apps/control-service/.venv/
+.venv/

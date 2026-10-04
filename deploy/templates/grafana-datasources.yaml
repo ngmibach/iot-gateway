@@ -1,12 +1,11 @@
-# Lab/default. Packaged installs render deploy/templates/grafana-datasources.yaml
-# with {{MONITORING_IP}} (see tools/render_config.py).
+# Template — render with tools/render_config.py; do not deploy unrendered.
 apiVersion: 1
 
 datasources:
   - name: Prometheus
     type: prometheus
     access: proxy
-    url: http://127.0.0.1:9090
+    url: http://{{MONITORING_IP}}:9090
     isDefault: true
     uid: prometheus
     editable: true
@@ -17,7 +16,7 @@ datasources:
   - name: Loki
     type: loki
     access: proxy
-    url: http://loki:3100
+    url: http://{{MONITORING_IP}}:3100
     uid: loki
     editable: true
     jsonData:

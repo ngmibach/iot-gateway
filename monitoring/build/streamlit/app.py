@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 from datetime import datetime, time as dtime
 from streamlit_autorefresh import st_autorefresh
@@ -47,16 +48,26 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ───────────────────────── Configuration ─────────────────────────
-LOKI_URL = "http://172.17.0.1:3100"
-PROMETHEUS_URL = "http://172.17.0.1:9090"
+# ───────────────────────── Configuration (env / settings) ─────────────────────────
+LOKI_URL = os.environ.get("LOKI_URL", "http://127.0.0.1:3100").rstrip("/")
+PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://127.0.0.1:9090").rstrip("/")
+CONTROL_SERVICE_URL = os.environ.get(
+    "CONTROL_SERVICE_URL", "http://127.0.0.1:9137"
+).rstrip("/")
+USE_LEGACY_GITEA = os.environ.get("USE_LEGACY_GITEA", "").strip().lower() in (
+    "1",
+    "true",
+    "yes",
+)
 
-# Gitea Control Plane (used to dispatch workflows via the seeded admin/actions repo)
-GITEA_URL = "http://172.17.0.1:5000"
-GITEA_OWNER = "admin"
-GITEA_REPO = "actions"
-GITEA_USER = "admin"
-GITEA_PASS = "admin"
+# Legacy Gitea (only when USE_LEGACY_GITEA=1)
+GITEA_URL = os.environ.get("GITEA_URL", "http://127.0.0.1:5000").rstrip("/")
+GITEA_OWNER = os.environ.get("GITEA_OWNER", "admin")
+GITEA_REPO = os.environ.get("GITEA_REPO", "actions")
+GITEA_USER = os.environ.get("GITEA_USER", "admin")
+GITEA_PASS = os.environ.get("GITEA_PASS", "admin")
+
+_DEFAULT_NODE = u.resolve_node_instance(os.environ.get("NODE_INSTANCE", "gateway"))
 
 # ───────────────────────── Sidebar ───────────────────────────────
 with st.sidebar:
@@ -104,12 +115,13 @@ with st.sidebar:
 
     st.markdown("---")
     st.markdown('<p class="sidebar-heading" style="color:#a6adc8;">Prometheus Target (node-exporter)</p>', unsafe_allow_html=True)
-    node_instance = st.text_input("Instance", "raspberry-pi-gateway")
-    job_name = st.text_input("Job", "node")
+    node_instance = st.text_input("Instance", _DEFAULT_NODE)
+    job_name = st.text_input("Job", os.environ.get("PROM_JOB", "node"))
 
     st.markdown("---")
     st.caption("Loki: " + LOKI_URL)
     st.caption("Prometheus: " + PROMETHEUS_URL)
+    st.caption("Control: " + CONTROL_SERVICE_URL)
 
 # ───────────────────────── Time range calculations ─────────────────────────
 start_ns = int(start_dt.timestamp() * 1e9)
@@ -173,7 +185,8 @@ u.selected_date = selected_date
 u.node_instance = node_instance
 u.job_name = job_name
 
-# Gitea (Control Plane)
+u.CONTROL_SERVICE_URL = CONTROL_SERVICE_URL
+u.USE_LEGACY_GITEA = USE_LEGACY_GITEA
 u.GITEA_URL = GITEA_URL
 u.GITEA_OWNER = GITEA_OWNER
 u.GITEA_REPO = GITEA_REPO
@@ -197,14 +210,14 @@ sensors_mod.end_dt = end_dt
 sensors_mod.duration = duration
 sensors_mod.selected_date = selected_date
 
-# Control Plane does not use date range but we still bind Gitea config for safety
+control_plane_mod.CONTROL_SERVICE_URL = CONTROL_SERVICE_URL
+control_plane_mod.USE_LEGACY_GITEA = USE_LEGACY_GITEA
 control_plane_mod.GITEA_URL = u.GITEA_URL
 control_plane_mod.GITEA_OWNER = u.GITEA_OWNER
 control_plane_mod.GITEA_REPO = u.GITEA_REPO
 control_plane_mod.GITEA_USER = u.GITEA_USER
 control_plane_mod.GITEA_PASS = u.GITEA_PASS
 
-# Bind live refresh state so Control Plane can show a nice "paused" message
 control_plane_mod.auto_refresh = auto_refresh
 control_plane_mod.refresh_seconds = refresh_seconds
 
