@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Sequence
+from typing import Any, Callable, Literal, Optional
 
-from .checksums import write_sha256sums
 from .linux import sign_gpg_detach
 from .tools import SigningTools, detect_signing_tools
 from .windows import sign_authenticode
@@ -17,6 +17,51 @@ LINUX_SUFFIXES = {".appimage", ".deb"}
 SIGNABLE_SUFFIXES = WINDOWS_SUFFIXES | LINUX_SUFFIXES
 
 Platform = Literal["windows", "linux", "auto"]
+
+
+def _sha256_file(path: Path, *, chunk: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with Path(path).open("rb") as f:
+        while True:
+            block = f.read(chunk)
+            if not block:
+                break
+            h.update(block)
+    return h.hexdigest()
+
+
+def write_sha256sums(
+    files: list[Path],
+    dest: Path,
+    *,
+    relative_to: Path | None = None,
+) -> Path:
+    """Write ``SHA256SUMS`` with ``<hash>  <name>`` lines (two spaces)."""
+    dest = Path(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    base = Path(relative_to) if relative_to else dest.parent
+    lines: list[str] = []
+    for path in files:
+        path = Path(path)
+        if not path.is_file():
+            continue
+        digest = _sha256_file(path)
+        try:
+            name = str(path.resolve().relative_to(base.resolve()))
+        except ValueError:
+            name = path.name
+        lines.append(f"{digest}  {name}")
+    dest.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    return dest
+
+
+def _scrub_error(msg: str, identity: "SigningIdentity") -> str:
+    """Strip known passphrases from exception text before audit/UI return."""
+    out = msg
+    for secret in (identity.pfx_passphrase, identity.gpg_passphrase):
+        if secret:
+            out = out.replace(secret, "***")
+    return out
 
 
 @dataclass
@@ -60,7 +105,6 @@ class SignRequest:
     artifacts: list[str]
     identity: SigningIdentity
     export_dir: Optional[str] = None
-    actor: str = "admin"
 
 
 @dataclass
@@ -98,7 +142,6 @@ def list_signable_artifacts(folder: Path) -> list[dict[str, str]]:
         if not path.is_file():
             continue
         suf = path.suffix.lower()
-        # AppImage often has no normal suffix casing — also check full name.
         name_lower = path.name.lower()
         platform = ""
         if suf in WINDOWS_SUFFIXES:
@@ -167,7 +210,6 @@ def sign_artifacts(
             platform = _infer_platform(src, identity)
             missing = tools.missing_for(platform)
             if missing and windows_signer is None and linux_signer is None:
-                # Allow injected signers in tests even when tools absent.
                 raise RuntimeError("; ".join(missing))
 
             if platform == "windows":
@@ -199,12 +241,12 @@ def sign_artifacts(
                     tools=tools,
                 )
                 tools_used.add("gpg")
-                # Also copy the unsigned AppImage/.deb into export (sig alone is not shippable).
+                # Ship payload must appear in export/SHA256SUMS (sig alone is not enough).
                 dest_src = export_dir / src.name
                 if dest_src.resolve() != src.resolve():
                     shutil.copy2(src, dest_src)
-                    if dest_src not in signed:
-                        signed.append(dest_src)
+                if dest_src not in signed:
+                    signed.append(dest_src)
 
             dest = export_dir / out.name
             if dest.resolve() != Path(out).resolve():
@@ -235,32 +277,16 @@ def sign_artifacts(
             audit_detail=detail,
         )
     except Exception as e:  # noqa: BLE001 — surface to API/UI
+        err = _scrub_error(str(e), identity)
         return SignResult(
             ok=False,
             source_paths=[str(p) for p in paths],
             export_dir=str(export_dir),
             identity_fingerprint=identity.public_fingerprint(),
-            error=str(e),
+            error=err,
             audit_detail={
                 "artifacts": [str(p) for p in paths],
-                "error": str(e),
+                "error": err,
                 **identity.audit_dict(),
             },
         )
-
-
-def redact_secrets(obj: Any, secrets: Sequence[str] = ()) -> Any:
-    """Best-effort scrub of known secret strings from nested structures."""
-    secrets = [s for s in secrets if s]
-    if not secrets:
-        return obj
-    if isinstance(obj, str):
-        out = obj
-        for s in secrets:
-            out = out.replace(s, "***")
-        return out
-    if isinstance(obj, dict):
-        return {k: redact_secrets(v, secrets) for k, v in obj.items()}
-    if isinstance(obj, list):
-        return [redact_secrets(v, secrets) for v in obj]
-    return obj

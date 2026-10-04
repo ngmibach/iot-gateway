@@ -2,20 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from signing.checksums import sha256_file, write_sha256sums
 from signing.linux import sign_gpg_detach, sig_output_path
 from signing.service import (
     SignRequest,
     SigningIdentity,
     list_signable_artifacts,
-    redact_secrets,
     sign_artifacts,
+    write_sha256sums,
 )
 from signing.tools import SigningTools, detect_signing_tools
 from signing.windows import sign_authenticode, signed_output_path
@@ -45,7 +45,7 @@ class ChecksumsTests(unittest.TestCase):
             a.write_bytes(b"abc")
             out = write_sha256sums([a], root / "SHA256SUMS", relative_to=root)
             text = out.read_text(encoding="utf-8")
-            digest = sha256_file(a)
+            digest = hashlib.sha256(b"abc").hexdigest()
             self.assertEqual(text.strip(), f"{digest}  a.bin")
 
 
@@ -77,6 +77,28 @@ class WindowsSignerTests(unittest.TestCase):
             self.assertEqual(cmd[0], "/bin/osslsigncode")
             self.assertIn("s3cret", cmd)  # tool needs it; must not be audited
             self.assertNotIn("s3cret", str(out))
+
+    def test_empty_passphrase_scrub_does_not_garble(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifact = root / "app.exe"
+            artifact.write_bytes(b"MZ")
+            pfx = root / "c.pfx"
+            pfx.write_bytes(b"pfx")
+            run = MagicMock()
+            run.return_value = MagicMock(
+                returncode=1, stdout="", stderr="tool failed: bad cert"
+            )
+            tools = SigningTools(osslsigncode="/bin/osslsigncode", signtool=None, gpg=None)
+            with self.assertRaises(RuntimeError) as ctx:
+                sign_authenticode(
+                    artifact,
+                    pfx_path=pfx,
+                    passphrase="",
+                    tools=tools,
+                    run=run,
+                )
+            self.assertEqual(str(ctx.exception), "osslsigncode failed: tool failed: bad cert")
 
     def test_missing_tool_clear_error(self) -> None:
         with tempfile.TemporaryDirectory() as td:
@@ -174,7 +196,6 @@ class ServiceTests(unittest.TestCase):
             self.assertTrue(result.ok, result.error)
             self.assertTrue((export / "SHA256SUMS").is_file())
             self.assertIn("DEADBEEF", result.identity_fingerprint or "")
-            # audit detail must not contain passphrase
             blob = json.dumps(result.audit_detail)
             self.assertNotIn(secret, blob)
             self.assertIn("thumbprint", blob)
@@ -211,10 +232,69 @@ class ServiceTests(unittest.TestCase):
             self.assertIn("App.AppImage.sig", names)
             self.assertNotIn("gpg-pass", json.dumps(result.audit_detail))
 
-    def test_redact_secrets(self) -> None:
-        data = {"msg": "fail pass=secret", "nested": ["secret"]}
-        out = redact_secrets(data, ["secret"])
-        self.assertNotIn("secret", json.dumps(out))
+    def test_linux_export_dir_same_as_artifact_parent(self) -> None:
+        """Ship payload must be in signed_paths/SHA256SUMS even when no copy needed."""
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifact = root / "App.AppImage"
+            artifact.write_bytes(b"img")
+
+            def fake_gpg(src, **kwargs):
+                out = Path(str(src) + ".sig")
+                out.write_bytes(b"sig")
+                return out
+
+            result = sign_artifacts(
+                SignRequest(
+                    artifacts=[str(artifact)],
+                    identity=SigningIdentity(
+                        platform="linux",
+                        gpg_key_id="0xABCD",
+                        gpg_passphrase="sekrit",
+                    ),
+                    export_dir=str(root),
+                ),
+                tools=SigningTools(None, None, None),
+                windows_signer=MagicMock(),
+                linux_signer=fake_gpg,
+            )
+            self.assertTrue(result.ok, result.error)
+            names = {Path(p).name for p in result.signed_paths}
+            self.assertEqual(names, {"App.AppImage", "App.AppImage.sig"})
+            sums = (root / "SHA256SUMS").read_text(encoding="utf-8")
+            self.assertIn("App.AppImage\n", sums + "\n")
+            self.assertIn("App.AppImage.sig", sums)
+
+    def test_failure_scrubs_passphrase_from_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            artifact = root / "Setup.msi"
+            artifact.write_bytes(b"msi")
+            pfx = root / "c.pfx"
+            pfx.write_bytes(b"pfx")
+            secret = "leak-me-passphrase"
+
+            def boom(src, **kwargs):
+                raise RuntimeError(f"signer exploded with {secret}")
+
+            result = sign_artifacts(
+                SignRequest(
+                    artifacts=[str(artifact)],
+                    identity=SigningIdentity(
+                        platform="windows",
+                        pfx_path=str(pfx),
+                        pfx_passphrase=secret,
+                    ),
+                    export_dir=str(root / "out"),
+                ),
+                tools=SigningTools(None, None, None),
+                windows_signer=boom,
+                linux_signer=MagicMock(),
+            )
+            self.assertFalse(result.ok)
+            self.assertNotIn(secret, result.error or "")
+            self.assertNotIn(secret, json.dumps(result.audit_detail))
+            self.assertIn("***", result.error or "")
 
 
 if __name__ == "__main__":

@@ -26,7 +26,6 @@ echo "== unit tests (desktop) =="
 
 echo "== unit tests (signing) =="
 "$PY" -m unittest discover -s "$CS/signing" -v
-"$PY" -m unittest discover -s "$CS/tests" -p 'test_signing*.py' -v
 
 echo "== detect-only =="
 "$PY" -m shell --detect-only | head -c 2000

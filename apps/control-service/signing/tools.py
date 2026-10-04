@@ -7,6 +7,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 
+class SigningToolMissing(RuntimeError):
+    """Raised when a required signing CLI is not on PATH."""
+
+
 @dataclass(frozen=True)
 class SigningTools:
     osslsigncode: Optional[str]

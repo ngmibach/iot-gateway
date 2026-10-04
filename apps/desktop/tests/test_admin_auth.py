@@ -49,3 +49,14 @@ class AdminAuthTests(unittest.TestCase):
         raw = keyring_store.get_secret("local", kind="admin")
         self.assertIsNotNone(raw)
         self.assertNotEqual(raw, "9999")
+
+    def test_expired_session_rejected(self) -> None:
+        import time
+
+        gate = admin_auth.AdminGate(ttl_s=1)
+        token = gate.set_pin("4321")
+        gate.require(token)
+        time.sleep(1.1)
+        with self.assertRaises(PermissionError):
+            gate.require(token)
+        self.assertFalse(gate.status(token)["unlocked"])

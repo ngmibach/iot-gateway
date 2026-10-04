@@ -7,13 +7,13 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from .tools import SigningTools, detect_signing_tools
+from .tools import SigningToolMissing, SigningTools, detect_signing_tools
 
 RunFn = Callable[..., subprocess.CompletedProcess]
 
 
-class SigningToolMissing(RuntimeError):
-    """Raised when neither osslsigncode nor signtool is on PATH."""
+def _scrub(err: str, passphrase: str) -> str:
+    return err.replace(passphrase, "***") if passphrase else err
 
 
 def signed_output_path(src: Path) -> Path:
@@ -98,9 +98,7 @@ def _sign_osslsigncode(
     proc = run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-        # Strip passphrase if it somehow appears in tool stderr.
-        err = err.replace(passphrase, "***")
-        raise RuntimeError(f"osslsigncode failed: {err}")
+        raise RuntimeError(f"osslsigncode failed: {_scrub(err, passphrase)}")
     return out
 
 
@@ -133,6 +131,5 @@ def _sign_signtool(
     proc = run(cmd, capture_output=True, text=True, check=False)
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-        err = err.replace(passphrase, "***")
-        raise RuntimeError(f"signtool failed: {err}")
+        raise RuntimeError(f"signtool failed: {_scrub(err, passphrase)}")
     return out

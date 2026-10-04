@@ -6,8 +6,8 @@ Setup Wizard + Actions chrome + process launcher for the Python control service 
 
 | Piece | Role |
 |-------|------|
-| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API (+ optional Streamlit) |
-| `ui/` | Setup Wizard + **Actions** + native Monitoring + optional Lab panel (`lab.html`) |
+| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API (+ optional Streamlit), Admin PIN |
+| `ui/` | Setup Wizard + **Actions** + native Monitoring + Lab (`lab.html`) + **Admin / Code Signing** |
 
 | `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API + Streamlit, **admin unlock** |
 | `ui/` | Setup Wizard + **Admin / Code Signing** pages (also Tauri `frontendDist`) |

@@ -45,6 +45,7 @@ class WizardState:
         self.firewall_confirmed = False
         self.lock = threading.Lock()
         self.admin = admin_auth.AdminGate()
+        self.last_signing_export: str | None = None
 
 
 STATE = WizardState()
@@ -71,6 +72,24 @@ def _lab_status_dict(st: Any) -> dict[str, Any]:
 
 def _admin_token(handler: BaseHTTPRequestHandler) -> str | None:
     return handler.headers.get("X-Admin-Session") or None
+
+
+def _normalize_platform(value: object) -> str:
+    plat = str(value or "auto").strip().lower()
+    return plat if plat in ("windows", "linux", "auto") else "auto"
+
+
+def _require_abs_path(raw: str, *, label: str) -> str:
+    """Admin signing paths: absolute, no NUL. Unlocked admin ≡ local FS access."""
+    text = (raw or "").strip()
+    if not text or "\x00" in text:
+        raise ValueError(f"{label}: empty or invalid path")
+    from pathlib import Path
+
+    p = Path(text)
+    if not p.is_absolute():
+        raise ValueError(f"{label} must be an absolute path")
+    return str(p)
 
 
 def _json_response(handler: BaseHTTPRequestHandler, code: int, body: Any) -> None:
@@ -568,7 +587,12 @@ def _handle_admin_signing(
     method: str,
     path: str,
 ) -> None:
-    """Code Signing tab APIs — require admin unlock (checked by caller)."""
+    """Code Signing tab APIs — require admin unlock (checked by caller).
+
+    Trust boundary: an unlocked admin session may read/sign absolute paths on
+    the local machine (intentional for build folders). ``open-export`` is
+    confined to the app data dir or the last successful sign export.
+    """
     from pathlib import Path
 
     from registry.registry import Registry  # type: ignore[import-not-found]
@@ -595,7 +619,7 @@ def _handle_admin_signing(
                 "pfx_path": ident.get("pfx_path"),
                 "thumbprint": ident.get("thumbprint"),
                 "gpg_key_id": ident.get("gpg_key_id"),
-                "platform": ident.get("platform") or "auto",
+                "platform": _normalize_platform(ident.get("platform")),
             },
         )
         return
@@ -603,9 +627,16 @@ def _handle_admin_signing(
     if method == "POST" and path == "/api/admin/signing/identity":
         body = _read_json(handler)
         settings = load_settings()
+        pfx_path = None
+        if body.get("pfx_path"):
+            try:
+                pfx_path = _require_abs_path(str(body["pfx_path"]), label="pfx_path")
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
         ident = {
-            "platform": str(body.get("platform") or "auto"),
-            "pfx_path": (str(body["pfx_path"]).strip() if body.get("pfx_path") else None),
+            "platform": _normalize_platform(body.get("platform")),
+            "pfx_path": pfx_path,
             "thumbprint": (
                 str(body["thumbprint"]).strip() if body.get("thumbprint") else None
             ),
@@ -629,9 +660,10 @@ def _handle_admin_signing(
 
     if method == "POST" and path == "/api/admin/signing/list-artifacts":
         body = _read_json(handler)
-        folder = str(body.get("folder") or "").strip()
-        if not folder:
-            _json_response(handler, 400, {"error": "folder required"})
+        try:
+            folder = _require_abs_path(str(body.get("folder") or ""), label="folder")
+        except ValueError as e:
+            _json_response(handler, 400, {"error": str(e)})
             return
         try:
             items = list_signable_artifacts(Path(folder))
@@ -653,9 +685,19 @@ def _handle_admin_signing(
         if gpg_pass is None:
             gpg_pass = keyring_store.get_secret("signing-gpg", kind="signing")
 
+        pfx_path = body.get("pfx_path") or saved.get("pfx_path")
+        if pfx_path:
+            try:
+                pfx_path = _require_abs_path(str(pfx_path), label="pfx_path")
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
+
         identity = SigningIdentity(
-            platform=str(body.get("platform") or saved.get("platform") or "auto"),
-            pfx_path=body.get("pfx_path") or saved.get("pfx_path"),
+            platform=_normalize_platform(  # type: ignore[arg-type]
+                body.get("platform") or saved.get("platform") or "auto"
+            ),
+            pfx_path=pfx_path,
             pfx_passphrase=pfx_pass,
             thumbprint=body.get("thumbprint") or saved.get("thumbprint"),
             gpg_key_id=body.get("gpg_key_id") or saved.get("gpg_key_id"),
@@ -665,16 +707,28 @@ def _handle_admin_signing(
         if not isinstance(artifacts, list) or not artifacts:
             _json_response(handler, 400, {"error": "artifacts list required"})
             return
+        try:
+            artifact_paths = [
+                _require_abs_path(str(a), label="artifact") for a in artifacts
+            ]
+        except ValueError as e:
+            _json_response(handler, 400, {"error": str(e)})
+            return
         export_dir = body.get("export_dir")
-        if not export_dir:
+        if export_dir:
+            try:
+                export_dir = _require_abs_path(str(export_dir), label="export_dir")
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
+        else:
             export_dir = str(ensure_data_dir() / "signed-export")
 
         result = sign_artifacts(
             SignRequest(
-                artifacts=[str(a) for a in artifacts],
+                artifacts=artifact_paths,
                 identity=identity,
                 export_dir=str(export_dir),
-                actor="admin",
             )
         )
         # Persist audit via registry.sqlite (no secrets in detail)
@@ -690,6 +744,9 @@ def _handle_admin_signing(
         finally:
             reg.close()
 
+        if result.ok and result.export_dir:
+            STATE.last_signing_export = result.export_dir
+
         payload = result.as_dict()
         payload["audit_id"] = audit_id
         _json_response(handler, 200 if result.ok else 400, payload)
@@ -697,17 +754,35 @@ def _handle_admin_signing(
 
     if method == "POST" and path == "/api/admin/signing/open-export":
         body = _read_json(handler)
-        folder = str(body.get("folder") or "").strip()
-        if not folder:
-            _json_response(handler, 400, {"error": "folder required"})
+        try:
+            folder = _require_abs_path(str(body.get("folder") or ""), label="folder")
+        except ValueError as e:
+            _json_response(handler, 400, {"error": str(e)})
             return
-        path_obj = Path(folder)
+        path_obj = Path(folder).resolve()
         if not path_obj.is_dir():
             _json_response(handler, 404, {"error": f"not a directory: {folder}"})
             return
-        # file:// open via browser helper
-        open_in_browser(path_obj.resolve().as_uri())
-        _json_response(handler, 200, {"ok": True, "folder": str(path_obj.resolve())})
+        # Confine open-export to app data tree or last successful sign export.
+        data_root = ensure_data_dir().resolve()
+        allowed = [data_root]
+        if STATE.last_signing_export:
+            allowed.append(Path(STATE.last_signing_export).resolve())
+        if not any(
+            path_obj == root or root in path_obj.parents for root in allowed
+        ):
+            _json_response(
+                handler,
+                403,
+                {
+                    "error": (
+                        "open-export confined to app data dir or last sign export"
+                    )
+                },
+            )
+            return
+        open_in_browser(path_obj.as_uri())
+        _json_response(handler, 200, {"ok": True, "folder": str(path_obj)})
         return
 
     _json_response(handler, 404, {"error": f"unknown api {method} {path}"})

@@ -17,7 +17,6 @@ from .lab import router as lab_router
 from .query import router as query_router
 from .schemas import HealthResponse
 from .settings import Settings
-from .signing_routes import router as signing_router
 
 
 def create_app(

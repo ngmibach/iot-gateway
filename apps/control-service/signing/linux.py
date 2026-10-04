@@ -6,13 +6,9 @@ import subprocess
 from pathlib import Path
 from typing import Callable, Optional
 
-from .tools import SigningTools, detect_signing_tools
+from .tools import SigningToolMissing, SigningTools, detect_signing_tools
 
 RunFn = Callable[..., subprocess.CompletedProcess]
-
-
-class SigningToolMissing(RuntimeError):
-    """Raised when gpg is not on PATH."""
 
 
 def sig_output_path(src: Path) -> Path:
@@ -73,6 +69,7 @@ def sign_gpg_detach(
     )
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip() or f"exit {proc.returncode}"
-        err = err.replace(passphrase, "***")
+        if passphrase:
+            err = err.replace(passphrase, "***")
         raise RuntimeError(f"gpg detach-sign failed: {err}")
     return out

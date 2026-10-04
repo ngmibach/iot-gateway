@@ -4,24 +4,20 @@ from __future__ import annotations
 
 import hashlib
 import hmac
-import logging
 import secrets
+import threading
 import time
 from dataclasses import dataclass
 from typing import Optional
 
 from . import keyring_store
 
-logger = logging.getLogger(__name__)
-
 ADMIN_GATEWAY_ID = "local"
 ADMIN_KIND = "admin"
-PIN_ACCOUNT_SUFFIX = "pin"
 DEFAULT_TTL_S = 15 * 60
-
-
-def _pin_account() -> str:
-    return keyring_store.cred_username(ADMIN_GATEWAY_ID, ADMIN_KIND)
+# Soft online throttle against local /api/admin/unlock brute-force.
+_MAX_UNLOCK_FAILURES = 5
+_UNLOCK_COOLDOWN_S = 30.0
 
 
 def has_admin_pin() -> bool:
@@ -65,36 +61,55 @@ class AdminGate:
 
     def __init__(self, *, ttl_s: int = DEFAULT_TTL_S) -> None:
         self.ttl_s = ttl_s
+        self._lock = threading.Lock()
         self._session: Optional[AdminSession] = None
+        self._fail_count = 0
+        self._cooldown_until = 0.0
 
     def status(self, token: Optional[str] = None) -> dict:
-        unlocked = False
-        if self._session and self._session.valid and token:
-            unlocked = hmac.compare_digest(self._session.token, token)
-        return {
-            "has_pin": has_admin_pin(),
-            "unlocked": unlocked,
-            "expires_at": self._session.expires_at if unlocked and self._session else None,
-            "ttl_s": self.ttl_s,
-        }
+        with self._lock:
+            session = self._session
+            unlocked = False
+            if session is not None and session.valid and token:
+                unlocked = hmac.compare_digest(session.token, token)
+            return {
+                "has_pin": has_admin_pin(),
+                "unlocked": unlocked,
+                "expires_at": session.expires_at if unlocked and session else None,
+                "ttl_s": self.ttl_s,
+            }
 
     def unlock(self, pin: str) -> str:
-        if not has_admin_pin():
-            raise ValueError("admin PIN not set — call set_pin first")
-        if not verify_admin_pin(pin):
-            raise ValueError("invalid admin PIN")
-        token = secrets.token_urlsafe(24)
-        self._session = AdminSession(token=token, expires_at=time.time() + self.ttl_s)
-        return token
+        with self._lock:
+            now = time.time()
+            if now < self._cooldown_until:
+                raise ValueError("too many failed unlocks — try again shortly")
+            if not has_admin_pin():
+                raise ValueError("admin PIN not set — call set_pin first")
+            if not verify_admin_pin(pin):
+                self._fail_count += 1
+                if self._fail_count >= _MAX_UNLOCK_FAILURES:
+                    self._cooldown_until = now + _UNLOCK_COOLDOWN_S
+                    self._fail_count = 0
+                raise ValueError("invalid admin PIN")
+            self._fail_count = 0
+            token = secrets.token_urlsafe(24)
+            self._session = AdminSession(
+                token=token, expires_at=now + self.ttl_s
+            )
+            return token
 
     def lock(self) -> None:
-        self._session = None
+        with self._lock:
+            self._session = None
 
     def require(self, token: Optional[str]) -> None:
-        if not self._session or not self._session.valid:
-            raise PermissionError("admin unlock required")
-        if not token or not hmac.compare_digest(self._session.token, token):
-            raise PermissionError("invalid or expired admin session")
+        with self._lock:
+            session = self._session
+            if session is None or not session.valid:
+                raise PermissionError("admin unlock required")
+            if not token or not hmac.compare_digest(session.token, token):
+                raise PermissionError("invalid or expired admin session")
 
     def set_pin(self, pin: str, *, unlock: bool = True) -> str:
         ref = set_admin_pin(pin)
