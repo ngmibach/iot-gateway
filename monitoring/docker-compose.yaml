@@ -1,3 +1,6 @@
+# Lab monitoring stack. Day-2 control plane is apps/control-service (SSH), not Gitea.
+# Gitea + runner + seed are DEPRECATED/optional — start only with:
+#   docker compose --profile legacy-gitea up -d
 services:
   loki:
     image: grafana/loki:latest
@@ -58,7 +61,9 @@ services:
     depends_on:
       - loki
 
+  # DEPRECATED control plane (replaced by SSH playbooks). Opt-in profile only.
   gitea:
+    profiles: ["legacy-gitea"]
     build:
       context: build/gitea/server
     container_name: gitea
@@ -96,6 +101,7 @@ services:
       retries: 6
       start_period: 30s
   gitea-seed:
+    profiles: ["legacy-gitea"]
     build:
       context: .
       dockerfile: build/gitea/seed/Dockerfile
@@ -126,6 +132,7 @@ services:
       - ./scripts/gitea_actions:/content:ro
       - ./build/gitea/action_latest:/build-context/gitea-action-latest:ro
   gitearunner:
+    profiles: ["legacy-gitea"]
     build:
       context: build/gitea/runner
     environment:

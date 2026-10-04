@@ -42,6 +42,7 @@ services:
     environment:
       - TZ=Asia/Ho_Chi_Minh
 
+  # Mandatory in v1 (K17): decrypt → sensor_data.log for IDS/dashboards.
   nodered:
     build: 
       context: ./nodered/build

@@ -1,204 +1,165 @@
-# IoT Gateway — Setup and Startup Guide
+# IoT Gateway Monitor
 
-This guide walks through setting up and starting the full IoT Gateway stack:
+Cross-platform control plane for the IoT gateway: **discover the device on your LAN → SSH install the gateway stack → open Monitoring + Actions**. You do not need to run `docker compose` or hand-edit IPs for the default path.
 
-| Component | Role |
-|-----------|------|
-| **Gateway** | Receives sensor data over MQTT, processes it, and forwards it to the monitoring stack |
-| **Monitoring** | Visualizes metrics and logs; provides the control plane (Grafana, Streamlit, Gitea, Prometheus) |
-| **Fake Sensor** | Generates simulated sensor traffic for testing (optional) |
+| Piece | Role |
+|-------|------|
+| **Desktop app** (Phase-0: Streamlit + control service; Phase-1: Tauri) | Setup Wizard, Monitoring, Actions, Admin |
+| **Control service** (`apps/control-service/`) | SSH provision/register playbooks, local SQLite registry, support bundle |
+| **Gateway** (on Ubuntu / Raspberry Pi) | Mosquitto, HAProxy, **Node-RED (mandatory)**, IDS, exporters, optional agent |
+| **Observability** | App-managed Loki + Prometheus (Grafana optional) |
 
-All commands below assume you are at the repository root unless a `cd` step is shown.
-
----
-
-## Prerequisites
-
-- Docker and Docker Compose installed
-- `openssl` available (used by `cert-generation.sh`)
-- Network access to the gateway host
-
-### 1. Update IP addresses
-
-Find the gateway machine IP:
-
-```shell
-ip addr
-# or
-ifconfig
-```
-
-Use the `inet` address of your primary interface (for example `10.185.71.215` on `eth1`).
-
-Update the following files with that IP:
-
-**`cert-generation.sh`** — server certificate common name:
-
-```shell
-SERVER_CN="<your-gateway-ip>"
-```
-
-**`fake_sensor/build/sensor*/test_sensor_data.sh`** — MQTT broker host (sensors 1–4 used by cert generation):
-
-```shell
-HOST="<your-gateway-ip>"
-```
-
-> Sensors 5–9 also have `test_sensor_data.sh` scripts; update `HOST` there as well if you plan to run them.
-
-### 2. Set permissions
-
-From the repository root, grant broad write access so containers can read and write mounted volumes:
-
-```shell
-sudo chmod -R 777 .
-```
-
-### 3. Update Gitea workflow volume paths
-
-Gitea Actions workflows mount host directories into runner containers. Update the `volumes` section in every YAML file under:
-
-```
-monitoring/scripts/gitea_actions/.gitea/workflows/
-```
-
-Replace placeholder paths with your actual checkout location. Gateway files live under the `gateway/` subdirectory:
-
-```yaml
-volumes:
-  - /path/to/iot-gateway/gateway/mosquitto/config/acl:/mosquitto/config/acl
-  - /path/to/iot-gateway/gateway/mosquitto/config/passwords:/mosquitto/config/passwords
-  - /path/to/iot-gateway/gateway/docker-compose.yaml:/iot-gateway/docker-compose.yaml
-  - /path/to/iot-gateway/gateway/haproxy/allowed-ips.txt:/haproxy/allowed-ips.txt
-```
-
-Workflows that touch certificates or sensor builds also need paths such as:
-
-```yaml
-  - /path/to/iot-gateway/gateway/certs:/server/certs
-  - /path/to/iot-gateway/fake_sensor/build/sensor1:/client/sensor1/certs
-```
-
-Check each workflow file — volume mounts differ per job.
+Design reference: `DESIGN-packaged-app.md` (when present in the tree).
 
 ---
 
-## Startup procedure
+## Recommended path (app-first)
 
-Services must be started in order: **certificates → gateway → monitoring → fake sensors (optional)**.
-
-### Step 1 — Generate certificates
-
-From the repository root:
+### 1. Install / start the control plane on your operator PC
 
 ```shell
+cd apps/control-service
+python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+
+# Local API (binds 127.0.0.1:9137 only)
+export IOTGW_CA_PASSPHRASE='…'          # gateway CA unlock for CSR sign
+export IOTGW_SSH_KEY=~/.ssh/id_ed25519  # or IOTGW_SSH_PASSWORD
+python -m api
+```
+
+Phase-0 UI: run Streamlit on the **host** (not inside the monitoring compose container) so it can reach the local API:
+
+```shell
+export CONTROL_SERVICE_URL=http://127.0.0.1:9137
+export LOKI_URL=http://127.0.0.1:3100
+export PROMETHEUS_URL=http://127.0.0.1:9090
+# USE_LEGACY_GITEA is off by default — do not set it for the app-first path
+streamlit run monitoring/build/streamlit/app.py
+```
+
+### 2. Discover → SSH → install gateway
+
+1. Enter the gateway LAN IP (mDNS via `iot-gateway-agent` is optional until after first install).
+2. Authenticate with the device SSH password or key.
+3. Provision uploads the gateway bundle, runs `docker compose up`, probes exporters/Loki, then installs the agent **last**.
+
+CLI dogfood (when the provisioner module is on your branch/PYTHONPATH):
+
+```shell
+PYTHONPATH=apps/control-service python -m provisioner provision \
+  --host "$GATEWAY_IP" --user ubuntu \
+  --gateway-ip "$GATEWAY_IP" --monitoring-ip "$MONITORING_IP"
+```
+
+### 3. Register devices & open the dashboard
+
+- **Actions → Register Device**: ACL + hashed Mosquitto password + HAProxy allow-list + mTLS client cert (one-time download token).
+- **Monitoring**: sensors / gateway / Raspberry Pi views against Loki + Prometheus.
+
+### 4. Support bundle (sanitized)
+
+```shell
+PYTHONPATH=apps/control-service python -c "
+from pathlib import Path
+from api.settings import Settings
+from registry.registry import Registry
+from support import write_support_bundle, default_bundle_path
+s = Settings.from_env()
+r = Registry(str(s.registry_path))
+path = write_support_bundle(default_bundle_path(s.data_dir), settings=s, registry=r)
+print(path)
+"
+```
+
+Export includes redacted settings, registry snapshot, audit log, and recent control logs. **No** passwords, API tokens, PEMs, or keyring/signing material.
+
+---
+
+## Node-RED is mandatory (K17)
+
+The gateway stack **must** keep Node-RED. It owns the decrypt → `sensor_data.log` path consumed by the IDS and dashboards. Removing or replacing Node-RED is out of scope for v1. Provision and compose checks treat a missing `nodered` service as a failure.
+
+---
+
+## Artifact signing — Admin Code Signing (not CI-only secrets)
+
+Release binaries (Windows `.msi`/`.exe`, Ubuntu AppImage/`.deb`) are **built unsigned in CI**. Shipping signatures are applied from the **Admin → Code Signing** tab (PR 14): the admin loads signing material via OS keyring / secure prompt and signs locally. Do not rely on long-lived org CI secrets as the only signing path. See migration notes in `docs/migration-app-first.md`.
+
+---
+
+## Gitea control plane — deprecated / optional
+
+Day-2 mutations (register, ACL, allow-list, clear logs) go through the **control service over SSH**. Gitea + runner + seed remain in `monitoring/docker-compose.yaml` only under the Compose profile `legacy-gitea` for brownfield labs. Prefer `USE_LEGACY_GITEA=0` (default) in Streamlit.
+
+```shell
+# Only if you intentionally need the old Actions runner:
+docker compose -f monitoring/docker-compose.yaml --profile legacy-gitea up -d
+```
+
+---
+
+## Advanced / legacy: three-folder Docker Compose
+
+Power users can still run the classic stacks by hand. Prefer the app-first path above for new installs.
+
+### Prerequisites
+
+- Docker + Docker Compose, `openssl`
+- Network reachability to the gateway host
+
+### Certificates
+
+```shell
+# Set SERVER_CN to the gateway IP inside cert-generation.sh, then:
 bash cert-generation.sh
 ```
 
-This script:
-
-- Creates CA, server, and client certificates for sensors 1–4
-- Copies certs into `gateway/certs/` and `fake_sensor/build/sensor{1..4}/`
-- Rebuilds fake-sensor images and restarts Mosquitto and HAProxy if the gateway is already running
-
-### Step 2 — Start the gateway
+### Start order
 
 ```shell
-cd gateway
-docker compose build
-docker compose up -d
+cd gateway && docker compose build && docker compose up -d
+cd ../monitoring && docker compose build && docker compose up -d   # Gitea profile optional
+# Optional lab traffic:
+cd ../fake_sensor && docker compose build && docker compose up -d
 ```
 
-Gateway services include Mosquitto, HAProxy, Node-RED, Promtail, IDS, and related exporters.
+Fake sensors should only run for short windows. Allow their Docker bridge IPs in `gateway/haproxy/allowed-ips.txt`, then reload HAProxy.
 
-### Step 3 — Start the monitoring stack
+### Legacy URLs (compose lab)
 
-```shell
-cd monitoring
-docker compose build
-docker compose up -d
-```
+| Service | URL | Notes |
+|---------|-----|-------|
+| Streamlit | http://localhost:8000 | Prefer host Streamlit + `CONTROL_SERVICE_URL` for Register Device |
+| Grafana | http://localhost:3210 | `admin` / `admin` |
+| Prometheus | http://localhost:9090 | |
+| Loki | http://localhost:3100 | |
+| Gitea | http://localhost:5000 | **Deprecated** control plane; profile `legacy-gitea` |
 
-Wait until containers are healthy, then open [http://localhost:5000](http://localhost:5000).
-
-#### First-time Gitea setup
-
-On a fresh install, Gitea shows the installation wizard:
-
-![Gitea installation page](assets/Gitea_UI.png)
-
-Open **Administrator Account Settings**:
-
-![Gitea administrator settings](assets/Administration_Section.png)
-
-Create the admin account:
-
-| Field | Value |
-|-------|-------|
-| Administrator Username | `admin` |
-| Email Address | `admin@localhost` |
-| Password | `admin` |
-| Confirm Password | `admin` |
-
-Click **Install Gitea**.
-
-After installation, bring the stack back up so seeding can finish:
-
-```shell
-docker compose up -d
-```
-
-Wait until the `gitea-seed` container completes. It creates the `admin/actions` repository, pushes workflow definitions, and registers the Gitea runner.
-
-### Monitoring dashboards
-
-| Service | URL | Credentials |
-|---------|-----|-------------|
-| Grafana | [http://localhost:3210](http://localhost:3210) | `admin` / `admin` |
-| Streamlit (control plane) | [http://localhost:8000](http://localhost:8000) | — |
-| Gitea | [http://localhost:5000](http://localhost:5000) | `admin` / `admin` |
-| Prometheus | [http://localhost:9090](http://localhost:9090) | — |
+Template-rendered endpoints live under `deploy/templates/` (`MONITORING_IP` / `GATEWAY_IP`). Avoid hard-coding `172.17.0.1`.
 
 ---
 
-### Step 4 — Start fake sensors (optional)
+## Tests (CI-friendly)
 
 ```shell
-cd fake_sensor
-docker compose build
-docker compose up -d
+cd apps/control-service
+PYTHONPATH=. python -m unittest discover -s tests -v
+# Includes support-bundle redaction + mocked Linux register/provision E2E
+PYTHONPATH=. python -m unittest tests.e2e.test_linux_register_provision -v
 ```
 
-> Run fake sensors only for short test windows. Continuous simulated traffic can fill log and metrics storage quickly.
+No Raspberry Pi is required for CI; live checklist text is in `tests/e2e/linux_happy_path.py`.
 
-#### Allow sensor IPs in HAProxy
+---
 
-Fake sensors connect from Docker bridge networks. HAProxy only forwards traffic from IPs listed in `gateway/haproxy/allowed-ips.txt`.
+## Repository layout
 
-1. Get a sensor container IP:
-
-   ```shell
-   docker exec -it fake_sensor-sensor1-1 hostname -I
-   ```
-
-   Example output: `172.20.0.10`
-
-2. Add the IP (or the whole Docker subnet) to `gateway/haproxy/allowed-ips.txt`:
-
-   ```
-   172.20.0.10
-   ```
-
-   To allow all containers on the bridge network at once:
-
-   ```
-   172.20.0.0/16
-   ```
-
-3. Restart HAProxy from the repository root:
-
-   ```shell
-   docker compose -f gateway/docker-compose.yaml restart haproxy
-   ```
-
-You can also manage allowed IPs through the Streamlit control plane or the **Update Device IP** Gitea workflow once the runner is registered.
+```
+apps/control-service/   # FastAPI, SSH actions, registry, telemetry, support bundle
+deploy/templates/       # IP-templated Promtail/Prometheus/Grafana snippets
+gateway/                # Device compose stack (Node-RED mandatory)
+monitoring/             # Lab compose (Loki/Prom/Grafana/Streamlit; Gitea optional)
+fake_sensor/            # Lab only
+docs/migration-app-first.md
+```
