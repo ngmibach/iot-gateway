@@ -1,1 +1,1 @@
-"""IoT Gateway control service package."""
+"""IoT Gateway control service (operator-side)."""
