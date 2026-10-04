@@ -57,6 +57,23 @@ def check_prometheus(base_url: str, *, timeout: float = 5.0) -> ProbeResult:
     )
 
 
+def gateway_loki_ready_curl(
+    monitoring_ip: str, *, port: int = 3100, max_time: int = 5
+) -> str:
+    """SSH-side probe command for PR6 acceptance (run on the gateway, not Windows).
+
+    Provisioner/wizard should execute this over the existing SSH session.
+    Windows-local curl is not sufficient for the NAT/portproxy path.
+    """
+    monitoring_ip = monitoring_ip.strip()
+    if not monitoring_ip:
+        raise ValueError("monitoring_ip is required")
+    return (
+        f"curl -fsS --max-time {max_time} "
+        f"http://{monitoring_ip}:{port}/ready"
+    )
+
+
 def wait_ready(
     *,
     loki_url: str | None = None,

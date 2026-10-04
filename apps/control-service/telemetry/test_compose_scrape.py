@@ -29,16 +29,19 @@ class ComposeScrapeTests(unittest.TestCase):
         self.assertIn("127.0.0.1:9090:9090", yml)
         self.assertNotIn("network_mode: host", yml)
 
-    def test_windows_docker_desktop_bridge_both(self) -> None:
-        yml = generate_compose_yaml(ComposeProfile.WINDOWS_DOCKER_DESKTOP)
-        self.assertIn("3100:3100", yml)
-        self.assertIn("9090:9090", yml)
+    def test_windows_desktop_aliases_linux_bridge(self) -> None:
+        bridge = generate_compose_yaml(ComposeProfile.LINUX_BRIDGE)
+        desktop = generate_compose_yaml(ComposeProfile.WINDOWS_DOCKER_DESKTOP)
+        self.assertEqual(bridge, desktop)
+        self.assertIn("3100:3100", desktop)
+        self.assertIn("9090:9090", desktop)
 
-    def test_render_scrape_targets(self) -> None:
-        text = render_prometheus_scrape("192.168.1.50", cadvisor_port=8080)
+    def test_render_scrape_targets_hardcodes_8080(self) -> None:
+        text = render_prometheus_scrape("192.168.1.50")
         self.assertIn("192.168.1.50:9100", text)
         self.assertIn("192.168.1.50:8080", text)
         self.assertNotIn("{{GATEWAY_IP}}", text)
+        self.assertNotIn("CADVISOR_PORT", text)
         self.assertIn("cadvisor", text)
         self.assertIn("mqtt_connected_sensor", text)
 

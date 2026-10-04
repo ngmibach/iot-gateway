@@ -20,7 +20,12 @@ from .nic import (
     list_ipv4_candidates,
     pick_default_monitoring_ip,
 )
-from .readiness import check_loki, check_prometheus, wait_ready
+from .readiness import (
+    check_loki,
+    check_prometheus,
+    gateway_loki_ready_curl,
+    wait_ready,
+)
 from .scrape import render_prometheus_scrape
 
 __all__ = [
@@ -34,6 +39,7 @@ __all__ = [
     "check_prometheus",
     "filter_nic_candidates",
     "format_checklist_for_display",
+    "gateway_loki_ready_curl",
     "generate_compose_yaml",
     "generate_wsl2_nat_checklist",
     "list_ipv4_candidates",

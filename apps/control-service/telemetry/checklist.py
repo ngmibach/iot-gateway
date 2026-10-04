@@ -20,8 +20,18 @@ class ChecklistItem:
     id: str
     title: str
     command: str
-    shell: str  # "powershell" | "cmd" | "either"
     notes: str = ""
+
+
+def _firewall_add(listen_port: int = LOKI_PORT) -> str:
+    return (
+        f'netsh advfirewall firewall add rule name="{FIREWALL_RULE_NAME}" '
+        f"dir=in action=allow protocol=TCP localport={listen_port}"
+    )
+
+
+def _firewall_delete() -> str:
+    return f'netsh advfirewall firewall delete rule name="{FIREWALL_RULE_NAME}"'
 
 
 def generate_wsl2_nat_checklist(
@@ -31,6 +41,7 @@ def generate_wsl2_nat_checklist(
     listen_address: str = "0.0.0.0",
     listen_port: int = LOKI_PORT,
     connect_port: int = LOKI_PORT,
+    include_firewall_delete: bool = False,
 ) -> list[ChecklistItem]:
     """Build the K18 guided checklist for Loki :3100 only.
 
@@ -46,15 +57,10 @@ def generate_wsl2_nat_checklist(
         f"listenaddress={listen_address} listenport={listen_port} "
         f"connectaddress={wsl2_ip} connectport={connect_port}"
     )
-    # CMD-style caret continuation (matches DESIGN doc); also provide one-liner above.
     portproxy_multiline = (
         f"netsh interface portproxy add v4tov4 "
         f"listenaddress={listen_address} listenport={listen_port} ^\n"
         f"  connectaddress={wsl2_ip} connectport={connect_port}"
-    )
-    firewall = (
-        f'netsh advfirewall firewall add rule name="{FIREWALL_RULE_NAME}" '
-        f"dir=in action=allow protocol=TCP localport={listen_port}"
     )
     show_proxy = "netsh interface portproxy show v4tov4"
     verify_note_parts = [
@@ -62,44 +68,56 @@ def generate_wsl2_nat_checklist(
         f"WSL2 connect address: {wsl2_ip}.",
     ]
     if monitoring_ip:
+        from .readiness import gateway_loki_ready_curl
+
         verify_note_parts.append(
-            f"After confirm, probe from the gateway: "
-            f"curl -fsS --max-time 5 http://{monitoring_ip}:{listen_port}/ready"
+            "After confirm, probe from the gateway (SSH): "
+            + gateway_loki_ready_curl(monitoring_ip, port=listen_port)
         )
 
-    return [
-        ChecklistItem(
-            id="portproxy_add",
-            title="Add portproxy (LAN :3100 → WSL2 Loki)",
-            command=portproxy,
-            shell="either",
-            notes=(
-                "Maps Windows listen → WSL2 Loki only. "
-                f"Multiline CMD form:\n{portproxy_multiline}"
+    items: list[ChecklistItem] = []
+    if include_firewall_delete:
+        items.append(
+            ChecklistItem(
+                id="firewall_delete",
+                title="Remove existing firewall rule (idempotent re-run)",
+                command=_firewall_delete(),
+                notes="Safe if the rule is missing; avoids duplicate-rule errors on add.",
+            )
+        )
+
+    items.extend(
+        [
+            ChecklistItem(
+                id="portproxy_add",
+                title="Add portproxy (LAN :3100 → WSL2 Loki)",
+                command=portproxy,
+                notes=(
+                    "Maps Windows listen → WSL2 Loki only. "
+                    f"Multiline CMD form:\n{portproxy_multiline}"
+                ),
             ),
-        ),
-        ChecklistItem(
-            id="firewall_allow",
-            title="Allow inbound TCP 3100 (Windows Firewall)",
-            command=firewall,
-            shell="either",
-            notes="Inbound allow for Promtail push from the gateway subnet.",
-        ),
-        ChecklistItem(
-            id="portproxy_show",
-            title="Verify portproxy table",
-            command=show_proxy,
-            shell="either",
-            notes="Confirm listenport 3100 → connectaddress matches current WSL2 IP.",
-        ),
-        ChecklistItem(
-            id="user_confirm",
-            title="Confirm in Setup Wizard",
-            command="",
-            shell="either",
-            notes=" ".join(verify_note_parts),
-        ),
-    ]
+            ChecklistItem(
+                id="firewall_allow",
+                title="Allow inbound TCP 3100 (Windows Firewall)",
+                command=_firewall_add(listen_port),
+                notes="Inbound allow for Promtail push from the gateway subnet.",
+            ),
+            ChecklistItem(
+                id="portproxy_show",
+                title="Verify portproxy table",
+                command=show_proxy,
+                notes="Confirm listenport 3100 → connectaddress matches current WSL2 IP.",
+            ),
+            ChecklistItem(
+                id="user_confirm",
+                title="Confirm in Setup Wizard",
+                command="",
+                notes=" ".join(verify_note_parts),
+            ),
+        ]
+    )
+    return items
 
 
 def format_checklist_for_display(items: list[ChecklistItem]) -> str:
@@ -126,9 +144,14 @@ def refresh_checklist_on_wsl_ip_change(
     *,
     monitoring_ip: str | None = None,
 ) -> list[ChecklistItem]:
-    """Re-display checklist when WSL IP changes (still no auto-apply)."""
+    """Re-display checklist when WSL IP changes (still no auto-apply).
+
+    Prepends portproxy delete + firewall delete so re-runs are idempotent.
+    """
     items = generate_wsl2_nat_checklist(
-        wsl2_ip=new_wsl2_ip, monitoring_ip=monitoring_ip
+        wsl2_ip=new_wsl2_ip,
+        monitoring_ip=monitoring_ip,
+        include_firewall_delete=True,
     )
     delete_old = (
         f"netsh interface portproxy delete v4tov4 "
@@ -138,10 +161,10 @@ def refresh_checklist_on_wsl_ip_change(
         id="portproxy_delete_stale",
         title=f"Remove stale portproxy (was {previous_wsl2_ip})",
         command=delete_old,
-        shell="either",
         notes=(
             f"WSL2 IP changed {previous_wsl2_ip} → {new_wsl2_ip}. "
             "Delete the old mapping before adding the new one."
         ),
     )
+    # Order: delete portproxy → delete firewall → add proxy → add firewall → …
     return [preamble, *items]

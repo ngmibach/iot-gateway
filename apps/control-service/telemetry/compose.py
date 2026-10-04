@@ -8,6 +8,7 @@ from pathlib import Path
 
 _ASSETS = Path(__file__).resolve().parent / "assets"
 
+# Tags are :latest for early bring-up; field-kit pins/digests land with image-cache work.
 LOKI_IMAGE = "grafana/loki:latest"
 PROM_IMAGE = "prom/prometheus:latest"
 PROJECT_NAME = "iotgw-telemetry"
@@ -18,11 +19,11 @@ class ComposeProfile(str, Enum):
 
     # Loki publishes 3100; Prometheus uses host network (typical Ubuntu).
     LINUX_HOST = "linux_host"
-    # Both on bridge with published ports (Linux alternate / WSL2-friendly).
+    # Both on bridge with published ports (Linux alternate).
     LINUX_BRIDGE = "linux_bridge"
     # WSL2 Ubuntu: Loki 0.0.0.0:3100; Prometheus localhost-only 9090.
     WSL2 = "wsl2"
-    # Docker Desktop on Windows (no host network): publish both ports.
+    # Docker Desktop on Windows — same compose body as LINUX_BRIDGE (wizard label).
     WINDOWS_DOCKER_DESKTOP = "windows_docker_desktop"
 
 
@@ -86,23 +87,24 @@ volumes:
 """
 
 
+def _bridge_both() -> str:
+    return _loki_service(publish="3100:3100") + _prometheus_bridge(publish="9090:9090")
+
+
 def generate_compose_yaml(profile: ComposeProfile | str) -> str:
     """Return docker-compose YAML for the given profile."""
     profile = ComposeProfile(profile)
     if profile is ComposeProfile.LINUX_HOST:
         body = _loki_service(publish="3100:3100") + _prometheus_host()
-    elif profile is ComposeProfile.LINUX_BRIDGE:
-        body = _loki_service(publish="3100:3100") + _prometheus_bridge(
-            publish="9090:9090"
-        )
+    elif profile in (
+        ComposeProfile.LINUX_BRIDGE,
+        ComposeProfile.WINDOWS_DOCKER_DESKTOP,
+    ):
+        body = _bridge_both()
     elif profile is ComposeProfile.WSL2:
         # Loki must listen on 0.0.0.0 inside WSL for portproxy; Prom stays local.
         body = _loki_service(publish="0.0.0.0:3100:3100") + _prometheus_bridge(
             publish="127.0.0.1:9090:9090"
-        )
-    elif profile is ComposeProfile.WINDOWS_DOCKER_DESKTOP:
-        body = _loki_service(publish="3100:3100") + _prometheus_bridge(
-            publish="9090:9090"
         )
     else:  # pragma: no cover
         raise ValueError(f"unknown profile: {profile}")

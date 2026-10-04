@@ -7,6 +7,7 @@ import unittest
 from telemetry.nic import (
     NicCandidate,
     filter_nic_candidates,
+    is_wsl_nat_iface,
     name_excluded,
     pick_default_monitoring_ip,
 )
@@ -41,6 +42,24 @@ class NicFilterTests(unittest.TestCase):
         names = [c.name for c in got]
         self.assertEqual(names, ["Ethernet", "Wi-Fi"])
 
+    def test_keeps_external_vethernet_lan(self) -> None:
+        # Case-insensitive ^veth must NOT swallow Hyper-V external LAN adapters.
+        raw = [
+            _c("vEthernet (External Switch)", "192.168.40.20"),
+            _c("vEthernet (LAN)", "10.0.0.8"),
+            _c("veth0abc", "172.17.0.2"),  # Linux pair — still excluded
+        ]
+        got = filter_nic_candidates(raw)
+        self.assertEqual(
+            [c.name for c in got],
+            ["vEthernet (External Switch)", "vEthernet (LAN)"],
+        )
+
+    def test_linux_veth_case_sensitive(self) -> None:
+        self.assertTrue(name_excluded("veth0abc"))
+        self.assertFalse(name_excluded("vEthernet (External Switch)"))
+        self.assertFalse(name_excluded("VETH0"))  # not a Linux veth pair name
+
     def test_excludes_loopback_and_link_local_ips(self) -> None:
         raw = [
             _c("eth0", "127.0.0.2"),
@@ -52,10 +71,30 @@ class NicFilterTests(unittest.TestCase):
 
     def test_can_keep_docker_when_flag_false(self) -> None:
         raw = [_c("docker0", "172.17.0.1"), _c("eth0", "192.168.1.10")]
-        got = filter_nic_candidates(raw, exclude_docker_wsl=False, exclude_link_local=False)
-        # docker0 still excluded? No — exclude_docker_wsl=False keeps it;
-        # loopback filter does not apply to 172.17.
+        got = filter_nic_candidates(
+            raw, exclude_docker_wsl=False, exclude_link_local=False
+        )
         self.assertEqual([c.name for c in got], ["docker0", "eth0"])
+
+    def test_wsl_nat_eth0_172_filtered_when_flag_set(self) -> None:
+        # Repro from review: eth0 172.28.x must not be MONITORING_IP on NAT path.
+        raw = [
+            _c("eth0", "172.28.123.4", 20),
+            _c("Ethernet", "192.168.1.10"),
+        ]
+        kept_bare = filter_nic_candidates(raw)  # bare metal: keep eth0 172.x
+        self.assertEqual([c.ip for c in kept_bare], ["172.28.123.4", "192.168.1.10"])
+
+        got = filter_nic_candidates(raw, exclude_wsl_nat=True)
+        self.assertEqual([c.ip for c in got], ["192.168.1.10"])
+        self.assertTrue(is_wsl_nat_iface(_c("eth0", "172.28.123.4", 20)))
+        # Bare-metal corporate 172.16 on enp* is not treated as WSL NAT.
+        corp = _c("enp1s0", "172.16.5.10", 16)
+        self.assertFalse(is_wsl_nat_iface(corp))
+        self.assertEqual(
+            filter_nic_candidates([corp], exclude_wsl_nat=True),
+            [corp],
+        )
 
     def test_name_excluded_helpers(self) -> None:
         self.assertTrue(name_excluded("docker0"))

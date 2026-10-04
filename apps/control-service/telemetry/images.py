@@ -1,4 +1,4 @@
-"""Image set manifest for monitoring backends and gateway field kits."""
+"""Image set manifest for monitoring backends (and documented gateway refs)."""
 
 from __future__ import annotations
 
@@ -21,6 +21,7 @@ def image_set() -> dict[str, Any]:
 
 
 # Eager constant for simple imports / manifests.
+# Tags are :latest until field-kit digest pinning ships with image-cache work.
 IMAGE_SET: dict[str, Any] = _load()
 
 
@@ -31,18 +32,3 @@ def required_images(*, include_optional_grafana: bool = False) -> list[str]:
     if include_optional_grafana:
         out.extend(data.get("optional_monitoring", []))
     return out
-
-
-def all_field_kit_images(*, include_optional_grafana: bool = False) -> list[str]:
-    """Monitoring + prebuilt gateway images (excludes local build contexts)."""
-    data = _load()
-    out = list(data.get("monitoring", [])) + list(data.get("gateway", []))
-    if include_optional_grafana:
-        out.extend(data.get("optional_monitoring", []))
-    seen: set[str] = set()
-    unique: list[str] = []
-    for img in out:
-        if img not in seen:
-            seen.add(img)
-            unique.append(img)
-    return unique

@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Mapping
 
-# Bundled fallback matching deploy/templates/prometheus.yml (PR1).
+# K11: cAdvisor port is pinned at 8080 on the gateway; do not re-parameterize here.
 _DEFAULT_TEMPLATE = """# Generated — do not edit by hand
 global:
   scrape_interval: 15s
@@ -20,7 +20,7 @@ scrape_configs:
 
   - job_name: 'cadvisor'
     static_configs:
-      - targets: ['{{GATEWAY_IP}}:{{CADVISOR_PORT}}']
+      - targets: ['{{GATEWAY_IP}}:8080']
         labels:
           instance: 'gateway'
 
@@ -61,7 +61,6 @@ def render_text(template: str, values: Mapping[str, str]) -> str:
 
 def _resolve_template(template: str | Path | None) -> str:
     if template is None:
-        # Prefer repo deploy/templates when running from a checkout.
         repo_tmpl = (
             Path(__file__).resolve().parents[3]
             / "deploy"
@@ -69,11 +68,7 @@ def _resolve_template(template: str | Path | None) -> str:
             / "prometheus.yml"
         )
         if repo_tmpl.is_file():
-            text = repo_tmpl.read_text(encoding="utf-8")
-            # PR1 template hard-codes :8080; normalize to placeholder if absent.
-            if "{{CADVISOR_PORT}}" not in text and ":8080" in text:
-                text = text.replace("{{GATEWAY_IP}}:8080", "{{GATEWAY_IP}}:{{CADVISOR_PORT}}")
-            return text
+            return repo_tmpl.read_text(encoding="utf-8")
         return _DEFAULT_TEMPLATE
     path = Path(template)
     if path.is_file():
@@ -84,18 +79,14 @@ def _resolve_template(template: str | Path | None) -> str:
 def render_prometheus_scrape(
     gateway_ip: str,
     *,
-    cadvisor_port: int | str = 8080,
     template: str | Path | None = None,
     extra_values: Mapping[str, str] | None = None,
 ) -> str:
-    """Render prometheus.yml scrape targets for the gateway."""
+    """Render prometheus.yml scrape targets (cAdvisor fixed at :8080 per K11)."""
     gateway_ip = gateway_ip.strip()
     if not gateway_ip:
         raise ValueError("gateway_ip is required")
-    values: dict[str, str] = {
-        "GATEWAY_IP": gateway_ip,
-        "CADVISOR_PORT": str(cadvisor_port),
-    }
+    values: dict[str, str] = {"GATEWAY_IP": gateway_ip}
     if extra_values:
         values.update({k: str(v) for k, v in extra_values.items()})
     return render_text(_resolve_template(template), values)

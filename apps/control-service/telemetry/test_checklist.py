@@ -11,6 +11,7 @@ from telemetry.checklist import (
     generate_wsl2_nat_checklist,
     refresh_checklist_on_wsl_ip_change,
 )
+from telemetry.readiness import gateway_loki_ready_curl
 
 
 class ChecklistTests(unittest.TestCase):
@@ -42,7 +43,7 @@ class ChecklistTests(unittest.TestCase):
         confirm = by_id["user_confirm"]
         self.assertEqual(confirm.command, "")
         self.assertIn("192.168.1.10:3100/ready", confirm.notes)
-        self.assertIn("9137", confirm.notes)  # warn: do not portproxy API
+        self.assertIn("9137", confirm.notes)
 
     def test_generate_requires_wsl2_ip(self) -> None:
         with self.assertRaises(ValueError):
@@ -57,17 +58,20 @@ class ChecklistTests(unittest.TestCase):
         self.assertIn("netsh interface portproxy", text)
         self.assertIn("netsh advfirewall", text)
 
-    def test_refresh_on_ip_change_prepends_delete(self) -> None:
+    def test_refresh_on_ip_change_prepends_delete_and_firewall(self) -> None:
         items = refresh_checklist_on_wsl_ip_change(
             "172.28.1.1",
             "172.28.9.9",
             monitoring_ip="10.0.0.5",
         )
-        self.assertEqual(items[0].id, "portproxy_delete_stale")
+        ids = [i.id for i in items]
+        self.assertEqual(ids[0], "portproxy_delete_stale")
+        self.assertIn("firewall_delete", ids)
         self.assertIn("delete v4tov4", items[0].command)
         self.assertIn("172.28.1.1", items[0].notes)
-        self.assertIn("172.28.9.9", items[0].notes)
-        # New add uses the new WSL IP
+        fw_del = next(i for i in items if i.id == "firewall_delete")
+        self.assertIn("delete rule", fw_del.command)
+        self.assertIn(FIREWALL_RULE_NAME, fw_del.command)
         add = next(i for i in items if i.id == "portproxy_add")
         self.assertIn("connectaddress=172.28.9.9", add.command)
 
@@ -77,6 +81,13 @@ class ChecklistTests(unittest.TestCase):
         self.assertNotIn("listenport=9137", blob)
         self.assertNotIn("listenport=8501", blob)
         self.assertNotIn("listenport=9090", blob)
+
+    def test_gateway_loki_ready_curl_helper(self) -> None:
+        cmd = gateway_loki_ready_curl("192.168.1.10")
+        self.assertEqual(
+            cmd,
+            "curl -fsS --max-time 5 http://192.168.1.10:3100/ready",
+        )
 
 
 if __name__ == "__main__":
