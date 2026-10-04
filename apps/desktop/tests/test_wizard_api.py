@@ -53,6 +53,16 @@ class WizardApiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
             html = resp.read().decode("utf-8")
         self.assertIn("Setup Wizard", html)
+        with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
+            html = resp.read().decode("utf-8")
+        self.assertIn("Actions", html)
+        self.assertIn("Rotate CA", html)
+
+    def test_control_config(self) -> None:
+        data = self._get("/api/wizard/control")
+        self.assertIn("url", data)
+        self.assertTrue(data["url"].startswith("http://127.0.0.1:"))
+        self.assertEqual(data.get("actions_path"), "/actions.html")
 
     def test_checklist_no_auto_apply(self) -> None:
         # Force a fake WSL IP via settings + detect mock

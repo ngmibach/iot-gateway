@@ -5,9 +5,11 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from registry.registry import Registry
 
+from .actions import router as actions_router
 from .cert_cache import CertBundleCache
 from .deps import AppState, OpenSSH, default_open_ssh
 from .devices import public_router, router as devices_router
@@ -33,7 +35,16 @@ def create_app(
 
     app = FastAPI(title="iot-gateway-control", version="0.1.0")
     app.state.control = state
+    # Desktop Actions chrome (:9138) + Tauri WebView call this API cross-origin.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?|tauri://localhost",
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.include_router(devices_router, prefix="/api/v1")
+    app.include_router(actions_router, prefix="/api/v1")
     app.include_router(public_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthResponse)

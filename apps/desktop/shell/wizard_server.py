@@ -18,6 +18,7 @@ from . import detect, ssh_setup
 from .launcher import ProcessManager, open_in_browser, wait_http
 from .paths import (
     CONTROL_HOST,
+    CONTROL_PORT,
     STREAMLIT_PORT,
     WIZARD_PORT,
     control_service_dir,
@@ -80,6 +81,31 @@ def _handle_api(
 
         if method == "GET" and path == "/api/wizard/env":
             _json_response(handler, 200, detect.environment_snapshot())
+            return
+
+        if method == "GET" and path == "/api/wizard/control":
+            # Actions chrome uses this to target FastAPI (CORS-enabled).
+            import os
+
+            settings = load_settings()
+            url = (
+                str(settings.get("control_url") or "").strip()
+                or f"http://{CONTROL_HOST}:{CONTROL_PORT}"
+            )
+            token = (
+                str(settings.get("api_token") or "").strip()
+                or os.environ.get("IOTGW_API_TOKEN", "").strip()
+                or None
+            )
+            _json_response(
+                handler,
+                200,
+                {
+                    "url": url,
+                    "api_token": token,
+                    "actions_path": "/actions.html",
+                },
+            )
             return
 
         if method == "GET" and path == "/api/wizard/nics":

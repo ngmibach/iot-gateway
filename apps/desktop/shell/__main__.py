@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"Setup Wizard → http://{args.host}:{args.port}/wizard.html\n"
+        f"Actions      → http://{args.host}:{args.port}/actions.html\n"
         f"Control API  → http://{CONTROL_HOST}:{CONTROL_PORT}\n"
         f"Streamlit    → http://{CONTROL_HOST}:{STREAMLIT_PORT} (WebView / browser)\n"
         "Windows: Loki :3100 via guided checklist only; UI ports need localhostForwarding."

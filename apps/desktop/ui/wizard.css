@@ -116,3 +116,65 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   color: var(--muted);
   white-space: pre-wrap;
 }
+.note-box.danger {
+  border-left-color: var(--bad);
+  background: #241418;
+}
+header a {
+  color: var(--accent);
+  text-decoration: none;
+  font-size: 0.85rem;
+  margin-left: 0.75rem;
+}
+header a:hover { text-decoration: underline; }
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  margin-bottom: 1rem;
+}
+.tabs button {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.8rem;
+}
+.tabs button.active {
+  color: var(--text);
+  border-color: var(--accent);
+  background: #1e2a3d;
+}
+table.devices {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.85rem;
+  margin-top: 0.5rem;
+}
+table.devices th, table.devices td {
+  border: 1px solid var(--border);
+  padding: 0.4rem 0.55rem;
+  text-align: left;
+}
+table.devices th { color: var(--muted); font-weight: 600; }
+.download-card {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin: 0.5rem 0;
+  background: #121a24;
+}
+.download-card a.btn-dl {
+  display: inline-block;
+  margin-top: 0.4rem;
+  background: var(--accent);
+  color: #041018;
+  padding: 0.4rem 0.75rem;
+  border-radius: 6px;
+  font-weight: 600;
+  text-decoration: none;
+  font-size: 0.85rem;
+}
+input[type="checkbox"] { min-width: auto; }

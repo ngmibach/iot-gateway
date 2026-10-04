@@ -12,6 +12,8 @@ if [[ -z "$PY" ]]; then
     PY=python3
   fi
 fi
+# Absolute path so subshells (cd control-service) still find the interpreter.
+PY="$(cd "$(dirname "$PY")" && pwd)/$(basename "$PY")"
 export PYTHONPATH="$DESKTOP:$CS${PYTHONPATH:+:$PYTHONPATH}"
 export IOTGW_DATA_DIR="${IOTGW_DATA_DIR:-$(mktemp -d /tmp/iotgw-desktop-smoke.XXXXXX)}"
 
@@ -35,8 +37,21 @@ url = f"http://127.0.0.1:{port}/api/wizard/env"
 with urllib.request.urlopen(url, timeout=5) as r:
     data = json.loads(r.read().decode())
 assert "docker" in data
-print("wizard ok on", port, "docker.present=", data["docker"]["present"])
+with urllib.request.urlopen(f"http://127.0.0.1:{port}/actions.html", timeout=5) as r:
+    html = r.read().decode()
+assert "Rotate server" in html and "Unregister" in html
+ctrl = json.loads(urllib.request.urlopen(f"http://127.0.0.1:{port}/api/wizard/control", timeout=5).read())
+assert ctrl.get("url")
+print("wizard ok on", port, "docker.present=", data["docker"]["present"], "actions ok")
 srv.shutdown()
 PY
+
+echo "== control-service API + rotate unit =="
+(
+  cd "$CS"
+  export PYTHONPATH="$CS${PYTHONPATH:+:$PYTHONPATH}"
+  "$PY" -m unittest discover -s tests -p 'test_api.py' -v
+  "$PY" -m unittest discover -s tests -p 'test_rotate_certs.py' -v
+)
 
 echo "SMOKE OK"

@@ -16,6 +16,7 @@ from actions.playbooks import PlaybookResult, RegisterResult
 from api.app import create_app
 from api.cert_cache import CertBundleCache
 from api.settings import Settings
+from certs.rotate import DeviceReissue, RotateCAResult, RotateServerResult
 from registry.registry import Registry
 
 
@@ -307,6 +308,121 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(denied.status_code, 401)
         self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(client.get("/health").status_code, 200)
+
+    def test_rotate_server_cert(self) -> None:
+        def _ok(_ssh: Any = None, **kwargs: Any) -> RotateServerResult:
+            return RotateServerResult(
+                ok=True,
+                status="ok",
+                message="rotated",
+                fingerprint_sha256="cd" * 32,
+                details={"gateway_ip": kwargs.get("gateway_ip")},
+            )
+
+        with patch("api.actions.rotate_server_cert", side_effect=_ok) as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/actions/rotate-server-cert",
+                json={},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["gateway_ip"], "192.168.1.50")
+        self.assertEqual(body["fingerprint_sha256"], "cd" * 32)
+        mocked.assert_called_once()
+        self.assertEqual(mocked.call_args.kwargs["gateway_ip"], "192.168.1.50")
+
+    def test_rotate_server_requires_ip_when_host_not_ip(self) -> None:
+        self.registry.upsert_gateway(
+            id="gw-name",
+            host="gateway.local",
+            ssh_user="pi",
+            install_root="/opt/iot-gateway",
+            fingerprint="fp2",
+        )
+        with patch("api.actions.rotate_server_cert") as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw-name/actions/rotate-server-cert",
+                json={},
+            )
+        self.assertEqual(r.status_code, 400, r.text)
+        mocked.assert_not_called()
+
+    def test_rotate_ca_break_glass_and_tokens(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+
+        def _ok(_ssh: Any = None, **kwargs: Any) -> RotateCAResult:
+            return RotateCAResult(
+                ok=True,
+                status="ok",
+                message="ca rotated",
+                devices=[
+                    DeviceReissue(
+                        device_id="sensor1",
+                        client_key_pem=b"k",
+                        client_crt_pem=b"c",
+                        ca_crt_pem=b"ca",
+                        cert_bundle=b"PK\x03\x04ca-zip",
+                        fingerprint_sha256="ee" * 32,
+                    )
+                ],
+            )
+
+        with patch("api.actions.rotate_ca", side_effect=_ok) as mocked:
+            denied = self.client.post(
+                "/api/v1/gateways/gw1/actions/rotate-ca",
+                json={"confirm_break_glass": False},
+            )
+            self.assertEqual(denied.status_code, 400)
+
+            r = self.client.post(
+                "/api/v1/gateways/gw1/actions/rotate-ca",
+                json={"confirm_break_glass": True},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertTrue(body["redistribute"])
+        self.assertEqual(len(body["devices"]), 1)
+        token = body["devices"][0]["cert_bundle_token"]
+        mocked.assert_called_once()
+        self.assertTrue(mocked.call_args.kwargs["confirm_break_glass"])
+
+        dl = self.client.get(
+            "/api/v1/gateways/gw1/devices/sensor1/cert-bundle",
+            params={"token": token},
+        )
+        self.assertEqual(dl.status_code, 200)
+        self.assertEqual(dl.content, b"PK\x03\x04ca-zip")
+
+    def test_rotate_ca_reload_failed_no_redistribute(self) -> None:
+        def _reload_failed(_ssh: Any = None, **kwargs: Any) -> RotateCAResult:
+            return RotateCAResult(
+                ok=False,
+                status="reload_failed",
+                message="frontends stale",
+                devices=[
+                    DeviceReissue(
+                        device_id="sensor1",
+                        client_key_pem=b"k",
+                        client_crt_pem=b"c",
+                        ca_crt_pem=b"ca",
+                        cert_bundle=b"PK\x03\x04hold",
+                    )
+                ],
+            )
+
+        with patch("api.actions.rotate_ca", side_effect=_reload_failed):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/actions/rotate-ca",
+                json={"confirm_break_glass": True, "gateway_ip": "192.168.1.50"},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["status"], "reload_failed")
+        self.assertFalse(body["redistribute"])
+        self.assertEqual(len(body["devices"]), 1)
 
 
 if __name__ == "__main__":

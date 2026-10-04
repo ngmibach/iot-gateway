@@ -104,3 +104,45 @@ class GatewayOut(BaseModel):
     status: Optional[str] = None
     # Fixed label matching deploy/templates prometheus `instance: gateway`.
     node_instance: str = "gateway"
+
+
+class RotateServerRequest(BaseModel):
+    gateway_ip: Optional[str] = None
+    ca_passphrase: Optional[str] = None
+    days: int = Field(default=730, ge=1, le=3650)
+
+
+class RotateServerResponse(BaseModel):
+    ok: bool
+    status: str = "ok"
+    message: str = ""
+    gateway_ip: str
+    not_valid_after: Optional[str] = None
+    fingerprint_sha256: Optional[str] = None
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class RotateCARequest(BaseModel):
+    gateway_ip: Optional[str] = None
+    ca_passphrase: Optional[str] = None
+    confirm_break_glass: bool = False
+    # None → reissue every registry device for this gateway.
+    device_ids: Optional[list[str]] = None
+
+
+class DeviceBundleToken(BaseModel):
+    device_id: str
+    cert_bundle_token: str
+    fingerprint_sha256: Optional[str] = None
+    not_valid_after: Optional[str] = None
+
+
+class RotateCAResponse(BaseModel):
+    ok: bool
+    status: str = "ok"
+    message: str = ""
+    gateway_ip: str
+    # Only redistribute when ok=True (reload_failed keeps tokens but UI must warn).
+    redistribute: bool = False
+    devices: list[DeviceBundleToken] = Field(default_factory=list)
+    details: dict[str, Any] = Field(default_factory=dict)

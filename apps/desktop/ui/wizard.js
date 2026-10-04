@@ -249,6 +249,12 @@
     $("btn-start-svc").addEventListener("click", () => startServices().catch(showErr));
     $("btn-stop-svc").addEventListener("click", () => stopServices().catch(showErr));
     $("btn-open-st").addEventListener("click", () => openStreamlit().catch(showErr));
+    const openActions = $("btn-open-actions");
+    if (openActions) {
+      openActions.addEventListener("click", () => {
+        window.location.href = "actions.html";
+      });
+    }
     showStep(0);
     refreshEnv().catch(showErr);
     refreshNics().catch(() => {});
