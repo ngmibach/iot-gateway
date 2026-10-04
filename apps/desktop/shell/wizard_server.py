@@ -12,7 +12,7 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from . import detect, ssh_setup
 from .launcher import ProcessManager, open_in_browser, wait_http
@@ -68,8 +68,16 @@ def _read_json(handler: BaseHTTPRequestHandler) -> dict:
     return data
 
 
-def _handle_api(handler: BaseHTTPRequestHandler, method: str, path: str) -> None:
+def _handle_api(
+    handler: BaseHTTPRequestHandler,
+    method: str,
+    path: str,
+    *,
+    query: str = "",
+) -> None:
     try:
+        qs = parse_qs(query)
+
         if method == "GET" and path == "/api/wizard/env":
             _json_response(handler, 200, detect.environment_snapshot())
             return
@@ -81,7 +89,10 @@ def _handle_api(handler: BaseHTTPRequestHandler, method: str, path: str) -> None
             )
 
             settings = load_settings()
-            mode = settings.get("windows_net_mode")
+            mode_q = (qs.get("windows_net_mode") or [None])[0]
+            mode = mode_q if mode_q not in (None, "") else settings.get("windows_net_mode")
+            if mode_q == "":
+                mode = None
             cands = list_ipv4_candidates(windows_net_mode=mode)
             default = pick_default_monitoring_ip(
                 cands, gateway_ip=settings.get("gateway_ip")
@@ -240,6 +251,16 @@ def _handle_api(handler: BaseHTTPRequestHandler, method: str, path: str) -> None
                     handler, 400, {"error": "host, username, password required"}
                 )
                 return
+            # Pin is mandatory — reject TOFU / WarningPolicy password installs.
+            try:
+                ssh_setup.resolve_required_pin(
+                    host,
+                    port,
+                    str(host_key_b64) if host_key_b64 else None,
+                )
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
             result = ssh_setup.install_pubkey(
                 host,
                 username,
@@ -307,9 +328,13 @@ def _handle_api(handler: BaseHTTPRequestHandler, method: str, path: str) -> None
             return
 
         if method == "GET" and path == "/api/wizard/settings":
-            # Redact password refs' resolved secrets
+            # Refs only (no keyring resolution). Strip any accidental plaintext.
             settings = load_settings()
             safe = dict(settings)
+            for gw in (safe.get("gateways") or {}).values():
+                if isinstance(gw, dict):
+                    gw.pop("password", None)
+                    gw.pop("ssh_password", None)
             _json_response(handler, 200, safe)
             return
 
@@ -326,14 +351,14 @@ class WizardHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
-            _handle_api(self, "GET", parsed.path)
+            _handle_api(self, "GET", parsed.path, query=parsed.query)
             return
         self._serve_static(parsed.path)
 
     def do_POST(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/"):
-            _handle_api(self, "POST", parsed.path)
+            _handle_api(self, "POST", parsed.path, query=parsed.query)
             return
         self.send_error(405)
 

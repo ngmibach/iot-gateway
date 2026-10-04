@@ -61,7 +61,12 @@ def save_settings(data: dict[str, Any]) -> None:
     path = settings_path()
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
     tmp.replace(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
 
 
 def repo_root() -> Path:

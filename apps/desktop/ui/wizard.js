@@ -3,6 +3,7 @@
   const STEPS = ["Engine", "NIC", "SSH", "Firewall", "Launch"];
   let step = 0;
   let hostKey = null;
+  let hostKeyPinned = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -58,9 +59,12 @@
   }
 
   async function refreshNics() {
-    const mode = $("net-mode").value || null;
-    // mode is applied on save; listing uses settings / auto
-    const data = await api("/api/wizard/nics");
+    const mode = $("net-mode").value;
+    const q =
+      mode === "" || mode == null
+        ? ""
+        : `?windows_net_mode=${encodeURIComponent(mode)}`;
+    const data = await api("/api/wizard/nics" + q);
     const sel = $("nic-select");
     sel.innerHTML = "";
     (data.candidates || []).forEach((c) => {
@@ -98,6 +102,8 @@
   }
 
   async function fetchHostKey() {
+    hostKeyPinned = false;
+    $("btn-install-key").disabled = true;
     hostKey = await api("/api/wizard/ssh/fetch-host-key", {
       method: "POST",
       body: JSON.stringify({
@@ -108,8 +114,7 @@
     $("hk-info").textContent =
       `${hostKey.key_type}\n${hostKey.fingerprint_sha256}\n(base64 length ${hostKey.base64.length})`;
     $("btn-pin-hk").disabled = false;
-    $("btn-install-key").disabled = false;
-    $("ssh-msg").innerHTML = `<div class="okmsg">Verify fingerprint on the device console, then Pin.</div>`;
+    $("ssh-msg").innerHTML = `<div class="okmsg">Verify fingerprint on the device console, then Pin (required before Install).</div>`;
   }
 
   async function pinHostKey() {
@@ -118,24 +123,29 @@
       method: "POST",
       body: JSON.stringify(hostKey),
     });
-    $("ssh-msg").innerHTML = `<div class="okmsg">Pinned ${hostKey.fingerprint_sha256}</div>`;
+    hostKeyPinned = true;
+    $("btn-install-key").disabled = false;
+    $("ssh-msg").innerHTML = `<div class="okmsg">Pinned ${hostKey.fingerprint_sha256} — Install is now enabled.</div>`;
   }
 
   async function installKey() {
+    if (!hostKeyPinned || !hostKey) {
+      throw new Error("Pin the host key before installing");
+    }
     const body = {
       host: $("ssh-host").value.trim(),
       port: Number($("ssh-port").value) || 22,
       username: $("ssh-user").value.trim(),
       password: $("ssh-pass").value,
       gateway_id: $("ssh-gid").value.trim() || "gateway",
-      host_key_base64: hostKey && hostKey.base64,
+      host_key_base64: hostKey.base64,
     };
     const res = await api("/api/wizard/ssh/install-key", {
       method: "POST",
       body: JSON.stringify(body),
     });
     $("ssh-pass").value = "";
-    $("ssh-msg").innerHTML = `<div class="okmsg">Key installed. ref=${res.ssh_password_ref} path=${res.ssh_key_path}</div>`;
+    $("ssh-msg").innerHTML = `<div class="okmsg">Key installed (password cleared). path=${res.ssh_key_path}</div>`;
   }
 
   async function refreshChecklist() {

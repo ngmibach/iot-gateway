@@ -24,7 +24,10 @@ class SSHTarget:
     key_filename: Optional[str] = None
     pkey: Optional[paramiko.PKey] = None
     # When set, refuse connect if remote key base64 does not match.
+    # Handshake uses WarningPolicy so Paramiko does not Reject before verify.
     host_key_base64: Optional[str] = None
+    # Extra OpenSSH known_hosts files (e.g. app data pin store).
+    known_hosts_paths: Optional[list[str]] = None
     # First-connect / lab only — playbooks should pass a pin instead.
     allow_unknown_host: bool = False
 
@@ -78,7 +81,17 @@ class SSHClient:
                         client.load_host_keys(known)
                     except OSError:
                         pass
-                if self.target.allow_unknown_host and not self.target.host_key_base64:
+                for extra in self.target.known_hosts_paths or []:
+                    if extra and os.path.isfile(extra):
+                        try:
+                            client.load_host_keys(extra)
+                        except OSError:
+                            pass
+                if self.target.host_key_base64:
+                    # Allow handshake; pin enforced via post-connect base64 check.
+                    # RejectPolicy would fail before that check on fresh machines.
+                    client.set_missing_host_key_policy(paramiko.WarningPolicy())
+                elif self.target.allow_unknown_host:
                     client.set_missing_host_key_policy(paramiko.WarningPolicy())
                 else:
                     # K7: pin or known_hosts required for secret-bearing mutations.

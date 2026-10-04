@@ -1,9 +1,8 @@
 """SSH host-key pin + ed25519 key generate/install (Setup Wizard).
 
-First connect: show fingerprint, user confirms pin → write app known_hosts.
-Generate app ed25519 keypair under data/ssh/; install pubkey via one-time
-password auth; store password in keyring only until key auth works, then
-prefer key (settings flag password_auth_disabled).
+Flow: Fetch fingerprint → user Pin (app known_hosts) → Install ed25519 via
+one-time password. Password is never kept after a successful key-auth probe;
+``password_auth_disabled`` is set and the keyring secret is deleted.
 """
 
 from __future__ import annotations
@@ -11,6 +10,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import socket
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -79,13 +79,16 @@ def fetch_host_key(host: str, port: int = 22, timeout: float = 15.0) -> HostKeyI
     """Fetch remote host key via Paramiko (no auth); return pin-able info."""
     import paramiko
 
-    sock_timeout = timeout
-    trans = paramiko.Transport((host, port))
+    sock = socket.create_connection((host, port), timeout=timeout)
     try:
-        trans.start_client(timeout=sock_timeout)
-        key = trans.get_remote_server_key()
+        trans = paramiko.Transport(sock)
+        try:
+            trans.start_client(timeout=timeout)
+            key = trans.get_remote_server_key()
+        finally:
+            trans.close()
     finally:
-        trans.close()
+        sock.close()
     raw = key.asbytes()
     return HostKeyInfo(
         host=host,
@@ -96,8 +99,18 @@ def fetch_host_key(host: str, port: int = 22, timeout: float = 15.0) -> HostKeyI
     )
 
 
+def pin_lookup_key(host: str, port: int = 22) -> Optional[str]:
+    """Return pinned host_key_base64 from settings index, if present."""
+    settings = load_settings()
+    pin = settings.get("ssh_host_pins", {}).get(f"{host}:{port}")
+    if not isinstance(pin, dict):
+        return None
+    b64 = pin.get("base64")
+    return str(b64) if b64 else None
+
+
 def pin_host_key(info: HostKeyInfo) -> None:
-    """Append/replace host key in app known_hosts (OpenSSH format)."""
+    """Write host key to app known_hosts (canonical) + settings fingerprint index."""
     path = known_hosts_path()
     host_field = info.host if info.port == 22 else f"[{info.host}]:{info.port}"
     line = f"{host_field} {info.key_type} {info.base64}\n"
@@ -109,6 +122,7 @@ def pin_host_key(info: HostKeyInfo) -> None:
     path.write_text("".join(kept), encoding="utf-8")
     os.chmod(path, 0o600)
 
+    # settings index is for UI/API lookup; known_hosts is what SSHClient loads.
     settings = load_settings()
     pins = settings.setdefault("ssh_host_pins", {})
     pins[f"{info.host}:{info.port}"] = {
@@ -117,6 +131,25 @@ def pin_host_key(info: HostKeyInfo) -> None:
         "base64": info.base64,
     }
     save_settings(settings)
+
+
+def resolve_required_pin(
+    host: str,
+    port: int,
+    host_key_base64: Optional[str],
+) -> str:
+    """Require a wizard pin before password-bearing install.
+
+    ``host_key_base64`` must match the pinned value when both are present.
+    """
+    pinned = pin_lookup_key(host, port)
+    if not pinned:
+        raise ValueError(
+            "Host key must be pinned in Setup Wizard before installing an SSH key"
+        )
+    if host_key_base64 and str(host_key_base64) != pinned:
+        raise ValueError("host_key_base64 does not match the pinned host key")
+    return pinned
 
 
 def install_pubkey(
@@ -128,27 +161,30 @@ def install_pubkey(
     port: int = 22,
     host_key_base64: Optional[str] = None,
 ) -> dict[str, Any]:
-    """One-time password SSH: append ed25519 pubkey to authorized_keys."""
+    """One-time password SSH: append ed25519 pubkey; then clear password secret."""
     from actions.shellutil import shell_quote  # type: ignore[import-not-found]
     from actions.ssh import SSHClient, SSHTarget  # type: ignore[import-not-found]
 
     if not gateway_id or any(c in gateway_id for c in " \t\n/\\"):
         raise ValueError("gateway_id must be a non-empty path-safe token")
+    pin_b64 = resolve_required_pin(host, port, host_key_base64)
+
     paths = generate_ed25519(gateway_id)
     pubkey = paths.public.read_text(encoding="utf-8").strip()
+    app_known = str(known_hosts_path())
     target = SSHTarget(
         host=host,
         username=username,
         port=port,
         password=password,
-        host_key_base64=host_key_base64,
-        allow_unknown_host=host_key_base64 is None,
+        host_key_base64=pin_b64,
+        known_hosts_paths=[app_known],
+        allow_unknown_host=False,
     )
     client = SSHClient(target)
     try:
         client.connect()
         q = shell_quote(pubkey)
-        # Idempotent append
         script = (
             "umask 077; mkdir -p ~/.ssh; touch ~/.ssh/authorized_keys; "
             "chmod 700 ~/.ssh; chmod 600 ~/.ssh/authorized_keys; "
@@ -160,7 +196,23 @@ def install_pubkey(
     finally:
         client.close()
 
-    ref = keyring_store.set_secret(gateway_id, password, kind="ssh")
+    # Probe key-only auth; on success drop password from keyring.
+    key_target = SSHTarget(
+        host=host,
+        username=username,
+        port=port,
+        key_filename=str(paths.private),
+        host_key_base64=pin_b64,
+        known_hosts_paths=[app_known],
+        allow_unknown_host=False,
+    )
+    key_client = SSHClient(key_target)
+    try:
+        key_client.connect()
+        key_client.run("true").check()
+    finally:
+        key_client.close()
+
     settings = load_settings()
     gateways = settings.setdefault("gateways", {})
     gateways[gateway_id] = {
@@ -168,26 +220,31 @@ def install_pubkey(
         "port": port,
         "username": username,
         "ssh_key_path": str(paths.private),
-        "ssh_password_ref": ref,
-        "password_auth_disabled": False,
-        "prefer_key": True,
+        "password_auth_disabled": True,
     }
     save_settings(settings)
+    # Clear any prior password ref (and never leave the one-time password stored).
+    keyring_store.delete_secret(gateway_id, kind="ssh")
+
     return {
         "gateway_id": gateway_id,
         "ssh_key_path": str(paths.private),
-        "ssh_password_ref": ref,
         "pubkey_installed": True,
+        "password_auth_disabled": True,
+        "password_retained": False,
     }
 
 
 def mark_password_auth_disabled(gateway_id: str) -> None:
+    """Flag gateway as key-only and delete any leftover keyring password."""
     settings = load_settings()
     gw = settings.get("gateways", {}).get(gateway_id)
     if not gw:
         return
     gw["password_auth_disabled"] = True
+    gw.pop("ssh_password_ref", None)
     save_settings(settings)
+    keyring_store.delete_secret(gateway_id, kind="ssh")
 
 
 def host_key_info_dict(info: HostKeyInfo) -> dict[str, Any]:

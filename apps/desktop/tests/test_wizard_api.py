@@ -7,6 +7,7 @@ import os
 import tempfile
 import threading
 import unittest
+import urllib.error
 import urllib.request
 from unittest import mock
 
@@ -78,6 +79,26 @@ class WizardApiTests(unittest.TestCase):
         )
         self.assertTrue(out["ok"])
         self.assertEqual(out["settings"]["monitoring_ip"], "10.0.0.5")
+
+    def test_install_key_rejects_without_pin(self) -> None:
+        req = urllib.request.Request(
+            self.base + "/api/wizard/ssh/install-key",
+            data=json.dumps(
+                {
+                    "host": "10.0.0.9",
+                    "username": "ubuntu",
+                    "password": "secret",
+                    "gateway_id": "gw",
+                }
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertIn("pin", body.get("error", "").lower())
 
 
 if __name__ == "__main__":
