@@ -171,6 +171,45 @@ class WizardApiTests(unittest.TestCase):
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(ctx.exception.code, 400)
 
+    def test_proxy_control_injects_api_token(self) -> None:
+        from shell import wizard_server as ws
+
+        captured: dict = {}
+        real_urlopen = urllib.request.urlopen
+
+        class _Resp:
+            status = 200
+            headers = {"Content-Type": "application/json"}
+
+            def read(self) -> bytes:
+                return b'{"ok":true}'
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return None
+
+        def fake_urlopen(req, timeout=30):  # noqa: ANN001
+            url = req if isinstance(req, str) else req.full_url
+            # Wizard→control proxy only; pass through the test→wizard request.
+            if ":9137" not in url:
+                return real_urlopen(req, timeout=timeout)
+            captured["url"] = url
+            captured["headers"] = dict(req.headers)
+            captured["method"] = req.get_method()
+            return _Resp()
+
+        with mock.patch.dict(os.environ, {"IOTGW_API_TOKEN": "secret-token"}):
+            with mock.patch.object(ws.urllib.request, "urlopen", fake_urlopen):
+                with urllib.request.urlopen(
+                    self.base + "/api/v1/gateways", timeout=5
+                ) as resp:
+                    body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(body, {"ok": True})
+        self.assertIn("http://127.0.0.1:9137/api/v1/gateways", captured["url"])
+        headers = {k.lower(): v for k, v in captured["headers"].items()}
+        self.assertEqual(headers.get("x-api-token"), "secret-token")
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,9 @@ apps/desktop/.venv/bin/python -m shell --detect-only
 apps/desktop/.venv/bin/python -m shell --no-browser
 # Start control API (native Monitoring is default; add --with-streamlit if needed):
 apps/desktop/.venv/bin/python -m shell --start-services --no-browser
-# Monitoring → http://127.0.0.1:9138/monitoring.html
+# Monitoring MUST be loaded from the wizard origin (same-origin /api/v1 proxy + token):
+#   http://127.0.0.1:9138/monitoring.html
+# Do not open ui/monitoring.html from Tauri frontendDist / file:// — those skip the proxy.
 ```
 
 Smoke:

@@ -1,17 +1,34 @@
-/* Native Monitoring tabs — talks to control-service /api/v1/query/* */
+/* Native Monitoring tabs — talks to control-service via wizard /api/v1 proxy. */
 (function () {
   const TABS = [
     { id: "gateway", label: "Gateway" },
     { id: "raspi", label: "Host" },
     { id: "sensors", label: "Sensors" },
   ];
-  // Same-origin via wizard proxy (/api/v1 → control-service + IOTGW_API_TOKEN).
+  const WIZARD_MONITORING = "http://127.0.0.1:9138/monitoring.html";
   let tab = "gateway";
   let timer = null;
+  let lastWarnings = [];
 
   const $ = (id) => document.getElementById(id);
 
+  /** Wizard shell proxies /api/v1 and injects IOTGW_API_TOKEN — not Tauri asset origin. */
+  function onWizardOrigin() {
+    if (location.protocol !== "http:" && location.protocol !== "https:") {
+      return false;
+    }
+    const host = location.hostname;
+    return host === "127.0.0.1" || host === "localhost";
+  }
+
   async function control(path, opts) {
+    if (!onWizardOrigin()) {
+      throw new Error(
+        "Open Monitoring from the Setup Wizard at " +
+          WIZARD_MONITORING +
+          " (same-origin /api/v1 proxy)."
+      );
+    }
     const headers = { "Content-Type": "application/json", ...(opts && opts.headers) };
     const res = await fetch(path, { ...opts, headers });
     const data = await res.json().catch(() => ({}));
@@ -20,6 +37,28 @@
       throw new Error(typeof detail === "string" ? detail : JSON.stringify(detail));
     }
     return data;
+  }
+
+  function showWarnings(warnings) {
+    lastWarnings = Array.isArray(warnings) ? warnings : [];
+    const banner = $("warn-banner");
+    if (!banner) return;
+    if (!lastWarnings.length) {
+      banner.classList.add("hidden");
+      banner.textContent = "";
+      return;
+    }
+    banner.classList.remove("hidden");
+    banner.textContent =
+      "Backend warnings (" +
+      lastWarnings.length +
+      "): " +
+      String(lastWarnings[0]).slice(0, 240);
+  }
+
+  function setStatusBadge(kind, text) {
+    $("hdr-status").innerHTML =
+      `<span class="badge ${kind}">${escapeHtml(text)}</span>`;
   }
 
   function sparkSvg(values, opts) {
@@ -152,6 +191,7 @@
       ])
     );
     $("gw-msg").textContent = `range=${data.range}`;
+    showWarnings(data.warnings);
   }
 
   async function refreshRaspi() {
@@ -169,6 +209,7 @@
     ]);
     $("raspi-spark").innerHTML = sparkSvg(data.cpu_sparkline_pct || [], { w: 600, h: 56 });
     $("raspi-msg").textContent = `node=${data.node} job=${data.job}`;
+    showWarnings(data.warnings);
   }
 
   async function refreshSensors() {
@@ -211,17 +252,23 @@
       ])
     );
     $("sensors-msg").textContent = `range=${data.range}`;
+    showWarnings(data.warnings);
   }
 
   async function refresh() {
-    $("hdr-status").innerHTML = `<span class="badge warn">loading…</span>`;
+    setStatusBadge("warn", "loading…");
     try {
       if (tab === "gateway") await refreshGateway();
       else if (tab === "raspi") await refreshRaspi();
       else await refreshSensors();
-      $("hdr-status").innerHTML = `<span class="badge ok">live</span>`;
+      if (lastWarnings.length) {
+        setStatusBadge("warn", "degraded");
+      } else {
+        setStatusBadge("ok", "live");
+      }
     } catch (e) {
-      $("hdr-status").innerHTML = `<span class="badge bad">${escapeHtml(e.message)}</span>`;
+      showWarnings([]);
+      setStatusBadge("bad", e.message);
     }
   }
 
@@ -244,6 +291,15 @@
   function wire() {
     buildTabs();
     showTab("gateway");
+    const originBanner = $("origin-banner");
+    if (!onWizardOrigin() && originBanner) {
+      originBanner.classList.remove("hidden");
+      originBanner.innerHTML =
+        `Monitoring must be opened from the Setup Wizard shell so <code>/api/v1</code> is proxied ` +
+        `(with optional <code>IOTGW_API_TOKEN</code>). Use ` +
+        `<a class="link" href="${WIZARD_MONITORING}">${WIZARD_MONITORING}</a>.`;
+      setStatusBadge("bad", "wrong origin");
+    }
     $("btn-refresh").addEventListener("click", () => refresh().catch(console.error));
     $("auto-refresh").addEventListener("change", scheduleAuto);
     $("show-all").addEventListener("change", () => {
@@ -254,6 +310,7 @@
       if (tab === "sensors") refresh().catch(console.error);
     });
     $("mon-tabs").addEventListener("click", () => refresh().catch(console.error));
+    if (!onWizardOrigin()) return;
     loadGateways()
       .catch(() => {})
       .finally(() => {

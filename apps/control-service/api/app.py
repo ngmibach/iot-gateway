@@ -37,6 +37,7 @@ def create_app(
     app = FastAPI(title="iot-gateway-control", version="0.1.0")
     app.state.control = state
     # Desktop Actions chrome (:9138) + Tauri WebView call this API cross-origin.
+    # Monitoring uses the wizard same-origin /api/v1 proxy; Actions still hits :9137 directly.
     app.add_middleware(
         CORSMiddleware,
         allow_origin_regex=r"https?://(127\.0\.0\.1|localhost)(:\d+)?|tauri://localhost",
