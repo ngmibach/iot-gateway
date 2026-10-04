@@ -133,6 +133,91 @@ class LifecycleTests(unittest.TestCase):
             self.assertIn("sensor1", up)
             mgr._cancel_timer()
 
+    def test_stale_auto_stop_ignored_after_restart(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _mini_tree(Path(tmp) / "src")
+            work = Path(tmp) / "work"
+            calls: list[list[str]] = []
+
+            def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                calls.append(list(cmd))
+                out = (
+                    "NAME STATUS\nsensor1 Up 2 seconds\n"
+                    if "ps" in cmd
+                    else "ok\n"
+                )
+                return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+            mgr = LabFakeSensorManager(work, source_dir=src, runner=runner)
+            mgr.start(gateway_ip="10.0.0.1", duration_minutes=5, sensors=["sensor1"])
+            old_id = mgr._run_id
+            mgr.start(gateway_ip="10.0.0.2", duration_minutes=5, sensors=["sensor1"])
+            downs_before = sum(1 for c in calls if "down" in c)
+            st = mgr.stop(
+                detail="auto-stopped after duration (storage overflow guard)",
+                expected_run_id=old_id,
+            )
+            self.assertIn("stale", st.detail.lower())
+            self.assertEqual(mgr._run_id, old_id + 1)
+            self.assertEqual(mgr._gateway_ip, "10.0.0.2")
+            self.assertIsNotNone(mgr._stops_at)
+            self.assertEqual(sum(1 for c in calls if "down" in c), downs_before)
+            mgr._cancel_timer()
+
+    def test_stale_stop_blocked_on_lock_cannot_tear_down_new_run(self) -> None:
+        """Auto-stop that entered stop() before start() finishes must no-op."""
+        import threading
+
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _mini_tree(Path(tmp) / "src")
+            work = Path(tmp) / "work"
+            calls: list[list[str]] = []
+            entered_stop = threading.Event()
+            release_start = threading.Event()
+
+            def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                calls.append(list(cmd))
+                out = (
+                    "NAME STATUS\nsensor1 Up 2 seconds\n"
+                    if "ps" in cmd
+                    else "ok\n"
+                )
+                return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
+
+            mgr = LabFakeSensorManager(work, source_dir=src, runner=runner)
+            mgr.start(gateway_ip="10.0.0.1", duration_minutes=5, sensors=["sensor1"])
+            stale_id = mgr._run_id
+
+            results: list[object] = []
+
+            def stale_stop() -> None:
+                # Hold path: wait until start has bumped run_id then call stop.
+                release_start.wait(timeout=5)
+                results.append(
+                    mgr.stop(
+                        detail="auto-stopped after duration (storage overflow guard)",
+                        expected_run_id=stale_id,
+                    )
+                )
+                entered_stop.set()
+
+            t = threading.Thread(target=stale_stop, daemon=True)
+            t.start()
+            # New start invalidates stale_id.
+            st = mgr.start(
+                gateway_ip="10.0.0.9", duration_minutes=5, sensors=["sensor1"]
+            )
+            release_start.set()
+            self.assertTrue(entered_stop.wait(timeout=5))
+            t.join(timeout=5)
+            self.assertEqual(len(results), 1)
+            stale_st = results[0]
+            assert isinstance(stale_st, type(st))
+            self.assertIn("stale", stale_st.detail.lower())
+            self.assertEqual(mgr._gateway_ip, "10.0.0.9")
+            self.assertIsNotNone(mgr._stops_at)
+            mgr._cancel_timer()
+
     def test_up_failure_clears_runtime_and_attempts_down(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _mini_tree(Path(tmp) / "src")

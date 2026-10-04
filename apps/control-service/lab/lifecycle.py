@@ -124,6 +124,8 @@ class LabFakeSensorManager:
         self._runner = runner or subprocess.run
         self._lock = threading.RLock()
         self._timer: threading.Timer | None = None
+        # Bumped at each start(); stale auto-stop callbacks no-op when mismatched.
+        self._run_id: int = 0
         self._gateway_ip: str | None = None
         self._sensors: list[str] = []
         self._duration_minutes: int | None = None
@@ -177,13 +179,16 @@ class LabFakeSensorManager:
             self._timer.cancel()
             self._timer = None
 
-    def _schedule_stop(self, duration_minutes: int) -> None:
+    def _schedule_stop(self, duration_minutes: int, run_id: int) -> None:
         self._cancel_timer()
         seconds = max(1, int(duration_minutes * 60))
 
         def _fire() -> None:
             try:
-                self.stop(detail="auto-stopped after duration (storage overflow guard)")
+                self.stop(
+                    detail="auto-stopped after duration (storage overflow guard)",
+                    expected_run_id=run_id,
+                )
             except Exception:  # noqa: BLE001 — timer must not raise into thread
                 pass
 
@@ -270,6 +275,8 @@ class LabFakeSensorManager:
                 raise ValueError(f"invalid sensor name: {name!r}")
 
         with self._lock:
+            # Invalidate any auto-stop already past cancel() and blocked on this lock.
+            self._run_id += 1
             self._cancel_timer()
             self._clear_runtime()
             down_detail = self._down_if_present()
@@ -293,15 +300,24 @@ class LabFakeSensorManager:
             self._duration_minutes = mins
             self._started_at = now
             self._stops_at = now + mins * 60
-            self._schedule_stop(mins)
+            self._schedule_stop(mins, self._run_id)
 
             detail = (proc.stdout or proc.stderr or "").strip() or "started"
             if down_detail:
                 detail = f"{detail}; prior down: {down_detail}"
             return self._status_unlocked(detail=detail)
 
-    def stop(self, *, detail: str = "stopped") -> FakeSensorStatus:
+    def stop(
+        self,
+        *,
+        detail: str = "stopped",
+        expected_run_id: int | None = None,
+    ) -> FakeSensorStatus:
         with self._lock:
+            if expected_run_id is not None and expected_run_id != self._run_id:
+                return self._status_unlocked(
+                    detail=f"stale auto-stop ignored (run_id {expected_run_id}!={self._run_id})"
+                )
             self._cancel_timer()
             if not self.compose_file.is_file():
                 self._clear_runtime()
