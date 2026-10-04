@@ -327,17 +327,6 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True, "url": url})
             return
 
-        if method == "GET" and path == "/api/wizard/settings":
-            # Refs only (no keyring resolution). Strip any accidental plaintext.
-            settings = load_settings()
-            safe = dict(settings)
-            for gw in (safe.get("gateways") or {}).values():
-                if isinstance(gw, dict):
-                    gw.pop("password", None)
-                    gw.pop("ssh_password", None)
-            _json_response(handler, 200, safe)
-            return
-
         _json_response(handler, 404, {"error": f"unknown api {method} {path}"})
     except Exception as e:  # noqa: BLE001 — surface to wizard UI
         logger.exception("wizard api error")

@@ -220,11 +220,9 @@ def install_pubkey(
         "port": port,
         "username": username,
         "ssh_key_path": str(paths.private),
-        "password_auth_disabled": True,
     }
     save_settings(settings)
-    # Clear any prior password ref (and never leave the one-time password stored).
-    keyring_store.delete_secret(gateway_id, kind="ssh")
+    mark_password_auth_disabled(gateway_id)
 
     return {
         "gateway_id": gateway_id,
