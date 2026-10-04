@@ -1,4 +1,9 @@
-"""Short-lived local fake_sensor compose for Lab demos (storage-overflow risk)."""
+"""Short-lived local fake_sensor compose for Lab demos (storage-overflow risk).
+
+HOST is baked into sensor images at build time, so every start rebuilds
+(``compose up --build``). Auto-stop uses an in-process timer — the Lab
+wizard/control process must stay running for the overflow guard to fire.
+"""
 
 from __future__ import annotations
 
@@ -12,29 +17,78 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Optional, Sequence
 
-from actions.validate import validate_ip_or_cidr
-
-from .host_template import stage_fake_sensor_tree
-
-_SENSOR_NAME_RE = re.compile(r"^sensor[1-9]$")
-
-
-def re_sensor_name(name: str) -> bool:
-    return bool(_SENSOR_NAME_RE.fullmatch(name.strip()))
-
 PROJECT_NAME = "iotgw-lab-fake-sensor"
 DEFAULT_SENSORS = ("sensor1", "sensor2", "sensor3", "sensor4")
 DEFAULT_DURATION_MINUTES = 10
 MAX_DURATION_MINUTES = 60
 STORAGE_OVERFLOW_WARNING = (
     "fake_sensor must run only for a short period — prolonged use can overflow "
-    "gateway/monitoring storage (logs, Loki, Mosquitto)."
+    "gateway/monitoring storage (logs, Loki, Mosquitto). Keep this app/wizard "
+    "open until auto-stop; exiting cancels the overflow timer while containers "
+    "may keep running."
 )
+
+_SENSOR_NAME_RE = re.compile(r"^sensor[1-9]$")
+_HOST_LINE_RE = re.compile(
+    r'^(HOST\s*=\s*)(?:\{\{GATEWAY_IP\}\}|["\']?[^"\'\n]*["\']?)(.*)$',
+    re.MULTILINE,
+)
+
+
+def _apply_host_to_script(text: str, gateway_ip: str) -> str:
+    """Rewrite HOST= lines to ``HOST="<gateway_ip>"``."""
+    ip = gateway_ip.strip()
+    if not ip:
+        raise ValueError("gateway_ip required")
+
+    def _sub(m: re.Match[str]) -> str:
+        return f'{m.group(1)}"{ip}"{m.group(2)}'
+
+    return _HOST_LINE_RE.sub(_sub, text)
+
+
+def _stage_fake_sensor_tree(
+    source: Path | str,
+    dest: Path | str,
+    *,
+    gateway_ip: str,
+) -> Path:
+    """Copy ``fake_sensor/`` into ``dest`` and template HOST. Never mutates source."""
+    source = Path(source).resolve()
+    dest = Path(dest).resolve()
+    if not source.is_dir():
+        raise FileNotFoundError(f"fake_sensor source missing: {source}")
+    if dest == source or source in dest.parents or dest in source.parents:
+        raise ValueError(
+            f"refusing to stage onto overlapping paths: source={source} dest={dest}"
+        )
+    if dest.exists():
+        shutil.rmtree(dest)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(
+        source,
+        dest,
+        ignore=shutil.ignore_patterns("__pycache__", "*.pyc", ".git"),
+    )
+    for script in dest.rglob("test_sensor_data.sh"):
+        original = script.read_text(encoding="utf-8")
+        updated = _apply_host_to_script(original, gateway_ip)
+        if updated != original:
+            script.write_text(updated, encoding="utf-8")
+    return dest
 
 
 def _repo_fake_sensor_dir() -> Path:
     # apps/control-service/lab/lifecycle.py → repo root
     return Path(__file__).resolve().parents[3] / "fake_sensor"
+
+
+def _parse_gateway_ipv4(gateway_ip: str) -> str:
+    raw = gateway_ip.strip()
+    try:
+        return str(ipaddress.IPv4Address(raw))
+    except ValueError as exc:
+        raise ValueError(f"invalid gateway_ip (need IPv4 host): {gateway_ip!r}") from exc
 
 
 @dataclass
@@ -52,7 +106,7 @@ class FakeSensorStatus:
 
 
 class LabFakeSensorManager:
-    """Stage templated HOST= tree, ``compose up`` selected sensors, auto-stop."""
+    """Stage templated HOST= tree, always ``compose up --build``, auto-stop."""
 
     def __init__(
         self,
@@ -68,7 +122,7 @@ class LabFakeSensorManager:
         self.project_name = project_name
         self.docker_bin = docker_bin or shutil.which("docker") or "docker"
         self._runner = runner or subprocess.run
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._timer: threading.Timer | None = None
         self._gateway_ip: str | None = None
         self._sensors: list[str] = []
@@ -137,77 +191,15 @@ class LabFakeSensorManager:
         self._timer.daemon = True
         self._timer.start()
 
-    def start(
-        self,
-        *,
-        gateway_ip: str,
-        duration_minutes: int = DEFAULT_DURATION_MINUTES,
-        sensors: Sequence[str] | None = None,
-        build: bool = True,
-    ) -> FakeSensorStatus:
-        """Template HOST, ``compose up -d`` (optional build), schedule auto-stop."""
-        ip = validate_ip_or_cidr(gateway_ip.strip())
-        if "/" in ip:
-            raise ValueError("gateway_ip must be a single host address, not CIDR")
-        try:
-            parsed = ipaddress.ip_address(ip)
-        except ValueError as exc:
-            raise ValueError(f"invalid gateway_ip: {gateway_ip!r}") from exc
-        if parsed.version != 4:
-            raise ValueError("gateway_ip must be IPv4")
-
-        mins = int(duration_minutes)
-        if mins < 1 or mins > MAX_DURATION_MINUTES:
-            raise ValueError(
-                f"duration_minutes must be 1..{MAX_DURATION_MINUTES} (got {mins})"
-            )
-        selected = list(sensors) if sensors else list(DEFAULT_SENSORS)
-        if not selected:
-            raise ValueError("sensors list empty")
-        for name in selected:
-            if not re_sensor_name(name):
-                raise ValueError(f"invalid sensor name: {name!r}")
-
-        with self._lock:
-            self._cancel_timer()
-            staged = stage_fake_sensor_tree(
-                self.source_dir, self.staged_dir, gateway_ip=ip
-            )
-            self._staged = staged
-            self._gateway_ip = ip
-            self._sensors = selected
-            self._duration_minutes = mins
-            self._started_at = time.time()
-            self._stops_at = self._started_at + mins * 60
-
-            up_args: list[str] = ["up", "-d"]
-            if build:
-                up_args.append("--build")
-            up_args.extend(selected)
-            proc = self._run(*up_args)
-            self._schedule_stop(mins)
-            detail = (proc.stdout or proc.stderr or "").strip()
-            return self.status(detail=detail or "started")
-
-    def stop(self, *, detail: str = "stopped") -> FakeSensorStatus:
-        with self._lock:
-            self._cancel_timer()
-            if not self.compose_file.is_file():
-                self._clear_runtime()
-                return FakeSensorStatus(
-                    running=False, warning=STORAGE_OVERFLOW_WARNING, detail="no compose"
-                )
-            proc = self._run("down", check=False, timeout=180)
-            down_detail = (proc.stderr or proc.stdout or "").strip()
-            if proc.returncode != 0:
-                down_detail = f"compose down exit {proc.returncode}: {down_detail}"
-            self._clear_runtime()
-            return FakeSensorStatus(
-                running=False,
-                warning=STORAGE_OVERFLOW_WARNING,
-                compose_ps="",
-                detail=f"{detail}; {down_detail}".strip("; "),
-            )
+    def _down_if_present(self) -> str:
+        """Stop previous lab project before restage/up. Returns detail fragment."""
+        if not self.compose_file.is_file():
+            return ""
+        proc = self._run("down", check=False, timeout=180)
+        detail = (proc.stderr or proc.stdout or "").strip()
+        if proc.returncode != 0:
+            return f"compose down exit {proc.returncode}: {detail}"
+        return detail
 
     def _clear_runtime(self) -> None:
         self._gateway_ip = None
@@ -216,17 +208,29 @@ class LabFakeSensorManager:
         self._started_at = None
         self._stops_at = None
 
-    def status(self, *, detail: str = "", probe_compose: bool = True) -> FakeSensorStatus:
+    def _status_unlocked(self, *, detail: str = "") -> FakeSensorStatus:
         ps_out = ""
         running = False
-        if probe_compose and self.compose_file.is_file():
-            proc = self._run("ps", check=False, timeout=60)
-            ps_out = (proc.stdout or "").strip()
-            running = proc.returncode == 0 and any(
-                tok in ps_out.lower() for tok in ("running", "up ")
-            )
-        elif self._started_at is not None and self._stops_at is not None:
-            running = time.time() < self._stops_at
+        if self.compose_file.is_file():
+            try:
+                proc = self._run("ps", check=False, timeout=60)
+                ps_out = (proc.stdout or "").strip()
+                running = proc.returncode == 0 and any(
+                    tok in ps_out.lower() for tok in ("running", "up ")
+                )
+            except (FileNotFoundError, OSError, subprocess.TimeoutExpired) as exc:
+                return FakeSensorStatus(
+                    running=False,
+                    gateway_ip=self._gateway_ip,
+                    sensors=list(self._sensors),
+                    duration_minutes=self._duration_minutes,
+                    started_at=self._started_at,
+                    stops_at=self._stops_at,
+                    warning=STORAGE_OVERFLOW_WARNING,
+                    compose_ps="",
+                    staged_root=str(self._staged) if self._staged else None,
+                    detail=f"status probe failed: {exc}",
+                )
         return FakeSensorStatus(
             running=running,
             gateway_ip=self._gateway_ip,
@@ -239,3 +243,80 @@ class LabFakeSensorManager:
             staged_root=str(self._staged) if self._staged else None,
             detail=detail,
         )
+
+    def start(
+        self,
+        *,
+        gateway_ip: str,
+        duration_minutes: int = DEFAULT_DURATION_MINUTES,
+        sensors: Sequence[str] | None = None,
+    ) -> FakeSensorStatus:
+        """Down previous run, stage HOST, ``compose up -d --build``, schedule auto-stop.
+
+        Always rebuilds: sensor images COPY scripts at build time, so templated
+        HOST only takes effect with ``--build``.
+        """
+        ip = _parse_gateway_ipv4(gateway_ip)
+        mins = int(duration_minutes)
+        if mins < 1 or mins > MAX_DURATION_MINUTES:
+            raise ValueError(
+                f"duration_minutes must be 1..{MAX_DURATION_MINUTES} (got {mins})"
+            )
+        selected = list(sensors) if sensors else list(DEFAULT_SENSORS)
+        if not selected:
+            raise ValueError("sensors list empty")
+        for name in selected:
+            if not _SENSOR_NAME_RE.fullmatch(name.strip()):
+                raise ValueError(f"invalid sensor name: {name!r}")
+
+        with self._lock:
+            self._cancel_timer()
+            self._clear_runtime()
+            down_detail = self._down_if_present()
+
+            staged = _stage_fake_sensor_tree(
+                self.source_dir, self.staged_dir, gateway_ip=ip
+            )
+            self._staged = staged
+
+            up_args = ["up", "-d", "--build", *selected]
+            try:
+                proc = self._run(*up_args)
+            except Exception:
+                self._down_if_present()
+                self._clear_runtime()
+                raise
+
+            now = time.time()
+            self._gateway_ip = ip
+            self._sensors = selected
+            self._duration_minutes = mins
+            self._started_at = now
+            self._stops_at = now + mins * 60
+            self._schedule_stop(mins)
+
+            detail = (proc.stdout or proc.stderr or "").strip() or "started"
+            if down_detail:
+                detail = f"{detail}; prior down: {down_detail}"
+            return self._status_unlocked(detail=detail)
+
+    def stop(self, *, detail: str = "stopped") -> FakeSensorStatus:
+        with self._lock:
+            self._cancel_timer()
+            if not self.compose_file.is_file():
+                self._clear_runtime()
+                return FakeSensorStatus(
+                    running=False, warning=STORAGE_OVERFLOW_WARNING, detail="no compose"
+                )
+            down_detail = self._down_if_present()
+            self._clear_runtime()
+            return FakeSensorStatus(
+                running=False,
+                warning=STORAGE_OVERFLOW_WARNING,
+                compose_ps="",
+                detail=f"{detail}; {down_detail}".strip("; "),
+            )
+
+    def status(self, *, detail: str = "") -> FakeSensorStatus:
+        with self._lock:
+            return self._status_unlocked(detail=detail)

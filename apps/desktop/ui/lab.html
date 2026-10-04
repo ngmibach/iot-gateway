@@ -23,13 +23,18 @@
       <div class="note-box" id="warn-box" style="border-color:var(--warn);color:var(--warn)">
         fake_sensor must run only for a <strong>short period</strong>. Prolonged use can overflow
         gateway/monitoring storage (logs, Loki, Mosquitto). The Lab auto-stops after the duration you set
-        (max 60 minutes).
+        (max 60 minutes). <strong>Keep this wizard/app open</strong> until auto-stop — exiting cancels the
+        in-process timer while containers may keep running.
       </div>
     </section>
 
     <section class="panel">
       <h2>Start / stop</h2>
-      <p>Templates <code>HOST=&lt;gateway IP&gt;</code> into a staged copy of <code>fake_sensor/</code>, then runs a short-lived local compose project (<code>iotgw-lab-fake-sensor</code>).</p>
+      <p>
+        Templates <code>HOST=&lt;gateway IP&gt;</code> into a staged copy of <code>fake_sensor/</code>, then
+        runs a short-lived local compose project (<code>iotgw-lab-fake-sensor</code>).
+        Images are always rebuilt so the templated HOST is baked into the sensor scripts.
+      </p>
       <div class="row">
         <label for="gateway-ip">Gateway IP</label>
         <input id="gateway-ip" placeholder="192.168.1.50" />
@@ -43,10 +48,7 @@
         <input id="sensors" value="sensor1,sensor2,sensor3,sensor4" title="Comma-separated sensor1..sensor9" />
       </div>
       <div class="row">
-        <label><input type="checkbox" id="build" checked /> Rebuild images</label>
-      </div>
-      <div class="row">
-        <button class="primary" id="btn-start">Start (short-lived)</button>
+        <button class="primary" id="btn-start">Start (short-lived, rebuild)</button>
         <button class="danger" id="btn-stop">Stop now</button>
         <button class="secondary" id="btn-refresh">Refresh status</button>
       </div>

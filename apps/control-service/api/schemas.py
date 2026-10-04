@@ -146,12 +146,14 @@ class RotateCAResponse(BaseModel):
     devices: list[DeviceBundleToken] = Field(default_factory=list)
 
 class LabFakeSensorsStartRequest(BaseModel):
-    """Optional Lab demo — not part of production install."""
+    """Optional Lab demo — not part of production install.
+
+    Images always rebuild so templated HOST= is baked into the sensor CMD script.
+    """
 
     gateway_ip: str = Field(..., min_length=1)
     duration_minutes: int = Field(default=10, ge=1, le=60)
     sensors: Optional[list[str]] = None
-    build: bool = True
 
     @field_validator("gateway_ip")
     @classmethod

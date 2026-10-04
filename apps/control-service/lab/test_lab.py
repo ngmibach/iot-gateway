@@ -8,12 +8,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from lab.host_template import apply_host_to_script, stage_fake_sensor_tree
 from lab.lifecycle import (
     DEFAULT_DURATION_MINUTES,
     MAX_DURATION_MINUTES,
     STORAGE_OVERFLOW_WARNING,
     LabFakeSensorManager,
+    _apply_host_to_script,
+    _stage_fake_sensor_tree,
 )
 
 
@@ -38,16 +39,19 @@ def _mini_tree(root: Path) -> Path:
 
 class HostTemplateTests(unittest.TestCase):
     def test_apply_host_rewrites_quoted_and_placeholder(self) -> None:
-        a = apply_host_to_script('HOST="172.20.10.2"\n', "10.0.0.5")
+        a = _apply_host_to_script('HOST="172.20.10.2"\n', "10.0.0.5")
         self.assertIn('HOST="10.0.0.5"', a)
-        b = apply_host_to_script("HOST={{GATEWAY_IP}}\n", "192.168.1.9")
+        b = _apply_host_to_script("HOST={{GATEWAY_IP}}\n", "192.168.1.9")
         self.assertIn('HOST="192.168.1.9"', b)
 
     def test_stage_and_template_tree(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _mini_tree(Path(tmp) / "src")
+            src_script = (src / "build" / "sensor1" / "test_sensor_data.sh").read_text(
+                encoding="utf-8"
+            )
             dest = Path(tmp) / "dest"
-            stage_fake_sensor_tree(src, dest, gateway_ip="10.1.2.3")
+            _stage_fake_sensor_tree(src, dest, gateway_ip="10.1.2.3")
             s1 = (dest / "build" / "sensor1" / "test_sensor_data.sh").read_text(
                 encoding="utf-8"
             )
@@ -58,10 +62,33 @@ class HostTemplateTests(unittest.TestCase):
             self.assertIn('HOST="10.1.2.3"', s2)
             self.assertNotIn("172.20.10.2", s1)
             self.assertNotIn("{{GATEWAY_IP}}", s2)
+            # Source tree must remain unchanged.
+            self.assertEqual(
+                (src / "build" / "sensor1" / "test_sensor_data.sh").read_text(
+                    encoding="utf-8"
+                ),
+                src_script,
+            )
+
+    def test_stage_refuses_dest_equal_source(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _mini_tree(Path(tmp) / "src")
+            before = (src / "build" / "sensor1" / "test_sensor_data.sh").read_text(
+                encoding="utf-8"
+            )
+            with self.assertRaises(ValueError):
+                _stage_fake_sensor_tree(src, src, gateway_ip="10.0.0.1")
+            self.assertEqual(
+                (src / "build" / "sensor1" / "test_sensor_data.sh").read_text(
+                    encoding="utf-8"
+                ),
+                before,
+            )
+            self.assertTrue(src.is_dir())
 
 
 class LifecycleTests(unittest.TestCase):
-    def test_start_templates_and_compose_up(self) -> None:
+    def test_start_templates_down_then_up_build(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             src = _mini_tree(Path(tmp) / "src")
             work = Path(tmp) / "work"
@@ -69,30 +96,70 @@ class LifecycleTests(unittest.TestCase):
 
             def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
                 calls.append(list(cmd))
-                out = "NAME STATUS\nsensor1 Up 2 seconds\n" if "ps" in cmd else "started\n"
+                out = (
+                    "NAME STATUS\nsensor1 Up 2 seconds\n"
+                    if "ps" in cmd
+                    else "ok\n"
+                )
                 return subprocess.CompletedProcess(cmd, 0, stdout=out, stderr="")
 
             mgr = LabFakeSensorManager(work, source_dir=src, runner=runner)
+            # Seed a prior compose file so start must down first.
+            staged = work / "fake_sensor"
+            staged.mkdir(parents=True)
+            (staged / "docker-compose.yaml").write_text("services: {}\n", encoding="utf-8")
+
             st = mgr.start(
                 gateway_ip="192.168.10.50",
                 duration_minutes=5,
                 sensors=["sensor1"],
-                build=True,
             )
             self.assertTrue(st.running)
             self.assertEqual(st.gateway_ip, "192.168.10.50")
             self.assertEqual(st.sensors, ["sensor1"])
             self.assertEqual(st.duration_minutes, 5)
             self.assertIn("overflow", st.warning.lower())
+            self.assertIn("keep this app", st.warning.lower())
             script = (
                 work / "fake_sensor" / "build" / "sensor1" / "test_sensor_data.sh"
             ).read_text(encoding="utf-8")
             self.assertIn('HOST="192.168.10.50"', script)
-            self.assertTrue(calls)
-            self.assertIn("compose", calls[0])
-            self.assertIn("up", calls[0])
-            self.assertIn("sensor1", calls[0])
+            # First compose op is down (prior project), then up --build.
+            compose_ops = [c for c in calls if "compose" in c]
+            self.assertGreaterEqual(len(compose_ops), 2)
+            self.assertIn("down", compose_ops[0])
+            up = next(c for c in compose_ops if "up" in c)
+            self.assertIn("--build", up)
+            self.assertIn("sensor1", up)
             mgr._cancel_timer()
+
+    def test_up_failure_clears_runtime_and_attempts_down(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            src = _mini_tree(Path(tmp) / "src")
+            work = Path(tmp) / "work"
+            calls: list[list[str]] = []
+
+            def runner(cmd, **kwargs):  # type: ignore[no-untyped-def]
+                calls.append(list(cmd))
+                if "up" in cmd:
+                    return subprocess.CompletedProcess(
+                        cmd, 1, stdout="", stderr="boom"
+                    )
+                return subprocess.CompletedProcess(cmd, 0, stdout="ok\n", stderr="")
+
+            mgr = LabFakeSensorManager(work, source_dir=src, runner=runner)
+            with self.assertRaises(RuntimeError):
+                mgr.start(
+                    gateway_ip="10.0.0.9",
+                    duration_minutes=5,
+                    sensors=["sensor1"],
+                )
+            self.assertIsNone(mgr._stops_at)
+            self.assertIsNone(mgr._started_at)
+            self.assertIsNone(mgr._gateway_ip)
+            self.assertIsNone(mgr._timer)
+            downs = [c for c in calls if "down" in c]
+            self.assertTrue(downs, "expected compose down after failed up")
 
     def test_rejects_bad_duration_and_cidr(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -180,6 +247,7 @@ class ApiLabTests(unittest.TestCase):
             self.assertTrue(r.json()["running"])
             self.assertIn("overflow", r.json()["warning"].lower())
             mgr.start.assert_called_once()
+            self.assertNotIn("build", mgr.start.call_args.kwargs)
             r2 = client.get("/api/v1/lab/fake-sensors/status")
             self.assertEqual(r2.status_code, 200)
             r3 = client.post("/api/v1/lab/fake-sensors/stop")

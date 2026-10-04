@@ -49,7 +49,10 @@
   }
 
   async function start() {
-    const mins = Number($("duration").value) || 10;
+    const mins = Number($("duration").value);
+    if (!Number.isFinite(mins) || mins < 1 || mins > 60) {
+      throw new Error("duration_minutes must be 1..60");
+    }
     if (mins > 30) {
       const ok = confirm(
         `Duration is ${mins} minutes. Prolonged fake_sensor runs can overflow storage. Continue?`
@@ -60,18 +63,17 @@
       .value.split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    $("msg").textContent = "Starting (may build images)…";
+    $("msg").textContent = "Starting (always rebuilds images for HOST)…";
     const data = await api("/api/lab/fake-sensors/start", {
       method: "POST",
       body: JSON.stringify({
         gateway_ip: $("gateway-ip").value.trim(),
         duration_minutes: mins,
         sensors,
-        build: $("build").checked,
       }),
     });
     showStatus(data);
-    $("msg").innerHTML = `<div class="okmsg">Started. Auto-stop scheduled. ${escapeHtml(data.warning || "")}</div>`;
+    $("msg").innerHTML = `<div class="okmsg">Started. Auto-stop scheduled — keep this app open. ${escapeHtml(data.warning || "")}</div>`;
   }
 
   async function stop() {

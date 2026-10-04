@@ -34,11 +34,14 @@ class LabWizardApiTests(unittest.TestCase):
                 return outer.fake_status
 
             def start(self_inner, **kwargs):
+                mins = int(kwargs.get("duration_minutes", 10))
+                if mins < 1 or mins > 60:
+                    raise ValueError(f"duration_minutes must be 1..60 (got {mins})")
                 outer.fake_status = FakeSensorStatus(
                     running=True,
                     gateway_ip=kwargs["gateway_ip"],
                     sensors=list(kwargs.get("sensors") or ["sensor1"]),
-                    duration_minutes=kwargs.get("duration_minutes", 10),
+                    duration_minutes=mins,
                     warning=STORAGE_OVERFLOW_WARNING,
                     detail="started",
                 )
@@ -115,6 +118,21 @@ class LabWizardApiTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as ctx:
             urllib.request.urlopen(req, timeout=5)
         self.assertEqual(ctx.exception.code, 400)
+
+    def test_duration_zero_rejected(self) -> None:
+        req = urllib.request.Request(
+            self.base + "/api/lab/fake-sensors/start",
+            data=json.dumps(
+                {"gateway_ip": "192.168.1.50", "duration_minutes": 0}
+            ).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 400)
+        body = json.loads(ctx.exception.read().decode("utf-8"))
+        self.assertIn("duration", body.get("error", "").lower())
 
 
 if __name__ == "__main__":

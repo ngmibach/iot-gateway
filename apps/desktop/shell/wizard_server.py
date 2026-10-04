@@ -62,18 +62,9 @@ def _lab_manager():
 
 
 def _lab_status_dict(st: Any) -> dict[str, Any]:
-    return {
-        "running": st.running,
-        "gateway_ip": st.gateway_ip,
-        "sensors": list(st.sensors),
-        "duration_minutes": st.duration_minutes,
-        "started_at": st.started_at,
-        "stops_at": st.stops_at,
-        "warning": st.warning,
-        "compose_ps": st.compose_ps,
-        "staged_root": st.staged_root,
-        "detail": st.detail,
-    }
+    from dataclasses import asdict
+
+    return asdict(st)
 
 
 def _json_response(handler: BaseHTTPRequestHandler, code: int, body: Any) -> None:
@@ -427,12 +418,20 @@ def _handle_api(
             sensors = body.get("sensors")
             if isinstance(sensors, str):
                 sensors = [s.strip() for s in sensors.split(",") if s.strip()]
+            raw_dur = body.get("duration_minutes", 10)
+            if raw_dur is None or raw_dur == "":
+                duration_minutes = 10
+            else:
+                try:
+                    duration_minutes = int(raw_dur)
+                except (TypeError, ValueError):
+                    _json_response(handler, 400, {"error": "duration_minutes must be an integer"})
+                    return
             try:
                 st = _lab_manager().start(
                     gateway_ip=gw,
-                    duration_minutes=int(body.get("duration_minutes") or 10),
+                    duration_minutes=duration_minutes,
                     sensors=sensors,
-                    build=bool(body.get("build", True)),
                 )
             except ValueError as e:
                 _json_response(handler, 400, {"error": str(e)})
