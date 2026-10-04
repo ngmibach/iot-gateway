@@ -9,6 +9,10 @@ def _ensure_trailing_newline(text: str) -> str:
     return text if text.endswith("\n") else text + "\n"
 
 
+def acl_has_user(content: str, user_id: str) -> bool:
+    return any(username == user_id for username, _ in _iter_user_blocks(content))
+
+
 def append_user_acl(
     content: str,
     user_id: str,
@@ -26,6 +30,33 @@ def append_user_acl(
     if topic_r:
         lines.append(f"topic read {topic_r}")
     return body + "\n".join(lines) + "\n"
+
+
+def replace_user_acl(
+    content: str,
+    user_id: str,
+    *,
+    topic_rw: str | None = None,
+    topic_r: str | None = None,
+) -> str:
+    """Replace an existing user block with a fresh one (topics from args only)."""
+    without = remove_user_acl(content, user_id)
+    return append_user_acl(without, user_id, topic_rw=topic_rw, topic_r=topic_r)
+
+
+def upsert_user_acl(
+    content: str,
+    user_id: str,
+    *,
+    topic_rw: str | None = None,
+    topic_r: str | None = None,
+) -> str:
+    """Insert or replace the ACL block for ``user_id`` (no duplicate users)."""
+    if acl_has_user(content, user_id):
+        return replace_user_acl(
+            content, user_id, topic_rw=topic_rw, topic_r=topic_r
+        )
+    return append_user_acl(content, user_id, topic_rw=topic_rw, topic_r=topic_r)
 
 
 def _iter_user_blocks(content: str) -> list[tuple[str | None, list[str]]]:
@@ -132,10 +163,7 @@ def merge_password_line(content: str, hash_line: str) -> str:
         else:
             new_lines.append(line)
     if not replaced:
-        if new_lines and new_lines[-1].strip():
-            new_lines.append(hash_line)
-        else:
-            new_lines.append(hash_line)
+        new_lines.append(hash_line)
     return "\n".join(new_lines) + "\n"
 
 

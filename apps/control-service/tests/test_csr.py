@@ -13,11 +13,11 @@ from cryptography.hazmat.primitives import serialization
 from actions.csr import (
     assemble_cert_bundle,
     generate_client_key_and_csr,
-    local_self_sign_for_tests,
     sign_csr_on_gateway,
 )
 from actions.paths import GatewayPaths
 from actions.ssh import CommandResult
+from tests.cert_helpers import local_self_sign_for_tests
 
 
 class TestCsr(unittest.TestCase):
@@ -87,7 +87,6 @@ class TestCsr(unittest.TestCase):
         self.assertEqual(result.client_crt_pem, signed_local.client_crt_pem)
         self.assertTrue(any("-passin file:/tmp/iotgw-ca-pass-" in c for c in runs))
         self.assertFalse(any("passin pass:" in c for c in runs))
-        # passphrase file written then unlinked
         pass_files = [p for p in written if "iotgw-ca-pass-" in p]
         self.assertEqual(len(pass_files), 1)
         self.assertEqual(written[pass_files[0]], b"not-admin")

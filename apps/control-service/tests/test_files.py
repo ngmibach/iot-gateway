@@ -29,6 +29,24 @@ class TestAclHelpers(unittest.TestCase):
         self.assertIn("topic readwrite sensors/sensor9/#\n", out)
         self.assertIn("topic read alerts/+\n", out)
 
+    def test_upsert_replaces_existing(self) -> None:
+        once = fileops.upsert_user_acl(
+            SAMPLE_ACL, "sensor1", topic_rw="sensors/sensor1/new/#"
+        )
+        twice = fileops.upsert_user_acl(
+            once, "sensor1", topic_rw="sensors/sensor1/final/#", topic_r="alerts/+"
+        )
+        self.assertEqual(twice.count("user sensor1\n"), 1)
+        self.assertIn("topic readwrite sensors/sensor1/final/#\n", twice)
+        self.assertNotIn("topic readwrite sensors/sensor1/#\n", twice)
+        self.assertIn("topic read alerts/+\n", twice)
+
+    def test_upsert_appends_new(self) -> None:
+        out = fileops.upsert_user_acl(
+            SAMPLE_ACL, "sensor9", topic_rw="sensors/sensor9/#"
+        )
+        self.assertEqual(out.count("user sensor9\n"), 1)
+
     def test_update_add_and_delete(self) -> None:
         out = fileops.update_user_acl(
             SAMPLE_ACL,
@@ -38,7 +56,6 @@ class TestAclHelpers(unittest.TestCase):
         )
         self.assertIn("topic readwrite sensors/sensor1/extra\n", out)
         self.assertNotIn("topic read alerts/+\n", out)
-        # other users untouched
         self.assertIn("user nodered\n", out)
         self.assertIn("user anonymous\n", out)
 

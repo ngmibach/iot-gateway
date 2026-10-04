@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import secrets
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
 from cryptography import x509
@@ -16,10 +16,7 @@ if TYPE_CHECKING:
     from .ssh import SSHClient
 
 from .paths import GatewayPaths
-
-
-def _shell_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\"'\"'") + "'"
+from .shellutil import shell_quote
 
 
 @dataclass
@@ -114,12 +111,12 @@ def sign_csr_on_gateway(
         # passin file: path is unquoted; token paths have no spaces/metachars.
         cmd = (
             "openssl x509 -req"
-            f" -in {_shell_quote(remote_csr)}"
-            f" -CA {_shell_quote(paths.ca_crt)}"
-            f" -CAkey {_shell_quote(paths.ca_key)}"
+            f" -in {shell_quote(remote_csr)}"
+            f" -CA {shell_quote(paths.ca_crt)}"
+            f" -CAkey {shell_quote(paths.ca_key)}"
             f" -passin file:{remote_pass}"
             " -CAcreateserial"
-            f" -out {_shell_quote(remote_crt)}"
+            f" -out {shell_quote(remote_crt)}"
             f" -days {int(days)}"
         )
         ssh.run(cmd, timeout=300).check()
@@ -147,7 +144,7 @@ def assemble_cert_bundle(
     client_crt_pem: bytes,
     client_key_pem: bytes,
 ) -> bytes:
-    """Build an in-memory tar-like plain zip of the three PEM files."""
+    """Build an in-memory zip of the three PEM files."""
     import io
     import zipfile
 
@@ -157,32 +154,3 @@ def assemble_cert_bundle(
         zf.writestr("client.crt", client_crt_pem)
         zf.writestr("client.key", client_key_pem)
     return buf.getvalue()
-
-
-def local_self_sign_for_tests(
-    material: ClientKeyMaterial,
-    *,
-    days: int = 30,
-) -> SignedClientCert:
-    """Test helper: self-sign CSR without a gateway (unit tests only)."""
-    key = serialization.load_pem_private_key(material.private_key_pem, password=None)
-    csr = x509.load_pem_x509_csr(material.csr_pem)
-    assert isinstance(key, rsa.RSAPrivateKey)
-    now = datetime.now(timezone.utc)
-    cert = (
-        x509.CertificateBuilder()
-        .subject_name(csr.subject)
-        .issuer_name(csr.subject)
-        .public_key(csr.public_key())
-        .serial_number(x509.random_serial_number())
-        .not_valid_before(now - timedelta(minutes=1))
-        .not_valid_after(now + timedelta(days=days))
-        .sign(key, hashes.SHA256())
-    )
-    pem = cert.public_bytes(serialization.Encoding.PEM)
-    return SignedClientCert(
-        client_crt_pem=pem,
-        ca_crt_pem=pem,
-        not_valid_after=cert.not_valid_after_utc,
-        fingerprint_sha256=cert.fingerprint(hashes.SHA256()).hex(),
-    )

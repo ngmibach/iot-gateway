@@ -10,6 +10,10 @@ from typing import Optional
 
 import paramiko
 
+from .shellutil import shell_quote
+
+_DEFAULT_BACKUP_KEEP = 5
+
 
 @dataclass
 class SSHTarget:
@@ -21,6 +25,8 @@ class SSHTarget:
     pkey: Optional[paramiko.PKey] = None
     # When set, refuse connect if remote key base64 does not match.
     host_key_base64: Optional[str] = None
+    # First-connect / lab only — playbooks should pass a pin instead.
+    allow_unknown_host: bool = False
 
 
 @dataclass
@@ -49,11 +55,13 @@ class SSHClient:
         connect_timeout: float = 15.0,
         command_timeout: float = 120.0,
         transport_retries: int = 2,
+        backup_keep: int = _DEFAULT_BACKUP_KEEP,
     ) -> None:
         self.target = target
         self.connect_timeout = connect_timeout
         self.command_timeout = command_timeout
         self.transport_retries = transport_retries
+        self.backup_keep = max(1, backup_keep)
         self._client: Optional[paramiko.SSHClient] = None
         self._sftp: Optional[paramiko.SFTPClient] = None
 
@@ -70,10 +78,11 @@ class SSHClient:
                         client.load_host_keys(known)
                     except OSError:
                         pass
-                if self.target.host_key_base64:
-                    client.set_missing_host_key_policy(paramiko.RejectPolicy())
-                else:
+                if self.target.allow_unknown_host and not self.target.host_key_base64:
                     client.set_missing_host_key_policy(paramiko.WarningPolicy())
+                else:
+                    # K7: pin or known_hosts required for secret-bearing mutations.
+                    client.set_missing_host_key_policy(paramiko.RejectPolicy())
                 connect_kwargs: dict = {
                     "hostname": self.target.host,
                     "port": self.target.port,
@@ -178,7 +187,6 @@ class SSHClient:
             self.sftp.chmod(tmp, mode)
         except OSError:
             pass
-        # Atomic replace when possible
         try:
             self.sftp.remove(path)
         except OSError:
@@ -201,8 +209,11 @@ class SSHClient:
         except OSError:
             return False
 
+    def listdir(self, path: str) -> list[str]:
+        return self.sftp.listdir(path)
+
     def backup(self, path: str) -> str:
-        """Copy ``path`` to ``path.bak.<epoch>``; return backup path."""
+        """Copy ``path`` to ``path.bak.<epoch>``; keep last ``backup_keep`` copies."""
         bak = f"{path}.bak.{int(time.time())}"
         data = self.read_bytes(path)
         mode = 0o644
@@ -211,7 +222,31 @@ class SSHClient:
         except OSError:
             pass
         self.write_bytes(bak, data, mode=mode)
+        self._prune_backups(path)
         return bak
+
+    def _prune_backups(self, path: str) -> None:
+        directory, name = path.rsplit("/", 1) if "/" in path else (".", path)
+        try:
+            entries = self.listdir(directory)
+        except OSError:
+            return
+        prefix = f"{name}.bak."
+        found: list[tuple[int, str]] = []
+        for entry in entries:
+            if not entry.startswith(prefix):
+                continue
+            suffix = entry[len(prefix) :]
+            if not suffix.isdigit():
+                continue
+            full = f"{directory}/{entry}" if directory != "." else entry
+            found.append((int(suffix), full))
+        found.sort(key=lambda t: t[0], reverse=True)
+        for _epoch, old in found[self.backup_keep :]:
+            try:
+                self.unlink(old)
+            except Exception:
+                pass
 
     def restore_backup(self, path: str, bak_path: str) -> None:
         data = self.read_bytes(bak_path)
@@ -226,8 +261,4 @@ class SSHClient:
         try:
             self.sftp.remove(path)
         except OSError:
-            self.run(f"rm -f -- {_shell_quote(path)}").check()
-
-
-def _shell_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\"'\"'") + "'"
+            self.run(f"rm -f -- {shell_quote(path)}").check()

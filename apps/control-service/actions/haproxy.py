@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .paths import HAPROXY_CONTAINER, GatewayPaths
-from .ssh import _shell_quote
+from .shellutil import shell_quote
 
 if TYPE_CHECKING:
     from .ssh import SSHClient
@@ -21,12 +21,12 @@ def reload_haproxy(
 
     Returns ``"hup"`` or ``"restart"`` indicating which path succeeded.
     """
-    hup = ssh.run(f"docker kill -s HUP {_shell_quote(container_name)}")
+    hup = ssh.run(f"docker kill -s HUP {shell_quote(container_name)}")
     if hup.exit_code == 0:
         return "hup"
     restart = ssh.run(
         "docker compose"
-        f" -f {_shell_quote(paths.compose_file)}"
+        f" -f {shell_quote(paths.compose_file)}"
         " restart haproxy"
     )
     restart.check()
@@ -36,6 +36,6 @@ def reload_haproxy(
 def restart_mosquitto(ssh: "SSHClient", paths: GatewayPaths) -> None:
     ssh.run(
         "docker compose"
-        f" -f {_shell_quote(paths.compose_file)}"
+        f" -f {shell_quote(paths.compose_file)}"
         " restart mosquitto"
     ).check()

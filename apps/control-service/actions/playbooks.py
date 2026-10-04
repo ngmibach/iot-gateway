@@ -16,6 +16,7 @@ from .csr import (
 from .haproxy import reload_haproxy, restart_mosquitto
 from .mosquitto_hash import hash_password_line, zeroize_str
 from .paths import DEFAULT_INSTALL_ROOT, GatewayPaths
+from .shellutil import shell_quote
 from .validate import (
     split_csv,
     validate_ip_or_cidr,
@@ -52,19 +53,60 @@ def _paths(install_root: str) -> GatewayPaths:
 def _chmod_mosquitto_secrets(ssh: "SSHClient", paths: GatewayPaths) -> None:
     # Host bind-mount perms; best-effort container ownership like the old workflow.
     ssh.run(
-        f"chmod 0600 {_shell_quote(paths.passwords)} {_shell_quote(paths.acl)} || true"
+        f"chmod 0600 {shell_quote(paths.passwords)} {shell_quote(paths.acl)} || true"
     )
     ssh.run(
         "docker compose"
-        f" -f {_shell_quote(paths.compose_file)}"
+        f" -f {shell_quote(paths.compose_file)}"
         " exec -T mosquitto sh -c "
         "'chown mosquitto:mosquitto /mosquitto/config/passwords /mosquitto/config/acl"
         " && chmod 0600 /mosquitto/config/passwords /mosquitto/config/acl' || true"
     )
 
 
-def _shell_quote(value: str) -> str:
-    return "'" + value.replace("'", "'\"'\"'") + "'"
+def _restore_backups(
+    ssh: "SSHClient",
+    *,
+    bak_acl: str | None = None,
+    bak_pw: str | None = None,
+    bak_ips: str | None = None,
+    paths: GatewayPaths,
+) -> None:
+    if bak_ips:
+        ssh.restore_backup(paths.allowed_ips, bak_ips)
+    if bak_pw:
+        ssh.restore_backup(paths.passwords, bak_pw)
+    if bak_acl:
+        ssh.restore_backup(paths.acl, bak_acl)
+
+
+def _cert_fields(
+    material: ClientKeyMaterial,
+    signed: SignedClientCert | None,
+) -> dict[str, Any]:
+    if signed is None:
+        return {
+            "client_key_pem": material.private_key_pem,
+            "client_crt_pem": None,
+            "ca_crt_pem": None,
+            "cert_fingerprint": None,
+            "cert_expires_at": None,
+            "cert_bundle": None,
+        }
+    return {
+        "client_key_pem": material.private_key_pem,
+        "client_crt_pem": signed.client_crt_pem,
+        "ca_crt_pem": signed.ca_crt_pem,
+        "cert_fingerprint": signed.fingerprint_sha256,
+        "cert_expires_at": (
+            signed.not_valid_after.isoformat() if signed.not_valid_after else None
+        ),
+        "cert_bundle": assemble_cert_bundle(
+            ca_crt_pem=signed.ca_crt_pem,
+            client_crt_pem=signed.client_crt_pem,
+            client_key_pem=material.private_key_pem,
+        ),
+    }
 
 
 def register_device(
@@ -81,13 +123,15 @@ def register_device(
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
 ) -> RegisterResult:
-    """Register MQTT user: ACL + hashed passwd + allow-list IP + CSR/sign.
+    """Register MQTT user: ACL upsert + hashed passwd + allow-list IP + CSR/sign.
 
-    Compensating restores on failure through step 5; mosquitto/haproxy reload
-    failures leave files consistent (degraded) per design.
+    Compensating restores on failure through step 5. After mosquitto restart,
+    reload failures return ``ok=True, status="degraded"`` without rolling back
+    live ACL/password files.
     """
     bak_acl = bak_pw = bak_ips = None
     signed: SignedClientCert | None = None
+    paths = _paths(install_root)
 
     try:
         user_id = validate_user_id(user_id)
@@ -97,7 +141,6 @@ def register_device(
         if topic_r:
             topic_r = validate_topic(topic_r)
 
-        paths = _paths(install_root)
         hash_line = hash_password_line(user_id, password)
         zeroize_str(password)
 
@@ -108,42 +151,35 @@ def register_device(
         bak_pw = ssh.backup(paths.passwords)
         bak_ips = ssh.backup(paths.allowed_ips)
 
-        # 2 ACL
-        acl = ssh.read_text(paths.acl)
-        acl = fileops.append_user_acl(
-            acl, user_id, topic_rw=topic_rw, topic_r=topic_r
-        )
+        # 2 ACL upsert (replace block if user already exists)
         try:
+            acl = fileops.upsert_user_acl(
+                ssh.read_text(paths.acl),
+                user_id,
+                topic_rw=topic_rw,
+                topic_r=topic_r,
+            )
             ssh.write_text(paths.acl, acl, mode=0o600)
         except Exception:
-            if bak_acl:
-                ssh.restore_backup(paths.acl, bak_acl)
+            _restore_backups(ssh, bak_acl=bak_acl, paths=paths)
             raise
 
         # 3 Password hash line
         try:
-            pw = ssh.read_text(paths.passwords)
-            pw = fileops.merge_password_line(pw, hash_line)
+            pw = fileops.merge_password_line(ssh.read_text(paths.passwords), hash_line)
             ssh.write_text(paths.passwords, pw, mode=0o600)
         except Exception:
-            if bak_pw:
-                ssh.restore_backup(paths.passwords, bak_pw)
-            if bak_acl:
-                ssh.restore_backup(paths.acl, bak_acl)
+            _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
             raise
 
         # 4 Allow-list
         try:
-            ips = ssh.read_text(paths.allowed_ips)
-            ips = fileops.add_allowlist_ips(ips, [ip])
+            ips = fileops.add_allowlist_ips(ssh.read_text(paths.allowed_ips), [ip])
             ssh.write_text(paths.allowed_ips, ips, mode=0o644)
         except Exception:
-            if bak_ips:
-                ssh.restore_backup(paths.allowed_ips, bak_ips)
-            if bak_pw:
-                ssh.restore_backup(paths.passwords, bak_pw)
-            if bak_acl:
-                ssh.restore_backup(paths.acl, bak_acl)
+            _restore_backups(
+                ssh, bak_acl=bak_acl, bak_pw=bak_pw, bak_ips=bak_ips, paths=paths
+            )
             raise
 
         # 5 CSR sign
@@ -157,47 +193,28 @@ def register_device(
                 reject_default_admin_passphrase=reject_default_admin_passphrase,
             )
         except Exception:
-            if bak_ips:
-                ssh.restore_backup(paths.allowed_ips, bak_ips)
-            if bak_pw:
-                ssh.restore_backup(paths.passwords, bak_pw)
-            if bak_acl:
-                ssh.restore_backup(paths.acl, bak_acl)
+            _restore_backups(
+                ssh, bak_acl=bak_acl, bak_pw=bak_pw, bak_ips=bak_ips, paths=paths
+            )
             raise
 
         _chmod_mosquitto_secrets(ssh, paths)
+        cert_kw = _cert_fields(material, signed)
+        backups = {"acl": bak_acl, "passwords": bak_pw, "allowed_ips": bak_ips}
 
-        # 6 Restart mosquitto
+        # 6 Restart mosquitto — files stay; do not roll back on failure.
         try:
             restart_mosquitto(ssh, paths)
         except Exception as exc:
             return RegisterResult(
-                ok=False,
+                ok=True,
                 status="degraded",
                 message=f"files written but mosquitto restart failed: {exc}",
-                details={"user_id": user_id, "ip": ip},
-                client_key_pem=material.private_key_pem,
-                client_crt_pem=signed.client_crt_pem if signed else None,
-                ca_crt_pem=signed.ca_crt_pem if signed else None,
-                cert_fingerprint=signed.fingerprint_sha256 if signed else None,
-                cert_expires_at=(
-                    signed.not_valid_after.isoformat()
-                    if signed and signed.not_valid_after
-                    else None
-                ),
-                cert_bundle=(
-                    assemble_cert_bundle(
-                        ca_crt_pem=signed.ca_crt_pem,
-                        client_crt_pem=signed.client_crt_pem,
-                        client_key_pem=material.private_key_pem,
-                    )
-                    if signed
-                    else None
-                ),
+                details={"user_id": user_id, "ip": ip, "backups": backups},
+                **cert_kw,
             )
 
-        # 7 HAProxy reload
-        haproxy_mode = "unknown"
+        # 7 HAProxy reload — do not roll back mosquitto-live files.
         try:
             haproxy_mode = reload_haproxy(ssh, paths)
         except Exception as exc:
@@ -212,29 +229,11 @@ def register_device(
                     "user_id": user_id,
                     "ip": ip,
                     "haproxy": "failed",
-                    "backups": {
-                        "acl": bak_acl,
-                        "passwords": bak_pw,
-                        "allowed_ips": bak_ips,
-                    },
+                    "backups": backups,
                 },
-                client_key_pem=material.private_key_pem,
-                client_crt_pem=signed.client_crt_pem,
-                ca_crt_pem=signed.ca_crt_pem,
-                cert_fingerprint=signed.fingerprint_sha256,
-                cert_expires_at=(
-                    signed.not_valid_after.isoformat()
-                    if signed.not_valid_after
-                    else None
-                ),
-                cert_bundle=assemble_cert_bundle(
-                    ca_crt_pem=signed.ca_crt_pem,
-                    client_crt_pem=signed.client_crt_pem,
-                    client_key_pem=material.private_key_pem,
-                ),
+                **cert_kw,
             )
 
-        assert signed is not None
         return RegisterResult(
             ok=True,
             status="ok",
@@ -243,26 +242,9 @@ def register_device(
                 "user_id": user_id,
                 "ip": ip,
                 "haproxy": haproxy_mode,
-                "backups": {
-                    "acl": bak_acl,
-                    "passwords": bak_pw,
-                    "allowed_ips": bak_ips,
-                },
+                "backups": backups,
             },
-            client_key_pem=material.private_key_pem,
-            client_crt_pem=signed.client_crt_pem,
-            ca_crt_pem=signed.ca_crt_pem,
-            cert_fingerprint=signed.fingerprint_sha256,
-            cert_expires_at=(
-                signed.not_valid_after.isoformat()
-                if signed.not_valid_after
-                else None
-            ),
-            cert_bundle=assemble_cert_bundle(
-                ca_crt_pem=signed.ca_crt_pem,
-                client_crt_pem=signed.client_crt_pem,
-                client_key_pem=material.private_key_pem,
-            ),
+            **cert_kw,
         )
     except Exception as exc:
         return RegisterResult(
@@ -284,43 +266,46 @@ def update_acl(
     install_root: str = DEFAULT_INSTALL_ROOT,
 ) -> PlaybookResult:
     """Port of update_acl.yaml."""
-    user_id = validate_user_id(user_id)
-    paths = _paths(install_root)
-
-    def _list(v: list[str] | str | None) -> list[str]:
-        if v is None:
-            return []
-        if isinstance(v, str):
-            return [validate_topic(t) for t in split_csv(v)]
-        return [validate_topic(t) for t in v]
-
-    add_rw_l, add_r_l = _list(add_rw), _list(add_r)
-    del_rw_l, del_r_l = _list(delete_rw), _list(delete_r)
-
-    bak = ssh.backup(paths.acl)
     try:
-        content = ssh.read_text(paths.acl)
-        updated = fileops.update_user_acl(
-            content,
-            user_id,
-            add_rw=add_rw_l,
-            add_r=add_r_l,
-            delete_rw=del_rw_l,
-            delete_r=del_r_l,
-        )
-        ssh.write_text(paths.acl, updated, mode=0o600)
-        _chmod_mosquitto_secrets(ssh, paths)
-        restart_mosquitto(ssh, paths)
-        return PlaybookResult(
-            ok=True,
-            message="ACL updated",
-            details={"user_id": user_id, "backup": bak},
-        )
-    except Exception as exc:
+        user_id = validate_user_id(user_id)
+        paths = _paths(install_root)
+
+        def _list(v: list[str] | str | None) -> list[str]:
+            if v is None:
+                return []
+            if isinstance(v, str):
+                return [validate_topic(t) for t in split_csv(v)]
+            return [validate_topic(t) for t in v]
+
+        add_rw_l, add_r_l = _list(add_rw), _list(add_r)
+        del_rw_l, del_r_l = _list(delete_rw), _list(delete_r)
+
+        bak = ssh.backup(paths.acl)
         try:
-            ssh.restore_backup(paths.acl, bak)
+            content = ssh.read_text(paths.acl)
+            updated = fileops.update_user_acl(
+                content,
+                user_id,
+                add_rw=add_rw_l,
+                add_r=add_r_l,
+                delete_rw=del_rw_l,
+                delete_r=del_r_l,
+            )
+            ssh.write_text(paths.acl, updated, mode=0o600)
+            _chmod_mosquitto_secrets(ssh, paths)
+            restart_mosquitto(ssh, paths)
+            return PlaybookResult(
+                ok=True,
+                message="ACL updated",
+                details={"user_id": user_id, "backup": bak},
+            )
         except Exception:
-            pass
+            try:
+                ssh.restore_backup(paths.acl, bak)
+            except Exception:
+                pass
+            raise
+    except Exception as exc:
         return PlaybookResult(ok=False, status="failed", message=str(exc))
 
 
@@ -381,17 +366,24 @@ def unregister_device(
     remove_ip: bool = False,
     install_root: str = DEFAULT_INSTALL_ROOT,
 ) -> PlaybookResult:
-    """Remove ACL block + password line; optionally remove IP if not shared."""
-    user_id = validate_user_id(user_id)
-    if ip is not None:
-        ip = validate_ip_or_cidr(ip)
-    paths = _paths(install_root)
+    """Remove ACL block + password line; optionally remove IP.
 
-    bak_acl = ssh.backup(paths.acl)
-    bak_pw = ssh.backup(paths.passwords)
-    bak_ips = ssh.backup(paths.allowed_ips) if remove_ip and ip else None
+    ``remove_ip=True`` is unsafe without a registry/shared-IP check — the
+    caller must confirm no other device shares ``ip``. Default is False.
+    """
+    paths = _paths(install_root)
+    bak_acl = bak_pw = bak_ips = None
+    mosquitto_restarted = False
 
     try:
+        user_id = validate_user_id(user_id)
+        if ip is not None:
+            ip = validate_ip_or_cidr(ip)
+
+        bak_acl = ssh.backup(paths.acl)
+        bak_pw = ssh.backup(paths.passwords)
+        bak_ips = ssh.backup(paths.allowed_ips) if remove_ip and ip else None
+
         acl = fileops.remove_user_acl(ssh.read_text(paths.acl), user_id)
         ssh.write_text(paths.acl, acl, mode=0o600)
 
@@ -404,9 +396,32 @@ def unregister_device(
 
         _chmod_mosquitto_secrets(ssh, paths)
         restart_mosquitto(ssh, paths)
+        mosquitto_restarted = True
+
         haproxy_mode = None
         if remove_ip and ip:
-            haproxy_mode = reload_haproxy(ssh, paths)
+            try:
+                haproxy_mode = reload_haproxy(ssh, paths)
+            except Exception as exc:
+                # Mosquitto already dropped the user — do not restore ACL/passwd.
+                return PlaybookResult(
+                    ok=True,
+                    status="degraded",
+                    message=(
+                        "user removed from mosquitto; allow-list may be stale "
+                        f"until haproxy reload: {exc}"
+                    ),
+                    details={
+                        "user_id": user_id,
+                        "removed_ip": ip,
+                        "haproxy": "failed",
+                        "backups": {
+                            "acl": bak_acl,
+                            "passwords": bak_pw,
+                            "allowed_ips": bak_ips,
+                        },
+                    },
+                )
 
         return PlaybookResult(
             ok=True,
@@ -423,14 +438,24 @@ def unregister_device(
             },
         )
     except Exception as exc:
-        try:
-            ssh.restore_backup(paths.acl, bak_acl)
-            ssh.restore_backup(paths.passwords, bak_pw)
-            if bak_ips:
-                ssh.restore_backup(paths.allowed_ips, bak_ips)
-        except Exception:
-            pass
-        return PlaybookResult(ok=False, status="failed", message=str(exc))
+        if not mosquitto_restarted:
+            try:
+                _restore_backups(
+                    ssh,
+                    bak_acl=bak_acl,
+                    bak_pw=bak_pw,
+                    bak_ips=bak_ips,
+                    paths=paths,
+                )
+            except Exception:
+                pass
+            return PlaybookResult(ok=False, status="failed", message=str(exc))
+        return PlaybookResult(
+            ok=True,
+            status="degraded",
+            message=f"mosquitto updated but later step failed: {exc}",
+            details={"user_id": user_id},
+        )
 
 
 def clear_logs(
@@ -444,7 +469,9 @@ def clear_logs(
     errors: list[str] = []
     for path in paths.log_paths():
         # Truncate in place so inodes watched by Promtail stay valid.
-        result = ssh.run(f": > {_shell_quote(path)} || truncate -s 0 {_shell_quote(path)}")
+        result = ssh.run(
+            f": > {shell_quote(path)} || truncate -s 0 {shell_quote(path)}"
+        )
         if result.exit_code == 0:
             truncated.append(path)
         else:

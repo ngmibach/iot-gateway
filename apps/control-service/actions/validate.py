@@ -7,8 +7,8 @@ import re
 
 from .paths import RESERVED_USERNAMES
 
-# MQTT filter: topic levels + optional trailing # / single-level +
-_TOPIC_RE = re.compile(r"^[^\s#\+]*(?:/(?:[^\s#\+]+|\+))*(?:/#)?$|^#$|^\+$")
+# MQTT filter: + / # only in legal wildcard positions (no foo/#/bar).
+_TOPIC_RE = re.compile(r"^([^/+#]+|\+)(/([^/+#]+|\+))*(/#)?$|^#$|^\+$")
 _USER_RE = re.compile(r"^[A-Za-z0-9._-]{1,64}$")
 
 
@@ -40,8 +40,7 @@ def validate_topic(topic: str) -> str:
         raise ValueError("empty MQTT topic")
     if "\n" in topic or "\r" in topic:
         raise ValueError(f"invalid MQTT topic: {topic!r}")
-    # Allow common patterns including sensors/foo/#
-    if not _TOPIC_RE.match(topic) and not re.match(r"^[A-Za-z0-9_./+\-#$]+$", topic):
+    if not _TOPIC_RE.match(topic):
         raise ValueError(f"invalid MQTT topic: {topic!r}")
     return topic
 

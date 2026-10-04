@@ -5,7 +5,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import secrets
-import subprocess
 from typing import Optional
 
 # Matches eclipse-mosquitto 2.x default $7$ (PBKDF2-HMAC-SHA512) output.
@@ -43,43 +42,10 @@ def hash_password_line(
     )
 
 
-def hash_password_line_via_docker(
-    username: str,
-    password: str,
-    *,
-    image: str = "eclipse-mosquitto:2",
-) -> str:
-    """Hash via ephemeral local container (argv never reaches the gateway)."""
-    if not username or ":" in username:
-        raise ValueError(f"invalid mosquitto username: {username!r}")
-    # Password is on local docker argv only — never forwarded over SSH.
-    out = subprocess.check_output(
-        [
-            "docker",
-            "run",
-            "--rm",
-            image,
-            "sh",
-            "-c",
-            'mosquitto_passwd -b -c /tmp/pw "$1" "$2" >/dev/null && cat /tmp/pw',
-            "sh",
-            username,
-            password,
-        ],
-        text=True,
-        timeout=60,
-    )
-    line = out.strip().splitlines()[-1].strip()
-    if not line.startswith(f"{username}:$"):
-        raise RuntimeError(f"unexpected mosquitto_passwd output: {line!r}")
-    return line
-
-
-def zeroize_bytearray(buf: bytearray) -> None:
-    for i in range(len(buf)):
-        buf[i] = 0
-
-
 def zeroize_str(_value: str) -> None:
-    """API hook after hashing; CPython str is immutable so this is a no-op clear."""
+    """Best-effort API hook after hashing.
+
+    CPython ``str`` is immutable, so this cannot clear the caller's plaintext.
+    Prefer passing secrets as ``bytearray`` at call sites when feasible.
+    """
     return
