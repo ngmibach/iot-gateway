@@ -89,10 +89,14 @@ def sign_csr_on_gateway(
     *,
     days: int = 730,
     reject_default_admin_passphrase: bool = True,
+    extfile_content: Optional[str] = None,
 ) -> SignedClientCert:
     """SFTP CSR + passin file (0600), openssl sign on gateway, unlink temps.
 
     Never uses ``-passin pass:`` on remote argv.
+
+    ``extfile_content`` is written to a 0600 tmp and passed as ``-extfile``
+    (e.g. ``subjectAltName=IP:GATEWAY_IP`` for server certs — K15).
     """
     if reject_default_admin_passphrase and ca_passphrase == "admin":
         raise ValueError("production profile refuses CA passphrase 'admin'")
@@ -103,10 +107,13 @@ def sign_csr_on_gateway(
     remote_csr = f"/tmp/iotgw-csr-{token}.csr"
     remote_crt = f"/tmp/iotgw-crt-{token}.crt"
     remote_pass = f"/tmp/iotgw-ca-pass-{token}"
+    remote_ext = f"/tmp/iotgw-ext-{token}.cnf" if extfile_content is not None else None
 
     try:
         ssh.write_bytes(remote_csr, csr_pem, mode=0o600)
         ssh.write_bytes(remote_pass, ca_passphrase.encode("utf-8"), mode=0o600)
+        if remote_ext is not None and extfile_content is not None:
+            ssh.write_bytes(remote_ext, extfile_content.encode("utf-8"), mode=0o600)
 
         # passin file: path is unquoted; token paths have no spaces/metachars.
         cmd = (
@@ -119,6 +126,8 @@ def sign_csr_on_gateway(
             f" -out {shell_quote(remote_crt)}"
             f" -days {int(days)}"
         )
+        if remote_ext is not None:
+            cmd += f" -extfile {shell_quote(remote_ext)}"
         ssh.run(cmd, timeout=300).check()
 
         client_crt = ssh.read_bytes(remote_crt)
@@ -131,7 +140,9 @@ def sign_csr_on_gateway(
             fingerprint_sha256=fp,
         )
     finally:
-        for path in (remote_csr, remote_crt, remote_pass):
+        for path in (remote_csr, remote_crt, remote_pass, remote_ext):
+            if path is None:
+                continue
             try:
                 ssh.unlink(path)
             except Exception:

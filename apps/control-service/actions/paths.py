@@ -31,12 +31,28 @@ class GatewayPaths:
         return f"{self.install_root}/haproxy/allowed-ips.txt"
 
     @property
+    def certs_dir(self) -> str:
+        return f"{self.install_root}/certs"
+
+    @property
     def ca_crt(self) -> str:
         return f"{self.install_root}/certs/ca.crt"
 
     @property
     def ca_key(self) -> str:
         return f"{self.install_root}/certs/ca.key"
+
+    @property
+    def server_crt(self) -> str:
+        return f"{self.install_root}/certs/server.crt"
+
+    @property
+    def server_key(self) -> str:
+        return f"{self.install_root}/certs/server.key"
+
+    @property
+    def server_pem(self) -> str:
+        return f"{self.install_root}/certs/server.pem"
 
     @property
     def mosquitto_log(self) -> str:
