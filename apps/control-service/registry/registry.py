@@ -18,15 +18,8 @@ def _now() -> int:
     return int(time.time())
 
 
-def _topics_to_text(value: Any) -> Optional[str]:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False)
-
-
-def _meta_to_text(value: Any) -> Optional[str]:
+def _json_text(value: Any) -> Optional[str]:
+    """Serialize list/dict values to JSON text; pass through str/None."""
     if value is None:
         return None
     if isinstance(value, str):
@@ -205,10 +198,10 @@ class Registry:
                 "id": id,
                 "ip": None if ip is _UNSET else ip,
                 "topics_rw": (
-                    None if topics_rw is _UNSET else _topics_to_text(topics_rw)
+                    None if topics_rw is _UNSET else _json_text(topics_rw)
                 ),
                 "topics_r": (
-                    None if topics_r is _UNSET else _topics_to_text(topics_r)
+                    None if topics_r is _UNSET else _json_text(topics_r)
                 ),
                 "monitor_enabled": (
                     1 if monitor_enabled is _UNSET else int(monitor_enabled)
@@ -221,7 +214,7 @@ class Registry:
                 ),
                 "created_at": created_at if created_at is not None else ts,
                 "meta_json": (
-                    None if meta_json is _UNSET else _meta_to_text(meta_json)
+                    None if meta_json is _UNSET else _json_text(meta_json)
                 ),
             }
         else:
@@ -232,12 +225,12 @@ class Registry:
                 "topics_rw": (
                     existing["topics_rw"]
                     if topics_rw is _UNSET
-                    else _topics_to_text(topics_rw)
+                    else _json_text(topics_rw)
                 ),
                 "topics_r": (
                     existing["topics_r"]
                     if topics_r is _UNSET
-                    else _topics_to_text(topics_r)
+                    else _json_text(topics_r)
                 ),
                 "monitor_enabled": (
                     existing["monitor_enabled"]
@@ -258,7 +251,7 @@ class Registry:
                 "meta_json": (
                     existing["meta_json"]
                     if meta_json is _UNSET
-                    else _meta_to_text(meta_json)
+                    else _json_text(meta_json)
                 ),
             }
         self._conn.execute(
@@ -421,8 +414,8 @@ class Registry:
         """
         created = 0
         ts = _now()
-        rw = _topics_to_text(topics_rw)
-        r = _topics_to_text(topics_r)
+        rw = _json_text(topics_rw)
+        r = _json_text(topics_r)
         for username in usernames:
             username = (username or "").strip()
             if not username:
