@@ -2,16 +2,31 @@
 
 from __future__ import annotations
 
+import functools
 import json
 import os
 import sqlite3
+import threading
 import time
-from typing import Any, Iterable, Optional
+from typing import Any, Callable, Iterable, Optional, TypeVar
 
 from .schema import SCHEMA_SQL
 
 # Distinguishes "caller omitted this kwarg" from explicit None (clear field).
 _UNSET: Any = object()
+
+_F = TypeVar("_F", bound=Callable[..., Any])
+
+
+def _locked(method: _F) -> _F:
+    """Serialize SQLite use across FastAPI's sync worker threads."""
+
+    @functools.wraps(method)
+    def wrapped(self: "Registry", *args: Any, **kwargs: Any) -> Any:
+        with self._lock:
+            return method(self, *args, **kwargs)
+
+    return wrapped  # type: ignore[return-value]
 
 
 def _now() -> int:
@@ -35,6 +50,7 @@ class Registry:
         if parent:
             os.makedirs(parent, exist_ok=True)
         self.path = path
+        self._lock = threading.RLock()
         # FastAPI runs sync routes in a worker thread pool; allow shared conn.
         self._conn = sqlite3.connect(path, timeout=30, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
@@ -42,6 +58,7 @@ class Registry:
         self._conn.executescript(SCHEMA_SQL)
         self._conn.commit()
 
+    @_locked
     def close(self) -> None:
         self._conn.close()
 
@@ -53,6 +70,7 @@ class Registry:
 
     # ── gateways ──────────────────────────────────────────────────────
 
+    @_locked
     def upsert_gateway(
         self,
         id: str,
@@ -159,6 +177,7 @@ class Registry:
         assert out is not None
         return out
 
+    @_locked
     def get_gateway(self, gateway_id: str) -> Optional[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT * FROM gateways WHERE id = ?", (gateway_id,)
@@ -166,12 +185,14 @@ class Registry:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    @_locked
     def list_gateways(self) -> list[dict[str, Any]]:
         cur = self._conn.execute("SELECT * FROM gateways ORDER BY id")
         return [dict(r) for r in cur.fetchall()]
 
     # ── devices ───────────────────────────────────────────────────────
 
+    @_locked
     def upsert_device(
         self,
         gateway_id: str,
@@ -288,6 +309,7 @@ class Registry:
         assert out is not None
         return out
 
+    @_locked
     def get_device(self, gateway_id: str, device_id: str) -> Optional[dict[str, Any]]:
         cur = self._conn.execute(
             "SELECT * FROM devices WHERE gateway_id = ? AND id = ?",
@@ -296,6 +318,7 @@ class Registry:
         row = cur.fetchone()
         return dict(row) if row else None
 
+    @_locked
     def list_devices(
         self,
         gateway_id: str,
@@ -317,6 +340,7 @@ class Registry:
             )
         return [dict(r) for r in cur.fetchall()]
 
+    @_locked
     def delete_device(self, gateway_id: str, device_id: str) -> bool:
         cur = self._conn.execute(
             "DELETE FROM devices WHERE gateway_id = ? AND id = ?",
@@ -335,6 +359,7 @@ class Registry:
 
     # ── allow-list import / link ──────────────────────────────────────
 
+    @_locked
     def import_allowlist_ips(
         self,
         gateway_id: str,
@@ -358,6 +383,7 @@ class Registry:
         self._conn.commit()
         return inserted
 
+    @_locked
     def link_allowlist_ip(
         self,
         gateway_id: str,
@@ -390,6 +416,7 @@ class Registry:
         assert row is not None
         return dict(row)
 
+    @_locked
     def list_allowlist_ips(self, gateway_id: str) -> list[dict[str, Any]]:
         cur = self._conn.execute(
             """
@@ -401,6 +428,7 @@ class Registry:
         )
         return [dict(r) for r in cur.fetchall()]
 
+    @_locked
     def import_acl_usernames(
         self,
         gateway_id: str,
@@ -437,6 +465,7 @@ class Registry:
 
     # ── audit ─────────────────────────────────────────────────────────
 
+    @_locked
     def audit(
         self,
         action: str,
@@ -469,6 +498,7 @@ class Registry:
         assert row is not None
         return dict(row)
 
+    @_locked
     def list_audit(
         self,
         *,

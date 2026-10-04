@@ -123,10 +123,10 @@ def _render_register(gateway_ids: list[str], gateway_meta: dict[str, dict]):
                 help="Min 8 chars; hashed on the operator, never on gateway argv",
             )
             ca_pass = st.text_input(
-                "CA passphrase",
-                value=os.environ.get("IOTGW_CA_PASSPHRASE", ""),
+                "CA passphrase (optional)",
+                value="",
                 type="password",
-                help="Gateway CA unlock (or set IOTGW_CA_PASSPHRASE on the control service)",
+                help="Leave blank to use IOTGW_CA_PASSPHRASE on the control service",
             )
         with c2:
             user_ip = st.text_input(

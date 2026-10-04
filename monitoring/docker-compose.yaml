@@ -50,6 +50,11 @@ services:
       - iot-net
     environment:
       - STREAMLIT_SERVER_ENABLE_CORS=false
+      # Lab monitoring: Loki on iot-net; Prometheus is host-network (docker0).
+      - LOKI_URL=http://loki:3100
+      - PROMETHEUS_URL=http://172.17.0.1:9090
+      # Phase-0 Register Device: run Streamlit on the host. Control API binds
+      # 127.0.0.1:9137 and is not reachable from this container.
     depends_on:
       - loki
 

@@ -16,6 +16,18 @@ def _as_topic_list(value: Union[str, list[str], None]) -> list[str]:
     return [str(v).strip() for v in value if str(v).strip()]
 
 
+def _one_topic(value: Union[str, list[str], None], field_name: str) -> Optional[str]:
+    """Playbook accepts a single topic today — reject multi-topic lists."""
+    items = _as_topic_list(value)
+    if not items:
+        return None
+    if len(items) > 1:
+        raise ValueError(
+            f"{field_name}: only one topic supported until multi-topic playbook exists"
+        )
+    return items[0]
+
+
 class RegisterDeviceRequest(BaseModel):
     user_id: str = Field(..., min_length=1, max_length=64)
     password: str = Field(..., min_length=8)
@@ -24,7 +36,6 @@ class RegisterDeviceRequest(BaseModel):
     topic_readwrite: Optional[Union[str, list[str]]] = None
     monitor_enabled: bool = True
     ca_passphrase: Optional[str] = None
-    reissue_cert: bool = False
 
     @field_validator("user_id")
     @classmethod
@@ -36,6 +47,12 @@ class RegisterDeviceRequest(BaseModel):
     def _strip_ip(cls, v: str) -> str:
         return v.strip()
 
+    @field_validator("topic_read", "topic_readwrite")
+    @classmethod
+    def _single_topic(cls, v: Union[str, list[str], None], info) -> Union[str, list[str], None]:
+        _one_topic(v, info.field_name)
+        return v
+
     def topics_r(self) -> list[str]:
         return _as_topic_list(self.topic_read)
 
@@ -43,12 +60,10 @@ class RegisterDeviceRequest(BaseModel):
         return _as_topic_list(self.topic_readwrite)
 
     def topic_r_arg(self) -> str | None:
-        items = self.topics_r()
-        return items[0] if items else None
+        return _one_topic(self.topic_read, "topic_read")
 
     def topic_rw_arg(self) -> str | None:
-        items = self.topics_rw()
-        return items[0] if items else None
+        return _one_topic(self.topic_readwrite, "topic_readwrite")
 
 
 class DeviceOut(BaseModel):
@@ -68,7 +83,11 @@ class RegisterDeviceResponse(BaseModel):
     cert_bundle_token: Optional[str] = None
     status: str = "ok"
     message: str = ""
-    idempotent: bool = False
+    # True when a devices row already existed for (gateway_id, user_id) before upsert.
+    idempotent: bool = Field(
+        default=False,
+        description="True if device row already existed; playbook still ran (full upsert).",
+    )
 
 
 class HealthResponse(BaseModel):
@@ -83,5 +102,5 @@ class GatewayOut(BaseModel):
     fingerprint: str
     monitoring_ip: Optional[str] = None
     status: Optional[str] = None
-    # Prometheus $node label / instance — registry-driven for Streamlit
-    node_instance: str
+    # Fixed label matching deploy/templates prometheus `instance: gateway`.
+    node_instance: str = "gateway"

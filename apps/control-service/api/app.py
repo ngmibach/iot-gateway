@@ -10,7 +10,7 @@ from registry.registry import Registry
 
 from .cert_cache import CertBundleCache
 from .deps import AppState, OpenSSH, default_open_ssh
-from .devices import router as devices_router
+from .devices import public_router, router as devices_router
 from .schemas import HealthResponse
 from .settings import Settings
 
@@ -34,13 +34,10 @@ def create_app(
     app = FastAPI(title="iot-gateway-control", version="0.1.0")
     app.state.control = state
     app.include_router(devices_router, prefix="/api/v1")
+    app.include_router(public_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return HealthResponse(status="ok")
-
-    @app.get("/api/v1/health", response_model=HealthResponse)
-    def health_v1() -> HealthResponse:
         return HealthResponse(status="ok")
 
     return app

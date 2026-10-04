@@ -359,17 +359,37 @@ def _control_headers() -> dict:
     return headers
 
 
-def control_list_gateways(timeout: float = 10.0) -> dict:
-    """GET /api/v1/gateways — returns {success, gateways|error}."""
+def _control_request(
+    method: str,
+    path: str,
+    *,
+    json: dict | None = None,
+    params: dict | None = None,
+    timeout: float = 15.0,
+    ok_key: str | None = None,
+) -> dict:
+    """Shared FastAPI client envelope: {success, status_code?, error?, ...}."""
     base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
+    url = f"{base}{path}"
     try:
-        resp = requests.get(
-            f"{base}/api/v1/gateways",
+        resp = requests.request(
+            method,
+            url,
+            json=json,
+            params=params,
             headers=_control_headers(),
             timeout=timeout,
         )
         if resp.status_code == 200:
-            return {"success": True, "gateways": resp.json()}
+            data = resp.json() if resp.content else {}
+            out = {"success": True, "status_code": resp.status_code}
+            if ok_key is not None:
+                out[ok_key] = data
+            elif isinstance(data, dict):
+                out.update(data)
+            else:
+                out["data"] = data
+            return out
         return {
             "success": False,
             "status_code": resp.status_code,
@@ -379,20 +399,11 @@ def control_list_gateways(timeout: float = 10.0) -> dict:
         return {"success": False, "error": str(ex)}
 
 
-def resolve_node_instance(fallback: str | None = None) -> str:
-    """NODE_INSTANCE from env, else primary gateway via control registry."""
-    env = os.environ.get("NODE_INSTANCE", "").strip()
-    if env:
-        return env
-    # Short timeout so Streamlit sidebar startup stays snappy when API is down.
-    result = control_list_gateways(timeout=1.5)
-    if result.get("success"):
-        gateways = result.get("gateways") or []
-        if gateways:
-            ni = (gateways[0] or {}).get("node_instance")
-            if ni:
-                return str(ni)
-    return fallback or "gateway"
+def control_list_gateways(timeout: float = 10.0) -> dict:
+    """GET /api/v1/gateways — returns {success, gateways|error}."""
+    return _control_request(
+        "GET", "/api/v1/gateways", timeout=timeout, ok_key="gateways"
+    )
 
 
 def control_register_device(
@@ -408,7 +419,6 @@ def control_register_device(
     timeout: float = 120.0,
 ) -> dict:
     """POST /api/v1/gateways/{gid}/devices — SSH register + registry upsert."""
-    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
     payload = {
         "user_id": user_id,
         "password": password,
@@ -421,42 +431,21 @@ def control_register_device(
         payload["topic_readwrite"] = topic_readwrite
     if ca_passphrase:
         payload["ca_passphrase"] = ca_passphrase
-    try:
-        resp = requests.post(
-            f"{base}/api/v1/gateways/{gateway_id}/devices",
-            json=payload,
-            headers=_control_headers(),
-            timeout=timeout,
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            return {"success": True, "status_code": resp.status_code, **data}
-        return {
-            "success": False,
-            "status_code": resp.status_code,
-            "error": (resp.text or resp.reason)[:600],
-        }
-    except Exception as ex:
-        return {"success": False, "error": str(ex)}
+    return _control_request(
+        "POST",
+        f"/api/v1/gateways/{gateway_id}/devices",
+        json=payload,
+        timeout=timeout,
+    )
 
 
 def control_list_devices(gateway_id: str, timeout: float = 15.0) -> dict:
-    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
-    try:
-        resp = requests.get(
-            f"{base}/api/v1/gateways/{gateway_id}/devices",
-            headers=_control_headers(),
-            timeout=timeout,
-        )
-        if resp.status_code == 200:
-            return {"success": True, "devices": resp.json()}
-        return {
-            "success": False,
-            "status_code": resp.status_code,
-            "error": (resp.text or resp.reason)[:600],
-        }
-    except Exception as ex:
-        return {"success": False, "error": str(ex)}
+    return _control_request(
+        "GET",
+        f"/api/v1/gateways/{gateway_id}/devices",
+        timeout=timeout,
+        ok_key="devices",
+    )
 
 
 def control_delete_device(
@@ -466,23 +455,12 @@ def control_delete_device(
     remove_ip: bool = False,
     timeout: float = 60.0,
 ) -> dict:
-    base = (CONTROL_SERVICE_URL or "http://127.0.0.1:9137").rstrip("/")
-    try:
-        resp = requests.delete(
-            f"{base}/api/v1/gateways/{gateway_id}/devices/{device_id}",
-            params={"remove_ip": str(remove_ip).lower()},
-            headers=_control_headers(),
-            timeout=timeout,
-        )
-        if resp.status_code == 200:
-            return {"success": True, **resp.json()}
-        return {
-            "success": False,
-            "status_code": resp.status_code,
-            "error": (resp.text or resp.reason)[:600],
-        }
-    except Exception as ex:
-        return {"success": False, "error": str(ex)}
+    return _control_request(
+        "DELETE",
+        f"/api/v1/gateways/{gateway_id}/devices/{device_id}",
+        params={"remove_ip": str(remove_ip).lower()},
+        timeout=timeout,
+    )
 
 
 def control_cert_bundle_url(gateway_id: str, device_id: str, token: str) -> str:

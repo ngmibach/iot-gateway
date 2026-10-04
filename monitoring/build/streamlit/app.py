@@ -67,7 +67,7 @@ GITEA_REPO = os.environ.get("GITEA_REPO", "actions")
 GITEA_USER = os.environ.get("GITEA_USER", "admin")
 GITEA_PASS = os.environ.get("GITEA_PASS", "admin")
 
-_DEFAULT_NODE = u.resolve_node_instance(os.environ.get("NODE_INSTANCE", "gateway"))
+_DEFAULT_NODE = os.environ.get("NODE_INSTANCE", "gateway").strip() or "gateway"
 
 # ───────────────────────── Sidebar ───────────────────────────────
 with st.sidebar:

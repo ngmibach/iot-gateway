@@ -9,6 +9,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from actions.playbooks import register_device, unregister_device
+from actions.validate import validate_ip_or_cidr, validate_topic, validate_user_id
 from registry.registry import Registry
 
 from .cert_cache import CertBundleCache
@@ -20,7 +21,10 @@ from .schemas import (
     RegisterDeviceResponse,
 )
 
+# Authenticated control routes.
 router = APIRouter(dependencies=[Depends(require_token)])
+# Cert-bundle uses one-time ?token= only (browser link cannot send API headers).
+public_router = APIRouter()
 
 
 def _parse_json_field(value: Any) -> Any:
@@ -70,9 +74,8 @@ def _require_gateway(registry: Registry, gid: str) -> dict[str, Any]:
     return gw
 
 
-def _node_instance(_gw: dict[str, Any]) -> str:
-    # Match deploy/templates prometheus `instance: gateway` label.
-    return "gateway"
+def _http_400(exc: ValueError) -> HTTPException:
+    return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 @router.get("/gateways", response_model=list[GatewayOut])
@@ -88,7 +91,7 @@ def list_gateways(registry: Registry = Depends(get_registry)) -> list[GatewayOut
                 fingerprint=gw["fingerprint"],
                 monitoring_ip=gw.get("monitoring_ip"),
                 status=gw.get("status"),
-                node_instance=_node_instance(gw),
+                node_instance="gateway",
             )
         )
     return out
@@ -128,19 +131,34 @@ def post_register_device(
             detail="ca_passphrase required (body or IOTGW_CA_PASSPHRASE)",
         )
 
+    # Validate before opening SSH so bad input is 400, not 502.
+    try:
+        user_id = validate_user_id(body.user_id)
+        ip = validate_ip_or_cidr(body.ip)
+        topic_rw = body.topic_rw_arg()
+        topic_r = body.topic_r_arg()
+        if topic_rw is not None:
+            topic_rw = validate_topic(topic_rw)
+        if topic_r is not None:
+            topic_r = validate_topic(topic_r)
+    except ValueError as exc:
+        raise _http_400(exc) from exc
+
     try:
         with open_ssh_for(state, gw) as ssh:
             result = register_device(
                 ssh,
-                user_id=body.user_id,
+                user_id=user_id,
                 password=body.password,
-                ip=body.ip,
-                topic_rw=body.topic_rw_arg(),
-                topic_r=body.topic_r_arg(),
+                ip=ip,
+                topic_rw=topic_rw,
+                topic_r=topic_r,
                 install_root=gw["install_root"],
                 ca_passphrase=ca_pass,
             )
-    except Exception as exc:  # noqa: BLE001 — surface SSH failures as 502
+    except ValueError as exc:
+        raise _http_400(exc) from exc
+    except Exception as exc:  # noqa: BLE001 — transport / remote failures
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"SSH/register failed: {exc}",
@@ -156,8 +174,8 @@ def post_register_device(
     topics_r = body.topics_r() or None
     device = registry.upsert_device(
         gid,
-        body.user_id,
-        ip=body.ip,
+        user_id,
+        ip=ip,
         topics_rw=topics_rw,
         topics_r=topics_r,
         monitor_enabled=1 if body.monitor_enabled else 0,
@@ -167,9 +185,9 @@ def post_register_device(
     registry.audit(
         "register_device",
         gateway_id=gid,
-        device_id=body.user_id,
+        device_id=user_id,
         detail={
-            "ip": body.ip,
+            "ip": ip,
             "status": result.status,
             "cert_fingerprint": result.cert_fingerprint,
         },
@@ -177,7 +195,7 @@ def post_register_device(
 
     token = None
     if result.cert_bundle:
-        token = cert_cache.put(gid, body.user_id, result.cert_bundle)
+        token = cert_cache.put(gid, user_id, result.cert_bundle)
 
     return RegisterDeviceResponse(
         device=_device_out(device),
@@ -197,6 +215,11 @@ def delete_device(
     registry: Registry = Depends(get_registry),
 ) -> dict[str, Any]:
     gw = _require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise _http_400(exc) from exc
+
     row = registry.get_device(gid, device_id)
     if row is None:
         raise HTTPException(
@@ -213,6 +236,8 @@ def delete_device(
                 remove_ip=remove_ip and bool(ip),
                 install_root=gw["install_root"],
             )
+    except ValueError as exc:
+        raise _http_400(exc) from exc
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -235,7 +260,7 @@ def delete_device(
     return {"ok": True, "status": result.status, "message": result.message}
 
 
-@router.get("/gateways/{gid}/devices/{device_id}/cert-bundle")
+@public_router.get("/gateways/{gid}/devices/{device_id}/cert-bundle")
 def download_cert_bundle(
     gid: str,
     device_id: str,
@@ -243,6 +268,7 @@ def download_cert_bundle(
     registry: Registry = Depends(get_registry),
     cert_cache: CertBundleCache = Depends(get_cert_cache),
 ) -> Response:
+    """One-time download; auth is the opaque token (no API token header)."""
     _require_gateway(registry, gid)
     blob = cert_cache.pop(token, gateway_id=gid, device_id=device_id)
     if blob is None:

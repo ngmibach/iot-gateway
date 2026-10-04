@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tempfile
+import time
 import unittest
 from contextlib import contextmanager
 from pathlib import Path
@@ -67,6 +68,7 @@ class ApiDeviceTests(unittest.TestCase):
         def open_ssh(_gw: dict[str, Any]) -> Iterator[_FakeSSH]:
             yield _FakeSSH()
 
+        self.open_ssh = open_ssh
         self.app = create_app(
             settings=self.settings,
             registry=self.registry,
@@ -75,12 +77,28 @@ class ApiDeviceTests(unittest.TestCase):
         )
         self.client = TestClient(self.app)
 
+    def _client_with_token(self, token: str = "secret-token") -> TestClient:
+        settings = Settings(
+            host="127.0.0.1",
+            port=9137,
+            data_dir=Path(self._tmp.name),
+            registry_path=Path(self._tmp.name) / "registry.sqlite",
+            api_token=token,
+            ca_passphrase="test-ca-secret",
+        )
+        app = create_app(
+            settings=settings,
+            registry=self.registry,
+            open_ssh=self.open_ssh,
+            cert_cache=self.cache,
+        )
+        return TestClient(app)
+
     def test_health(self) -> None:
         r = self.client.get("/health")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["status"], "ok")
-        r2 = self.client.get("/api/v1/health")
-        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(self.client.get("/api/v1/health").status_code, 404)
 
     def test_list_gateways_node_instance(self) -> None:
         r = self.client.get("/api/v1/gateways")
@@ -122,19 +140,56 @@ class ApiDeviceTests(unittest.TestCase):
 
         token = body["cert_bundle_token"]
         dl = self.client.get(
-            f"/api/v1/gateways/gw1/devices/sensor5/cert-bundle",
+            "/api/v1/gateways/gw1/devices/sensor5/cert-bundle",
             params={"token": token},
         )
         self.assertEqual(dl.status_code, 200)
         self.assertEqual(dl.content, b"PK\x03\x04fake-zip")
         self.assertIn("application/zip", dl.headers.get("content-type", ""))
 
-        # One-time: second download fails
         dl2 = self.client.get(
-            f"/api/v1/gateways/gw1/devices/sensor5/cert-bundle",
+            "/api/v1/gateways/gw1/devices/sensor5/cert-bundle",
             params={"token": token},
         )
         self.assertEqual(dl2.status_code, 404)
+
+    def test_cert_bundle_download_without_api_token_when_configured(self) -> None:
+        """Browser-style GET with only ?token= must work even if IOTGW_API_TOKEN is set."""
+        client = self._client_with_token("secret-token")
+        with patch("api.devices.register_device", side_effect=_register_ok):
+            r = client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor9",
+                    "password": "password123",
+                    "ip": "10.0.0.9",
+                },
+                headers={"X-API-Token": "secret-token"},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        token = r.json()["cert_bundle_token"]
+        # No API header — Streamlit link_button / browser download.
+        dl = client.get(
+            "/api/v1/gateways/gw1/devices/sensor9/cert-bundle",
+            params={"token": token},
+        )
+        self.assertEqual(dl.status_code, 200, dl.text)
+        self.assertEqual(dl.content, b"PK\x03\x04fake-zip")
+        self.assertEqual(
+            client.get(
+                "/api/v1/gateways/gw1/devices/sensor9/cert-bundle",
+                params={"token": token},
+            ).status_code,
+            404,
+        )
+
+    def test_cert_bundle_ttl_expiry(self) -> None:
+        cache = CertBundleCache(ttl_s=1)
+        tok = cache.put("gw1", "sensor1", b"blob")
+        self.assertEqual(cache.pop(tok, gateway_id="gw1", device_id="sensor1"), b"blob")
+        tok = cache.put("gw1", "sensor1", b"blob")
+        time.sleep(1.1)
+        self.assertIsNone(cache.pop(tok, gateway_id="gw1", device_id="sensor1"))
 
     def test_register_unknown_gateway_404(self) -> None:
         with patch("api.devices.register_device", side_effect=_register_ok):
@@ -147,6 +202,47 @@ class ApiDeviceTests(unittest.TestCase):
                 },
             )
         self.assertEqual(r.status_code, 404)
+
+    def test_register_validation_400_bad_ip(self) -> None:
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor5",
+                    "password": "password123",
+                    "ip": "not-an-ip",
+                },
+            )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("IP", r.json()["detail"])
+        mocked.assert_not_called()
+
+    def test_register_validation_400_reserved_user(self) -> None:
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "nodered",
+                    "password": "password123",
+                    "ip": "10.0.0.1",
+                },
+            )
+        self.assertEqual(r.status_code, 400, r.text)
+        mocked.assert_not_called()
+
+    def test_register_rejects_multi_topic_list(self) -> None:
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor5",
+                    "password": "password123",
+                    "ip": "10.0.0.1",
+                    "topic_read": ["a/+", "b/+"],
+                },
+            )
+        self.assertEqual(r.status_code, 422)
+        mocked.assert_not_called()
 
     def test_register_playbook_failure_502(self) -> None:
         def _fail(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
@@ -173,35 +269,43 @@ class ApiDeviceTests(unittest.TestCase):
         mocked.assert_called_once()
         self.assertIsNone(self.registry.get_device("gw1", "sensor1"))
 
-    def test_api_token_required_when_configured(self) -> None:
-        self.settings = Settings(
-            host="127.0.0.1",
-            port=9137,
-            data_dir=Path(self._tmp.name),
-            registry_path=Path(self._tmp.name) / "registry.sqlite",
-            api_token="secret-token",
-            ca_passphrase="x",
+    def test_api_token_x_header_and_bearer(self) -> None:
+        client = self._client_with_token("secret-token")
+        self.assertEqual(client.get("/api/v1/gateways").status_code, 401)
+        self.assertEqual(
+            client.get(
+                "/api/v1/gateways",
+                headers={"X-API-Token": "secret-token"},
+            ).status_code,
+            200,
         )
-
-        @contextmanager
-        def open_ssh(_gw: dict[str, Any]) -> Iterator[_FakeSSH]:
-            yield _FakeSSH()
-
-        app = create_app(
-            settings=self.settings,
-            registry=self.registry,
-            open_ssh=open_ssh,
-            cert_cache=self.cache,
+        self.assertEqual(
+            client.get(
+                "/api/v1/gateways",
+                headers={"Authorization": "Bearer secret-token"},
+            ).status_code,
+            200,
         )
-        client = TestClient(app)
-        denied = client.get("/api/v1/gateways")
+        with patch("api.devices.register_device", side_effect=_register_ok):
+            denied = client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor5",
+                    "password": "password123",
+                    "ip": "10.0.0.1",
+                },
+            )
+            ok = client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor5",
+                    "password": "password123",
+                    "ip": "10.0.0.1",
+                },
+                headers={"Authorization": "Bearer secret-token"},
+            )
         self.assertEqual(denied.status_code, 401)
-        ok = client.get(
-            "/api/v1/gateways",
-            headers={"X-API-Token": "secret-token"},
-        )
-        self.assertEqual(ok.status_code, 200)
-        # /health stays open
+        self.assertEqual(ok.status_code, 200, ok.text)
         self.assertEqual(client.get("/health").status_code, 200)
 
 
