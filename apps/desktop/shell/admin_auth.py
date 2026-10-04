@@ -20,13 +20,17 @@ _MAX_UNLOCK_FAILURES = 5
 _UNLOCK_COOLDOWN_S = 30.0
 
 
+def _normalize_pin(pin: str) -> str:
+    return (pin or "").strip()
+
+
 def has_admin_pin() -> bool:
     return keyring_store.get_secret(ADMIN_GATEWAY_ID, kind=ADMIN_KIND) is not None
 
 
 def set_admin_pin(pin: str) -> str:
     """Store admin PIN in keyring. Returns keyring ref (never log pin)."""
-    pin = (pin or "").strip()
+    pin = _normalize_pin(pin)
     if len(pin) < 4:
         raise ValueError("admin PIN must be at least 4 characters")
     # Store a hash so a compromised fallback file does not yield the raw PIN.
@@ -38,7 +42,9 @@ def verify_admin_pin(pin: str) -> bool:
     stored = keyring_store.get_secret(ADMIN_GATEWAY_ID, kind=ADMIN_KIND)
     if stored is None:
         return False
-    digest = hashlib.sha256(b"iotgw-admin-pin:" + (pin or "").encode("utf-8")).hexdigest()
+    digest = hashlib.sha256(
+        b"iotgw-admin-pin:" + _normalize_pin(pin).encode("utf-8")
+    ).hexdigest()
     return hmac.compare_digest(stored, digest)
 
 
@@ -112,6 +118,10 @@ class AdminGate:
                 raise PermissionError("invalid or expired admin session")
 
     def set_pin(self, pin: str, *, unlock: bool = True) -> str:
+        # Creating/changing a PIN clears lockout so unlock cannot fail after store.
+        with self._lock:
+            self._fail_count = 0
+            self._cooldown_until = 0.0
         ref = set_admin_pin(pin)
         if unlock:
             return self.unlock(pin)

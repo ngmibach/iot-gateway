@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -51,8 +52,6 @@ class AdminAuthTests(unittest.TestCase):
         self.assertNotEqual(raw, "9999")
 
     def test_expired_session_rejected(self) -> None:
-        import time
-
         gate = admin_auth.AdminGate(ttl_s=1)
         token = gate.set_pin("4321")
         gate.require(token)
@@ -60,3 +59,27 @@ class AdminAuthTests(unittest.TestCase):
         with self.assertRaises(PermissionError):
             gate.require(token)
         self.assertFalse(gate.status(token)["unlocked"])
+
+    def test_whitespace_pin_create_and_unlock(self) -> None:
+        gate = admin_auth.AdminGate(ttl_s=60)
+        token = gate.set_pin("  5678  ")
+        self.assertTrue(gate.status(token)["unlocked"])
+        gate.lock()
+        token2 = gate.unlock("5678")
+        gate.require(token2)
+        token3 = gate.unlock("  5678 ")
+        gate.require(token3)
+
+    def test_set_pin_clears_unlock_cooldown(self) -> None:
+        gate = admin_auth.AdminGate(ttl_s=60)
+        gate.set_pin("1111")
+        gate.lock()
+        # Trip throttle without waiting the real cooldown.
+        with gate._lock:
+            gate._fail_count = 0
+            gate._cooldown_until = time.time() + 60
+        with self.assertRaises(ValueError) as ctx:
+            gate.unlock("1111")
+        self.assertIn("too many failed", str(ctx.exception))
+        token = gate.set_pin("2222")
+        self.assertTrue(gate.status(token)["unlocked"])
