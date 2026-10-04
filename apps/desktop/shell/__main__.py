@@ -3,7 +3,7 @@
 Usage:
   PYTHONPATH=apps/desktop:apps/control-service python -m shell
   PYTHONPATH=... python -m shell --no-browser --port 9138
-  PYTHONPATH=... python -m shell --start-services   # API+Streamlit then wizard
+  PYTHONPATH=... python -m shell --start-services   # API then wizard (native Monitoring)
 """
 
 from __future__ import annotations
@@ -19,14 +19,19 @@ from .wizard_server import run_forever
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="IoT Gateway Monitor — Phase-0 shell")
+    parser = argparse.ArgumentParser(description="IoT Gateway Monitor — desktop shell")
     parser.add_argument("--host", default=CONTROL_HOST)
     parser.add_argument("--port", type=int, default=WIZARD_PORT)
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
         "--start-services",
         action="store_true",
-        help="Start control-service (:9137) and Streamlit (:8501) before wizard",
+        help="Start control-service (:9137) before wizard (native Monitoring default)",
+    )
+    parser.add_argument(
+        "--with-streamlit",
+        action="store_true",
+        help="Also start Streamlit (:8501); off by default in Phase-1",
     )
     parser.add_argument(
         "--detect-only",
@@ -56,20 +61,25 @@ def main(argv: list[str] | None = None) -> int:
             mgr.stop_all()
             return 1
         print(f"control-service ready at {ctrl.url}")
-        try:
-            st = mgr.start_streamlit()
-            if wait_http(st.url, timeout=90):
-                print(f"streamlit ready at {st.url}")
-            else:
-                print("streamlit did not become ready (wizard still usable)", file=sys.stderr)
-        except FileNotFoundError as e:
-            print(f"streamlit skip: {e}", file=sys.stderr)
+        if args.with_streamlit:
+            try:
+                st = mgr.start_streamlit()
+                if wait_http(st.url, timeout=90):
+                    print(f"streamlit ready at {st.url}")
+                else:
+                    print(
+                        "streamlit did not become ready (wizard still usable)",
+                        file=sys.stderr,
+                    )
+            except FileNotFoundError as e:
+                print(f"streamlit skip: {e}", file=sys.stderr)
 
     print(
         f"Setup Wizard → http://{args.host}:{args.port}/wizard.html\n"
         f"Actions      → http://{args.host}:{args.port}/actions.html\n"
+        f"Monitoring   → http://{args.host}:{args.port}/monitoring.html\n"
         f"Control API  → http://{CONTROL_HOST}:{CONTROL_PORT}\n"
-        f"Streamlit    → http://{CONTROL_HOST}:{STREAMLIT_PORT} (WebView / browser)\n"
+        f"Streamlit    → http://{CONTROL_HOST}:{STREAMLIT_PORT} (optional)\n"
         "Windows: Loki :3100 via guided checklist only; UI ports need localhostForwarding."
     )
     try:

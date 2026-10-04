@@ -10,8 +10,9 @@
   <header>
     <div>
       <h1>IoT Gateway Monitor — Setup Wizard</h1>
-      <div class="sub">Phase-0 · Docker/WSL · NIC · SSH pin · firewall checklist · Streamlit
+      <div class="sub">Phase-0/1 · Docker/WSL · NIC · SSH pin · firewall · native Monitoring
         <a href="actions.html">Actions →</a>
+        <a href="monitoring.html">Monitoring →</a>
       </div>
     </div>
     <div id="hdr-status"></div>
@@ -99,13 +100,20 @@
     </section>
 
     <section class="panel step hidden" data-step="4" id="step-launch">
-      <h2>5. Launch control service + Streamlit</h2>
-      <p>Starts FastAPI on <code>127.0.0.1:9137</code> and Streamlit on <code>127.0.0.1:8501</code>. Tauri WebView (or browser) embeds Streamlit.</p>
+      <h2>5. Launch control service + Monitoring</h2>
+      <p>Starts FastAPI on <code>127.0.0.1:9137</code>. Default UI is <strong>native Monitoring</strong> (Gateway / Host / Sensors). Streamlit remains optional.</p>
       <div class="row">
-        <button class="primary" id="btn-start-svc">Start services</button>
-        <button class="secondary" id="btn-open-st">Open Streamlit</button>
+        <button class="primary" id="btn-start-svc">Start control service</button>
+        <button class="secondary" id="btn-open-mon">Open Monitoring</button>
         <button class="secondary" id="btn-open-actions" type="button">Open Actions</button>
+        <button class="secondary" id="btn-open-st">Open Streamlit (optional)</button>
         <button class="danger" id="btn-stop-svc">Stop</button>
+      </div>
+      <div class="row">
+        <label class="chk" style="min-width:auto">
+          <input type="checkbox" id="chk-streamlit" />
+          Also start Streamlit
+        </label>
       </div>
       <pre class="mono" id="svc-status"></pre>
       <div id="svc-msg"></div>

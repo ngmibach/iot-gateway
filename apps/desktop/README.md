@@ -1,13 +1,13 @@
-# IoT Gateway Monitor — desktop (Phase-0)
+# IoT Gateway Monitor — desktop (Phase-0/1)
 
-Setup Wizard + Actions chrome + process launcher for the Python control service (`127.0.0.1:9137`) and Streamlit UI (`127.0.0.1:8501`). Tauri 2 hosts the wizard/Actions and can WebView-navigate to Streamlit.
+Setup Wizard + Actions chrome + process launcher for the Python control service (`127.0.0.1:9137`) and **native Monitoring** UI (`/monitoring.html`). Streamlit (`127.0.0.1:8501`) remains optional. Tauri 2 hosts the wizard/Actions and can WebView-navigate to Monitoring.
 
-## What ships in Phase-0
+## What ships
 
 | Piece | Role |
 |-------|------|
-| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API + Streamlit |
-| `ui/` | Setup Wizard + **Actions** pages (register/cert download, unregister, rotate server vs CA) |
+| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API (+ optional Streamlit) |
+| `ui/` | Setup Wizard + **Actions** pages (register/cert download, unregister, rotate server vs CA) + native Monitoring tabs (Gateway / Host / Sensors) |
 | `src-tauri/` | Tauri 2 scaffold — Linux AppImage / Windows MSI·NSIS packaging stubs |
 
 **Windows networking**
@@ -34,8 +34,9 @@ apps/desktop/.venv/bin/python -m shell --detect-only
 # Wizard UI on http://127.0.0.1:9138/wizard.html
 # Actions  on http://127.0.0.1:9138/actions.html  (calls FastAPI :9137)
 apps/desktop/.venv/bin/python -m shell --no-browser
-# Then open the URL; use step 5 to start API + Streamlit, or:
+# Start control API (native Monitoring is default; add --with-streamlit if needed):
 apps/desktop/.venv/bin/python -m shell --start-services --no-browser
+# Monitoring → http://127.0.0.1:9138/monitoring.html
 ```
 
 Smoke:

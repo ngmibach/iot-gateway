@@ -201,14 +201,15 @@
 
   async function startServices() {
     $("svc-msg").textContent = "Starting…";
+    const wantSt = !!($("chk-streamlit") && $("chk-streamlit").checked);
     const data = await api("/api/wizard/services/start", {
       method: "POST",
-      body: JSON.stringify({ streamlit: true }),
+      body: JSON.stringify({ streamlit: wantSt }),
     });
     $("svc-status").textContent = JSON.stringify(data, null, 2);
     const ok = data.control && data.control.healthy;
     $("svc-msg").innerHTML = ok
-      ? `<div class="okmsg">Control service healthy. Streamlit healthy=${data.streamlit && data.streamlit.healthy}</div>`
+      ? `<div class="okmsg">Control service healthy. Open <a href="monitoring.html">Monitoring</a>. Streamlit=${wantSt ? (data.streamlit && data.streamlit.healthy) : "skipped"}</div>`
       : `<div class="err">Control service not healthy — check ~/.local/share/iot-gateway-monitor/control-service.log (or %APPDATA%)</div>`;
   }
 
@@ -216,6 +217,10 @@
     await api("/api/wizard/services/stop", { method: "POST", body: "{}" });
     $("svc-status").textContent = JSON.stringify(await api("/api/wizard/services/status"), null, 2);
     $("svc-msg").innerHTML = `<div class="okmsg">Stopped.</div>`;
+  }
+
+  async function openMonitoring() {
+    window.location.href = "monitoring.html";
   }
 
   async function openStreamlit() {
@@ -248,6 +253,7 @@
     $("btn-confirm-cl").addEventListener("click", () => confirmChecklist().catch(showErr));
     $("btn-start-svc").addEventListener("click", () => startServices().catch(showErr));
     $("btn-stop-svc").addEventListener("click", () => stopServices().catch(showErr));
+    $("btn-open-mon").addEventListener("click", () => openMonitoring().catch(showErr));
     $("btn-open-st").addEventListener("click", () => openStreamlit().catch(showErr));
     const openActions = $("btn-open-actions");
     if (openActions) {

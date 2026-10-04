@@ -57,6 +57,13 @@ class WizardApiTests(unittest.TestCase):
             html = resp.read().decode("utf-8")
         self.assertIn("Actions", html)
         self.assertIn("Rotate CA", html)
+        with urllib.request.urlopen(self.base + "/monitoring.html", timeout=5) as resp:
+            mon = resp.read().decode("utf-8")
+        self.assertIn("Native Monitoring", mon)
+        self.assertIn("monitoring.js", mon)
+        with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
+            js = resp.read().decode("utf-8")
+        self.assertIn("/api/v1/query/summaries", js)
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")

@@ -28,6 +28,8 @@ class Settings:
     ssh_password: str | None = None
     ca_passphrase: str | None = None
     allow_unknown_host: bool = False
+    loki_url: str = "http://127.0.0.1:3100"
+    prometheus_url: str = "http://127.0.0.1:9090"
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -47,6 +49,16 @@ class Settings:
             "true",
             "yes",
         )
+        loki = (
+            os.environ.get("LOKI_URL")
+            or os.environ.get("IOTGW_LOKI_URL")
+            or "http://127.0.0.1:3100"
+        ).strip()
+        prom = (
+            os.environ.get("PROMETHEUS_URL")
+            or os.environ.get("IOTGW_PROMETHEUS_URL")
+            or "http://127.0.0.1:9090"
+        ).strip()
         return cls(
             host=os.environ.get("IOTGW_CONTROL_HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=int(os.environ.get("IOTGW_CONTROL_PORT", "9137") or "9137"),
@@ -57,4 +69,6 @@ class Settings:
             ssh_password=pw,
             ca_passphrase=ca,
             allow_unknown_host=allow,
+            loki_url=loki or "http://127.0.0.1:3100",
+            prometheus_url=prom or "http://127.0.0.1:9090",
         )

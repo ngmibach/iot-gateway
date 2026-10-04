@@ -302,7 +302,8 @@ def _handle_api(
 
         if method == "POST" and path == "/api/wizard/services/start":
             body = _read_json(handler)
-            start_st = bool(body.get("streamlit", True))
+            # Phase-1 default: control service only; Streamlit opt-in.
+            start_st = bool(body.get("streamlit", False))
             with STATE.lock:
                 ctrl = STATE.manager.start_control_service()
                 ok_ctrl = wait_http(ctrl.url, timeout=45, path="/health")
@@ -332,6 +333,7 @@ def _handle_api(
                         "error": st_error,
                         "status": STATE.manager.status()["streamlit"],
                     },
+                    "monitoring_url": f"http://{CONTROL_HOST}:{WIZARD_PORT}/monitoring.html",
                 },
             )
             return

@@ -1,15 +1,21 @@
-//! Phase-0 Tauri shell: Setup Wizard UI + navigate WebView to Streamlit.
+//! Desktop shell: Setup Wizard + native Monitoring WebView.
 //!
-//! The Python control service (:9137) and Streamlit (:8501) are started by the
-//! desktop shell (`python -m shell`) or a sidecar; this binary hosts the UI.
+//! The Python control service (:9137) is started by `python -m shell`.
+//! Phase-1 default UI is native Monitoring; Streamlit (:8501) is optional.
 //! Windows: UI ports use localhostForwarding — do not portproxy :9137/:8501.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use tauri::Manager;
 
+const MONITORING_URL: &str = "http://127.0.0.1:9138/monitoring.html";
 const STREAMLIT_URL: &str = "http://127.0.0.1:8501";
 const WIZARD_URL: &str = "http://127.0.0.1:9138/wizard.html";
+
+#[tauri::command]
+fn monitoring_url() -> String {
+    MONITORING_URL.to_string()
+}
 
 #[tauri::command]
 fn streamlit_url() -> String {
@@ -19,6 +25,15 @@ fn streamlit_url() -> String {
 #[tauri::command]
 fn wizard_url() -> String {
     WIZARD_URL.to_string()
+}
+
+#[tauri::command]
+fn open_monitoring_in_window(app: tauri::AppHandle) -> Result<(), String> {
+    if let Some(w) = app.get_webview_window("main") {
+        w.eval(&format!("window.location.href = '{}';", MONITORING_URL))
+            .map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -35,8 +50,10 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![
+            monitoring_url,
             streamlit_url,
             wizard_url,
+            open_monitoring_in_window,
             open_streamlit_in_window
         ])
         .run(tauri::generate_context!())
