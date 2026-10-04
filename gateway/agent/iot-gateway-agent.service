@@ -1,0 +1,21 @@
+[Unit]
+Description=IoT Gateway discovery agent (mDNS + read-only /v1/health)
+Documentation=file:///opt/iot-gateway/agent
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/iot-gateway
+Environment=AGENT_HOST=0.0.0.0
+Environment=AGENT_PORT=9138
+Environment=INSTALL_ROOT=/opt/iot-gateway
+# Prefer a venv created at provision time; fall back to system python -m.
+ExecStart=/opt/iot-gateway/agent/.venv/bin/python -m iot_gateway_agent
+Restart=on-failure
+RestartSec=5
+# Read-only API; no AmbientCapabilities needed beyond bind (port 9138 is unprivileged).
+
+[Install]
+WantedBy=multi-user.target
