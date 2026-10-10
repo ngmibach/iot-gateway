@@ -15,7 +15,11 @@ Get installers from the project [**GitHub Releases**](https://github.com/ngmibac
 
 Everything else (SSH provision, Register Device, certs, monitoring, lab, admin PIN) is done in the **UI**.
 
-Built by [`.github/workflows/desktop-packages.yml`](../../.github/workflows/desktop-packages.yml) on GitHub-hosted runners (`windows-latest` + `ubuntu-24.04`).
+Built by [`.github/workflows/desktop-packages.yml`](../../.github/workflows/desktop-packages.yml) on GitHub-hosted runners:
+
+- Push to **`linux`** → AppImage
+- Push to **`windows`** → `.exe`
+- Workflow definition lives on **`main`** (mirrored onto `linux` / `windows`)
 
 ---
 
@@ -44,7 +48,7 @@ bash apps/desktop/packaging/build_linux_appimage.sh
 bash apps/desktop/packaging/build_windows.sh
 ```
 
-Publish: push a `desktop-v*` / `v*` tag, or Actions → *Desktop packages* → Run workflow with **publish_release**.
+Publish: `git push origin linux` or `git push origin windows` (updates **`desktop-latest`** Release), or Actions → *Desktop packages* → Run workflow.
 
 Sign release binaries from **Admin → Code Signing** inside the running app (keyring; not CI-only secrets).
 

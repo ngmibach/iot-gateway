@@ -54,28 +54,35 @@ Node-RED stays mandatory on the gateway (decrypt → `sensor_data.log` for IDS/d
 
 ---
 
-## Build pipeline (maintainers)
+## Branches (only three)
 
-GitHub Actions workflow [`.github/workflows/desktop-packages.yml`](.github/workflows/desktop-packages.yml):
+| Branch | Role |
+|--------|------|
+| **`main`** | Integration branch + CI workflow definition (source of truth) |
+| **`linux`** | Push here → CI builds `IoTGatewayMonitor-x86_64.AppImage` → [Releases](https://github.com/ngmibach/iot-gateway/releases) |
+| **`windows`** | Push here → CI builds `IoTGatewayMonitor.exe` → [Releases](https://github.com/ngmibach/iot-gateway/releases) |
 
-- **`windows-latest`** → `IoTGatewayMonitor.exe` (PyInstaller, self-contained)
-- **`ubuntu-24.04`** → `IoTGatewayMonitor-x86_64.AppImage` (PyInstaller + appimagetool)
-- On tag `v*` / `desktop-v*` or manual **workflow_dispatch** with `publish_release=true` → uploads to **GitHub Releases**
-
-Trigger a release from the Actions tab → *Desktop packages* → Run workflow, or:
+Workflow: [`.github/workflows/desktop-packages.yml`](.github/workflows/desktop-packages.yml) (GitHub-hosted runners). Successful builds update the **`desktop-latest`** release (same file names are replaced).
 
 ```shell
-git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+# Rebuild Linux package
+git checkout linux
+git merge main          # pick up shared changes when needed
+git push origin linux   # → AppImage CI
+
+# Rebuild Windows package
+git checkout windows
+git merge main
+git push origin windows # → .exe CI
 ```
+
+Manual rebuild: Actions → *Desktop packages* → Run workflow (choose linux / windows / both).
 
 Local rebuild (developers only):
 
 ```shell
-# Linux AppImage
-bash apps/desktop/packaging/build_linux_appimage.sh
-
-# Windows .exe (native Windows or CI)
-bash apps/desktop/packaging/build_windows.sh
+bash apps/desktop/packaging/build_linux_appimage.sh   # → AppImage
+bash apps/desktop/packaging/build_windows.sh          # → .exe (on Windows / CI)
 ```
 
 ---

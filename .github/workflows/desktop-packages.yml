@@ -1,42 +1,46 @@
 name: Desktop packages (AppImage + Windows exe)
 
-# Builds downloadable, double-clickable apps — no developer CLI required.
-# Artifacts upload on every run; a GitHub Release is published on tag v* or
-# when workflow_dispatch sets publish_release=true.
+# Lives on main (source of truth) and is mirrored on linux / windows.
+# Triggers:
+#   - push to `linux`   → build AppImage → publish/update Release asset
+#   - push to `windows` → build .exe     → publish/update Release asset
+#   - workflow_dispatch → build chosen platform(s) manually
+#
+# Repo keeps only three long-lived branches: main, linux, windows.
 
 on:
+  push:
+    branches: [linux, windows]
   workflow_dispatch:
     inputs:
+      platform:
+        description: "Which package(s) to build"
+        type: choice
+        options:
+          - linux
+          - windows
+          - both
+        default: both
       publish_release:
-        description: "Publish/update a GitHub Release with the built installers"
+        description: "Publish/update the GitHub Release (desktop-latest)"
         type: boolean
         default: true
       tag:
-        description: "Release tag (default: desktop-v0.1.0 or existing tag)"
+        description: "Release tag to create or update"
         type: string
-        default: "desktop-v0.1.0"
-  push:
-    tags: ["v*", "desktop-v*"]
-    paths:
-      - "apps/desktop/**"
-      - "apps/control-service/**"
-      - "gateway/**"
-      - "deploy/**"
-      - "tools/**"
-      - ".github/workflows/desktop-packages.yml"
-    branches: ["main", "feat/clickable-desktop-app"]
-  pull_request:
-    paths:
-      - "apps/desktop/**"
-      - "apps/control-service/**"
-      - ".github/workflows/desktop-packages.yml"
+        default: "desktop-latest"
 
 permissions:
   contents: write
 
 jobs:
   linux-appimage:
+    name: Build Linux AppImage
     runs-on: ubuntu-24.04
+    if: >-
+      github.ref_name == 'linux'
+      || (github.event_name == 'workflow_dispatch'
+          && (inputs.platform == 'linux' || inputs.platform == 'both'))
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +71,12 @@ jobs:
           if-no-files-found: error
 
   windows-exe:
+    name: Build Windows exe
     runs-on: windows-latest
+    if: >-
+      github.ref_name == 'windows'
+      || (github.event_name == 'workflow_dispatch'
+          && (inputs.platform == 'windows' || inputs.platform == 'both'))
     steps:
       - uses: actions/checkout@v4
 
@@ -93,10 +102,17 @@ jobs:
           if-no-files-found: error
 
   release:
+    name: Publish GitHub Release
     needs: [linux-appimage, windows-exe]
+    # One platform job is often skipped; publish whenever at least one built.
     if: >-
-      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-      || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+      always()
+      && (needs.linux-appimage.result == 'success'
+          || needs.windows-exe.result == 'success')
+      && (needs.linux-appimage.result != 'failure'
+          && needs.windows-exe.result != 'failure')
+      && (github.event_name == 'push'
+          || (github.event_name == 'workflow_dispatch' && inputs.publish_release))
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -104,10 +120,11 @@ jobs:
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: iot-gateway-monitor-*
           path: release-assets
+          merge-multiple: true
 
       - name: Flatten assets
-        id: assets
         run: |
           mkdir -p dist
           find release-assets -type f \( -name '*.AppImage' -o -name '*.exe' -o -name 'SHA256SUMS*' \) \
@@ -124,10 +141,12 @@ jobs:
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
           else
-            TAG="${GITHUB_REF_NAME}"
+            # Continuous downloadable build from linux/windows pushes
+            TAG="desktop-latest"
           fi
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "Publishing release tag: $TAG"
+          echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+          echo "Publishing release tag: $TAG (from ${GITHUB_REF_NAME})"
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
@@ -135,7 +154,7 @@ jobs:
           tag_name: ${{ steps.tag.outputs.tag }}
           name: IoT Gateway Monitor ${{ steps.tag.outputs.tag }}
           draft: false
-          prerelease: ${{ contains(steps.tag.outputs.tag, 'rc') || contains(steps.tag.outputs.tag, 'beta') }}
+          prerelease: ${{ steps.tag.outputs.tag == 'desktop-latest' }}
           generate_release_notes: true
           body: |
             ## Download & run
@@ -145,9 +164,11 @@ jobs:
             | **Windows** | `IoTGatewayMonitor.exe` | Download → double-click |
             | **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | Download → `chmod +x` once → double-click |
 
-            No Python, Rust, or CLI setup required. Setup Wizard, Actions, Monitoring, Lab, and Admin all run in the app window.
+            Built from branch `${{ steps.tag.outputs.branch }}`.
+            Push to **`linux`** rebuilds the AppImage; push to **`windows`** rebuilds the `.exe`.
+            Same-named assets on this release are replaced on each successful build.
 
-            SmartScreen / Gatekeeper may warn on first launch for unsigned builds — choose **More info → Run anyway** (Windows) or right-click → Allow (Linux).
+            No Python, Rust, or CLI setup required. Day-to-day work is done in the app UI.
           files: |
             dist/*
         env:
