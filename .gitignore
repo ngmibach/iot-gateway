@@ -19,5 +19,6 @@ apps/control-service/.venv/
 apps/desktop/.venv/
 apps/desktop/.local-libs/
 apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/target/
+apps/desktop/build/
+apps/desktop/dist/
 .venv/

@@ -1,165 +1,132 @@
 # IoT Gateway Monitor
 
-Cross-platform control plane for the IoT gateway: **discover the device on your LAN → SSH install the gateway stack → open Monitoring + Actions**. You do not need to run `docker compose` or hand-edit IPs for the default path.
+Cross-platform desktop app for the IoT gateway: **download → double-click → Setup Wizard → Monitoring + Actions**. No Python, Rust, or CLI setup for normal use.
 
 | Piece | Role |
 |-------|------|
-| **Desktop app** (Phase-0: Streamlit + control service; Phase-1: Tauri) | Setup Wizard, Monitoring, Actions, Admin |
-| **Control service** (`apps/control-service/`) | SSH provision/register playbooks, local SQLite registry, support bundle |
-| **Gateway** (on Ubuntu / Raspberry Pi) | Mosquitto, HAProxy, **Node-RED (mandatory)**, IDS, exporters, optional agent |
+| **Desktop app** (Windows `.exe` / Linux AppImage) | Setup Wizard, Monitoring, Actions, Lab, Admin |
+| **Control service** (bundled inside the app) | SSH provision/register playbooks, local SQLite registry |
+| **Gateway** (on Ubuntu / Raspberry Pi) | Mosquitto, HAProxy, **Node-RED (mandatory)**, IDS, exporters |
 | **Observability** | App-managed Loki + Prometheus (Grafana optional) |
 
-Design reference: `DESIGN-packaged-app.md` (when present in the tree).
+---
+
+## Download & run (recommended)
+
+Installers are published on the [**GitHub Releases**](https://github.com/ngmibach/iot-gateway/releases) page (built by GitHub Actions).
+
+| Platform | File | How to run |
+|----------|------|------------|
+| **Windows 10/11** | `IoTGatewayMonitor.exe` | Download → double-click |
+| **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | Download → allow execute once → double-click |
+
+### Windows
+
+1. Open the latest Release and download **`IoTGatewayMonitor.exe`**.
+2. Double-click it. If SmartScreen appears: **More info → Run anyway**.
+3. The app window opens (Setup Wizard). Use the UI for discover → SSH → install gateway → Register Device → Monitoring.
+
+### Ubuntu / Linux
+
+1. Download **`IoTGatewayMonitor-x86_64.AppImage`**.
+2. Right-click → Properties → allow executing as program  
+   *(or once in a terminal: `chmod +x IoTGatewayMonitor-x86_64.AppImage`)*
+3. Double-click the AppImage. The app window opens.
+
+All day-to-day work (provision, register device, cert download, monitoring, lab sensors, admin PIN / code signing) is done **in the UI**.
+
+App data:
+
+- Linux: `~/.local/share/iot-gateway-monitor/`
+- Windows: `%APPDATA%\IoTGatewayMonitor\`
 
 ---
 
-## Recommended path (app-first)
+## What the app does
 
-### 1. Install / start the control plane on your operator PC
+1. **Setup Wizard** — enter the gateway LAN IP, SSH as the device user, provision the Docker gateway stack.
+2. **Actions → Register Device** — ACL + Mosquitto password + HAProxy allow-list + mTLS client cert (one-time download).
+3. **Monitoring** — sensors / gateway / Raspberry Pi views against Loki + Prometheus.
+4. **Lab** — short-lived fake sensors for demos.
+5. **Admin → Code Signing** — sign release binaries locally via OS keyring (optional).
 
-```shell
-cd apps/control-service
-python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-
-# Local API (binds 127.0.0.1:9137 only)
-export IOTGW_CA_PASSPHRASE='…'          # gateway CA unlock for CSR sign
-export IOTGW_SSH_KEY=~/.ssh/id_ed25519  # or IOTGW_SSH_PASSWORD
-python -m api
-```
-
-Phase-0 UI: run Streamlit on the **host** (not inside the monitoring compose container) so it can reach the local API:
-
-```shell
-export CONTROL_SERVICE_URL=http://127.0.0.1:9137
-export LOKI_URL=http://127.0.0.1:3100
-export PROMETHEUS_URL=http://127.0.0.1:9090
-# USE_LEGACY_GITEA is off by default — do not set it for the app-first path
-streamlit run monitoring/build/streamlit/app.py
-```
-
-### 2. Discover → SSH → install gateway
-
-1. Enter the gateway LAN IP (mDNS via `iot-gateway-agent` is optional until after first install).
-2. Authenticate with the device SSH password or key.
-3. Provision uploads the gateway bundle, runs `docker compose up`, probes exporters/Loki, then installs the agent **last**.
-
-CLI dogfood (when the provisioner module is on your branch/PYTHONPATH):
-
-```shell
-PYTHONPATH=apps/control-service python -m provisioner provision \
-  --host "$GATEWAY_IP" --user ubuntu \
-  --gateway-ip "$GATEWAY_IP" --monitoring-ip "$MONITORING_IP"
-```
-
-### 3. Register devices & open the dashboard
-
-- **Actions → Register Device**: ACL + hashed Mosquitto password + HAProxy allow-list + mTLS client cert (one-time download token).
-- **Monitoring**: sensors / gateway / Raspberry Pi views against Loki + Prometheus.
-
-### 4. Support bundle (sanitized)
-
-```shell
-PYTHONPATH=apps/control-service python -c "
-from pathlib import Path
-from api.settings import Settings
-from registry.registry import Registry
-from support import write_support_bundle, default_bundle_path
-s = Settings.from_env()
-r = Registry(str(s.registry_path))
-path = write_support_bundle(default_bundle_path(s.data_dir), settings=s, registry=r)
-print(path)
-"
-```
-
-Export includes redacted settings, registry snapshot, audit log, and recent control logs. **No** passwords, API tokens, PEMs, or keyring/signing material.
+Node-RED stays mandatory on the gateway (decrypt → `sensor_data.log` for IDS/dashboards).
 
 ---
 
-## Node-RED is mandatory (K17)
+## Build pipeline (maintainers)
 
-The gateway stack **must** keep Node-RED. It owns the decrypt → `sensor_data.log` path consumed by the IDS and dashboards. Removing or replacing Node-RED is out of scope for v1. Provision and compose checks treat a missing `nodered` service as a failure.
+GitHub Actions workflow [`.github/workflows/desktop-packages.yml`](.github/workflows/desktop-packages.yml):
 
----
+- **`windows-latest`** → `IoTGatewayMonitor.exe` (PyInstaller, self-contained)
+- **`ubuntu-24.04`** → `IoTGatewayMonitor-x86_64.AppImage` (PyInstaller + appimagetool)
+- On tag `v*` / `desktop-v*` or manual **workflow_dispatch** with `publish_release=true` → uploads to **GitHub Releases**
 
-## Artifact signing — Admin Code Signing (not CI-only secrets)
-
-Release binaries (Windows `.msi`/`.exe`, Ubuntu AppImage/`.deb`) are **built unsigned in CI**. Shipping signatures are applied from the **Admin → Code Signing** tab (PR 14): the admin loads signing material via OS keyring / secure prompt and signs locally. Do not rely on long-lived org CI secrets as the only signing path. See migration notes in `docs/migration-app-first.md`.
-
----
-
-## Gitea control plane — deprecated / optional
-
-Day-2 mutations (register, ACL, allow-list, clear logs) go through the **control service over SSH**. Gitea + runner + seed remain in `monitoring/docker-compose.yaml` only under the Compose profile `legacy-gitea` for brownfield labs. Leave `USE_LEGACY_GITEA` unset (legacy only enables for `1`/`true`/`yes`).
+Trigger a release from the Actions tab → *Desktop packages* → Run workflow, or:
 
 ```shell
-# Only if you intentionally need the old Actions runner:
-docker compose -f monitoring/docker-compose.yaml --profile legacy-gitea up -d
+git tag desktop-v0.1.0 && git push origin desktop-v0.1.0
+```
+
+Local rebuild (developers only):
+
+```shell
+# Linux AppImage
+bash apps/desktop/packaging/build_linux_appimage.sh
+
+# Windows .exe (native Windows or CI)
+bash apps/desktop/packaging/build_windows.sh
 ```
 
 ---
 
-## Advanced / legacy: three-folder Docker Compose
+## Windows networking notes
 
-Power users can still run the classic stacks by hand. Prefer the app-first path above for new installs.
+- UI ports `:9137` / `:9138` use Windows **`localhostForwarding`** when services run inside WSL2 (`.wslconfig`). The downloadable `.exe` runs natively on Windows and binds localhost directly.
+- Loki `:3100` firewall/portproxy steps appear as a **copyable checklist in the Setup Wizard** — the app never silently changes firewall rules.
 
-### Prerequisites
+---
 
-- Docker + Docker Compose, `openssl`
-- Network reachability to the gateway host
+## Advanced / legacy: Docker Compose lab
 
-### Certificates
-
-```shell
-# Set SERVER_CN to the gateway IP inside cert-generation.sh, then:
-bash cert-generation.sh
-```
-
-### Start order
+Power users can still run the classic three-folder stacks by hand. Prefer the downloadable app for new installs.
 
 ```shell
 cd gateway && docker compose build && docker compose up -d
-cd ../monitoring && docker compose build && docker compose up -d   # Gitea profile optional
+cd ../monitoring && docker compose build && docker compose up -d
 # Optional lab traffic:
 cd ../fake_sensor && docker compose build && docker compose up -d
 ```
 
-Fake sensors should only run for short windows. Allow their Docker bridge IPs in `gateway/haproxy/allowed-ips.txt`, then reload HAProxy.
+| Service | URL |
+|---------|-----|
+| Grafana | http://localhost:3210 (`admin` / `admin`) |
+| Prometheus | http://localhost:9090 |
+| Loki | http://localhost:3100 |
 
-### Legacy URLs (compose lab)
-
-| Service | URL | Notes |
-|---------|-----|-------|
-| Streamlit | http://localhost:8000 | Prefer host Streamlit + `CONTROL_SERVICE_URL` for Register Device |
-| Grafana | http://localhost:3210 | `admin` / `admin` |
-| Prometheus | http://localhost:9090 | |
-| Loki | http://localhost:3100 | |
-| Gitea | http://localhost:5000 | **Deprecated** control plane; profile `legacy-gitea` |
-
-Template-rendered endpoints live under `deploy/templates/` (`MONITORING_IP` / `GATEWAY_IP`). Avoid hard-coding `172.17.0.1`.
+Gitea + runner remain only under Compose profile `legacy-gitea` (deprecated control plane).
 
 ---
 
-## Tests (CI-friendly)
+## Developer source run (optional)
+
+Only needed if you are changing the app itself. End users should use Releases.
+
+See [`apps/desktop/README.md`](apps/desktop/README.md) for venv / shortcut details.
 
 ```shell
-cd apps/control-service
-PYTHONPATH=. python -m unittest discover -s tests -v
-# Includes support-bundle redaction + mocked Linux register/provision E2E
-PYTHONPATH=. python -m unittest tests.e2e.test_linux_register_provision -v
+cd apps/control-service && PYTHONPATH=. python -m unittest discover -s tests -v
 ```
-
-No Raspberry Pi is required for CI; live checklist text is in `tests/e2e/linux_happy_path.py`.
 
 ---
 
 ## Repository layout
 
 ```
-apps/control-service/   # FastAPI, SSH actions, registry, telemetry, support bundle
-deploy/templates/       # IP-templated Promtail/Prometheus/Grafana snippets
+apps/desktop/           # Clickable app (shell + UI + packaging/)
+apps/control-service/   # FastAPI, SSH actions, registry, telemetry
 gateway/                # Device compose stack (Node-RED mandatory)
-monitoring/             # Lab compose (Loki/Prom/Grafana/Streamlit; Gitea optional)
-fake_sensor/            # Lab only
-docs/migration-app-first.md
+monitoring/             # Lab compose (Loki/Prom/Grafana)
+deploy/templates/       # IP-templated Promtail/Prometheus snippets
+.github/workflows/      # Builds .exe + AppImage → Releases
 ```

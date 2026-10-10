@@ -31,6 +31,7 @@ def _want_gui_by_default(argv: list[str]) -> bool:
             "--no-browser",
             "--start-services",
             "--detect-only",
+            "--run-control-service",
             "--help",
             "-h",
         )
@@ -38,11 +39,31 @@ def _want_gui_by_default(argv: list[str]) -> bool:
         return False
     if os.environ.get("IOTGW_FORCE_CLI", "").strip() in ("1", "true", "yes"):
         return False
+    # Frozen Windows .exe: always GUI (no console / DISPLAY).
+    if getattr(sys, "frozen", False):
+        return True
     return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
+def _run_control_service() -> int:
+    """Child entry used by the frozen .exe / AppImage (no system Python)."""
+    from .paths import control_service_dir, repo_root
+
+    cs = str(control_service_dir())
+    if cs not in sys.path:
+        sys.path.insert(0, cs)
+    os.environ.setdefault("IOTGW_REPO_ROOT", str(repo_root()))
+    from api.__main__ import main as api_main  # type: ignore[import-not-found]
+
+    api_main()
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
     raw = list(sys.argv[1:] if argv is None else argv)
+    if "--run-control-service" in raw:
+        return _run_control_service()
+
     parser = argparse.ArgumentParser(description="IoT Gateway Monitor — desktop app")
     parser.add_argument("--host", default=CONTROL_HOST)
     parser.add_argument("--port", type=int, default=WIZARD_PORT)
@@ -66,6 +87,11 @@ def main(argv: list[str] | None = None) -> int:
         "--detect-only",
         action="store_true",
         help="Print Docker/WSL detection JSON and exit",
+    )
+    parser.add_argument(
+        "--run-control-service",
+        action="store_true",
+        help=argparse.SUPPRESS,  # internal: frozen child process
     )
     parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args(raw)

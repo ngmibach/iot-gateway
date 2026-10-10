@@ -23,6 +23,15 @@ FORBIDDEN_PROMTAIL_MARKERS = ("172.17.0.1", "{{")
 
 
 def repo_root_from_here() -> Path:
+    """Repo / bundle root that contains ``gateway/``, ``tools/``, ``deploy/``."""
+    import os
+    import sys
+
+    env = os.environ.get("IOTGW_REPO_ROOT", "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
     # provisioner/ -> control-service/ -> apps/ -> repo
     return Path(__file__).resolve().parents[3]
 

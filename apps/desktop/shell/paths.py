@@ -1,9 +1,13 @@
-"""App data / settings paths (Linux + Windows)."""
+"""App data / settings paths (Linux + Windows).
+
+Supports both source-tree runs and PyInstaller frozen builds (``sys._MEIPASS``).
+"""
 
 from __future__ import annotations
 
 import json
 import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +19,18 @@ CONTROL_HOST = "127.0.0.1"
 CONTROL_PORT = 9137
 STREAMLIT_PORT = 8501
 WIZARD_PORT = 9138
+
+
+def is_frozen() -> bool:
+    """True when running inside a PyInstaller (or similar) bundle."""
+    return bool(getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"))
+
+
+def bundle_root() -> Path | None:
+    """PyInstaller extract/dir root, or None when running from source."""
+    if is_frozen():
+        return Path(sys._MEIPASS)  # type: ignore[attr-defined]
+    return None
 
 
 def data_dir() -> Path:
@@ -70,17 +86,34 @@ def save_settings(data: dict[str, Any]) -> None:
 
 
 def repo_root() -> Path:
-    """apps/desktop/shell/paths.py → repo root (four parents up from file)."""
+    """Repo root (source) or frozen bundle root (contains ``gateway/``, ``tools/``)."""
+    env = os.environ.get("IOTGW_REPO_ROOT", "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    bundled = bundle_root()
+    if bundled is not None:
+        return bundled
+    # apps/desktop/shell/paths.py → repo root (four parents up from file).
     return Path(__file__).resolve().parents[3]
 
 
 def control_service_dir() -> Path:
+    bundled = bundle_root()
+    if bundled is not None:
+        # Packaged layout: control-service/ next to ui/ and gateway/.
+        return bundled / "control-service"
     return repo_root() / "apps" / "control-service"
 
 
 def streamlit_app_dir() -> Path:
+    bundled = bundle_root()
+    if bundled is not None:
+        return bundled / "streamlit"
     return repo_root() / "monitoring" / "build" / "streamlit"
 
 
 def desktop_ui_dir() -> Path:
+    bundled = bundle_root()
+    if bundled is not None:
+        return bundled / "ui"
     return Path(__file__).resolve().parents[1] / "ui"

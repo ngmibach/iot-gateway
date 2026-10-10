@@ -1,65 +1,154 @@
-name: Desktop packages (AppImage + Windows)
+name: Desktop packages (AppImage + Windows exe)
+
+# Builds downloadable, double-clickable apps — no developer CLI required.
+# Artifacts upload on every run; a GitHub Release is published on tag v* or
+# when workflow_dispatch sets publish_release=true.
 
 on:
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: "Publish/update a GitHub Release with the built installers"
+        type: boolean
+        default: true
+      tag:
+        description: "Release tag (default: desktop-v0.1.0 or existing tag)"
+        type: string
+        default: "desktop-v0.1.0"
   push:
+    tags: ["v*", "desktop-v*"]
+    paths:
+      - "apps/desktop/**"
+      - "apps/control-service/**"
+      - "gateway/**"
+      - "deploy/**"
+      - "tools/**"
+      - ".github/workflows/desktop-packages.yml"
+    branches: ["main", "feat/clickable-desktop-app"]
+  pull_request:
     paths:
       - "apps/desktop/**"
       - "apps/control-service/**"
       - ".github/workflows/desktop-packages.yml"
-    branches: ["main", "feat/clickable-desktop-app"]
+
+permissions:
+  contents: write
 
 jobs:
   linux-appimage:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: System deps
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: System deps (AppImage)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
-            python3 python3-venv python3-pip
-      - name: Python venv (for beforeDev / runtime smoke)
-        run: |
-          python3 -m venv apps/desktop/.venv
-          apps/desktop/.venv/bin/pip install -r apps/desktop/requirements.txt \
-            -r apps/control-service/requirements.txt
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
+          sudo apt-get install -y \
+            libfuse2 file desktop-file-utils \
+            libxcb-xinerama0 libxkbcommon-x11-0 libglib2.0-0
+
       - name: Build AppImage
         working-directory: apps/desktop
-        run: cargo tauri build --bundles appimage
+        env:
+          IOTGW_DIST: ${{ github.workspace }}/apps/desktop/dist
+        run: bash packaging/build_linux_appimage.sh
+
       - name: Upload AppImage
         uses: actions/upload-artifact@v4
         with:
           name: iot-gateway-monitor-linux-appimage
-          path: apps/desktop/src-tauri/target/release/bundle/appimage/*.AppImage
+          path: |
+            apps/desktop/dist/IoTGatewayMonitor-*.AppImage
+            apps/desktop/dist/SHA256SUMS-linux.txt
+          if-no-files-found: error
 
-  windows-msi:
+  windows-exe:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Python deps
+
+      - name: Build Windows .exe
         shell: bash
-        run: |
-          python -m venv apps/desktop/.venv
-          apps/desktop/.venv/Scripts/pip install -r apps/desktop/requirements.txt \
-            -r apps/control-service/requirements.txt
-      - name: Install tauri-cli
-        run: cargo install tauri-cli --version "^2" --locked
-      - name: Build MSI + NSIS
-        working-directory: apps/desktop
-        run: cargo tauri build --bundles msi,nsis
-      - name: Upload Windows installers
+        env:
+          IOTGW_DIST: ${{ github.workspace }}/apps/desktop/dist
+          IOTGW_PYI_ONEFILE: "1"
+          IOTGW_PYI_CONSOLE: "0"
+        run: bash apps/desktop/packaging/build_windows.sh
+
+      - name: Upload Windows exe
         uses: actions/upload-artifact@v4
         with:
-          name: iot-gateway-monitor-windows
+          name: iot-gateway-monitor-windows-exe
           path: |
-            apps/desktop/src-tauri/target/release/bundle/msi/*.msi
-            apps/desktop/src-tauri/target/release/bundle/nsis/*.exe
+            apps/desktop/dist/IoTGatewayMonitor.exe
+            apps/desktop/dist/SHA256SUMS-windows.txt
+          if-no-files-found: error
+
+  release:
+    needs: [linux-appimage, windows-exe]
+    if: >-
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Flatten assets
+        id: assets
+        run: |
+          mkdir -p dist
+          find release-assets -type f \( -name '*.AppImage' -o -name '*.exe' -o -name 'SHA256SUMS*' \) \
+            -exec cp -v {} dist/ \;
+          ls -lh dist
+          {
+            echo "### Files"
+            ls -lh dist | sed 's/^/ /'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing release tag: $TAG"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: IoT Gateway Monitor ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: ${{ contains(steps.tag.outputs.tag, 'rc') || contains(steps.tag.outputs.tag, 'beta') }}
+          generate_release_notes: true
+          body: |
+            ## Download & run
+
+            | Platform | File | How to run |
+            |----------|------|------------|
+            | **Windows** | `IoTGatewayMonitor.exe` | Download → double-click |
+            | **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | Download → `chmod +x` once → double-click |
+
+            No Python, Rust, or CLI setup required. Setup Wizard, Actions, Monitoring, Lab, and Admin all run in the app window.
+
+            SmartScreen / Gatekeeper may warn on first launch for unsigned builds — choose **More info → Run anyway** (Windows) or right-click → Allow (Linux).
+          files: |
+            dist/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

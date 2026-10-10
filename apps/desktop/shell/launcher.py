@@ -59,6 +59,10 @@ class ProcessManager:
         env["IOTGW_CONTROL_HOST"] = host
         env["IOTGW_CONTROL_PORT"] = str(port)
         env.setdefault("IOTGW_DATA_DIR", str(data_dir()))
+        # Frozen builds: provisioner resolves gateway/tools from this root.
+        from .paths import is_frozen, repo_root
+
+        env.setdefault("IOTGW_REPO_ROOT", str(repo_root()))
         settings = load_settings()
         # Prefer per-gateway key from settings when a single default is set.
         default_gw = settings.get("default_gateway_id")
@@ -70,14 +74,24 @@ class ProcessManager:
             env.update(extra_env)
         log_path = ensure_data_dir() / "control-service.log"
         log_f = open(log_path, "a", encoding="utf-8")  # noqa: SIM115 — kept for child lifetime
-        proc = subprocess.Popen(
-            [py, "-m", "api"],
-            cwd=str(cs),
-            env=env,
-            stdout=log_f,
-            stderr=subprocess.STDOUT,
-            start_new_session=True,
-        )
+        if is_frozen():
+            # Same bundled exe re-entered as the control API child (no system Python).
+            cmd = [py, "--run-control-service"]
+            cwd = str(repo_root())
+        else:
+            cmd = [py, "-m", "api"]
+            cwd = str(cs)
+        popen_kwargs: dict = {
+            "cwd": cwd,
+            "env": env,
+            "stdout": log_f,
+            "stderr": subprocess.STDOUT,
+            "start_new_session": True,
+        }
+        if os.name == "nt":
+            # Hide console for the child when the parent is a windowed .exe.
+            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        proc = subprocess.Popen(cmd, **popen_kwargs)
         self._children.append(proc)
         url = f"http://{host}:{port}"
         self.control = ManagedProcess("control-service", proc, url)
