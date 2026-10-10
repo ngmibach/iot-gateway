@@ -212,12 +212,28 @@ class ProvisionFlowTests(unittest.TestCase):
             template_dir=self.repo / "deploy" / "templates",
             repo_root=self.repo,
             agent_mode="skip",
+            backend="compose",  # legacy path covered by these tests
             probe_retries=1,
             loki_probe_retries=1,
             probe_interval_s=0,
         )
         base.update(kwargs)
         return ProvisionConfig(**base)
+
+    def test_agent_backend_no_docker(self) -> None:
+        ssh = _ok_ssh()
+        ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))
+        ssh.when("command -v python3", CommandResult(0, "/usr/bin/python3\n", ""))
+        ssh.when("python3 -m venv", CommandResult(0, "", ""))
+        ssh.when("pip install", CommandResult(0, "", ""))
+        ssh.when("systemctl", CommandResult(0, "", ""))
+        ssh.when("curl -fsS http://127.0.0.1:9139/v1/health", CommandResult(0, '{"status":"ok"}', ""))
+        ssh.when("sudo -n", CommandResult(0, "", ""))
+        result = provision(ssh, self._config(backend="agent", agent_mode="auto"))
+        self.assertEqual(result.backend, "agent")
+        self.assertTrue(result.agent_installed)
+        self.assertTrue(any("no Docker" in n for n in result.notes))
+        self.assertFalse(any("docker info" in c for c in ssh.commands))
 
     def test_happy_path_skips_agent(self) -> None:
         ssh = _ok_ssh()

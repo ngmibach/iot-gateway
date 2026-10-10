@@ -14,6 +14,7 @@ from .compose import (
 )
 from .images import IMAGE_SET, required_images
 from .lifecycle import BackendStatus, TelemetryManager
+from .native import NativeTelemetryManager, NativeTelemetryStatus, default_native_root
 from .nic import (
     NicCandidate,
     filter_nic_candidates,
@@ -35,6 +36,9 @@ __all__ = [
     "IMAGE_SET",
     "NicCandidate",
     "TelemetryManager",
+    "NativeTelemetryManager",
+    "NativeTelemetryStatus",
+    "default_native_root",
     "check_loki",
     "check_prometheus",
     "filter_nic_candidates",

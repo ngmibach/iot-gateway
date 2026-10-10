@@ -10,10 +10,9 @@
     <header>
     <div>
       <h1>IoT Gateway Monitor — Setup Wizard</h1>
-      <div class="sub">Phase-0/1 · Docker/WSL · NIC · SSH pin · firewall · native Monitoring
+      <div class="sub">Local monitoring · NIC · SSH · firewall · Monitoring
         <a href="actions.html">Actions →</a>
         <a href="monitoring.html">Monitoring →</a>
-        <a href="lab.html">Lab →</a>
         <a href="admin.html">Admin →</a>
       </div>
     </div>
@@ -23,14 +22,16 @@
     <nav class="steps" id="step-tabs"></nav>
 
     <section class="panel step" data-step="0" id="step-engine">
-      <h2>1. Container engine</h2>
-      <p>You will not run docker compose yourself — the app manages containers. A container engine is still required.</p>
+      <h2>1. Local monitoring</h2>
+      <p>This PC does <strong>not</strong> need Docker. The app downloads Loki and Prometheus once and runs them as local processes. You stay in this window — no external installers.</p>
       <div class="row">
+        <button class="primary" id="btn-prepare-telemetry">Prepare monitoring</button>
         <button class="secondary" id="btn-refresh-env">Re-detect</button>
-        <span id="docker-badge"></span>
+        <button class="secondary" id="btn-stop-telemetry">Stop</button>
+        <span id="telemetry-badge"></span>
       </div>
+      <div class="note-box" id="telemetry-hint"></div>
       <pre class="mono" id="env-json"></pre>
-      <div class="note-box" id="docker-hint"></div>
     </section>
 
     <section class="panel step hidden" data-step="1" id="step-nic">
@@ -102,15 +103,16 @@
     </section>
 
     <section class="panel step hidden" data-step="4" id="step-launch">
-      <h2>5. Launch control service + Monitoring</h2>
-      <p>Starts FastAPI on <code>127.0.0.1:9137</code>. Default UI is <strong>native Monitoring</strong> (Gateway / Host / Sensors). Streamlit remains optional.</p>
+      <h2>5. Launch + provision gateway</h2>
+      <p>Starts the local control API on <code>127.0.0.1:9137</code>. Provision installs the <strong>monolithic gateway agent</strong> over SSH (native Mosquitto + agent — <em>no Docker</em> on the device).</p>
       <div class="row">
         <button class="primary" id="btn-start-svc">Start control service</button>
+        <button class="primary" id="btn-provision-agent">Install / update gateway agent</button>
         <button class="secondary" id="btn-open-mon">Open Monitoring</button>
         <button class="secondary" id="btn-open-actions" type="button">Open Actions</button>
-        <button class="secondary" id="btn-open-st">Open Streamlit (optional)</button>
         <button class="danger" id="btn-stop-svc">Stop</button>
       </div>
+      <div id="provision-msg"></div>
       <div class="row">
         <label class="chk" style="min-width:auto">
           <input type="checkbox" id="chk-streamlit" />

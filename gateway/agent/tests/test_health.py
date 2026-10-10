@@ -37,7 +37,6 @@ class HealthShapeTests(unittest.TestCase):
         self.assertEqual(payload["port"], 19138)
         self.assertEqual(payload["mqtts"], MQTT_TLS_PORT)
         self.assertEqual(payload["path"], HEALTH_PATH)
-        self.assertTrue(payload["read_only"])
         self.assertIn("GET /v1/health", payload["api"])
         self.assertIn("GET /v1/info", payload["api"])
 
@@ -54,7 +53,7 @@ class MdnsTests(unittest.TestCase):
             return real_import(name, *args, **kwargs)
 
         with mock.patch("builtins.__import__", side_effect=_fake_import):
-            handle, enabled = start_mdns(9138)
+            handle, enabled = start_mdns(9139)
 
         self.assertIsNone(handle)
         self.assertIs(enabled, False)

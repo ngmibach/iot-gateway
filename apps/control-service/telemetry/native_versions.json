@@ -1,0 +1,36 @@
+{
+  "prometheus": {
+    "version": "2.54.1",
+    "assets": {
+      "linux-amd64": {
+        "url": "https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.linux-amd64.tar.gz",
+        "sha256": "31715ef65e8a898d0f97c8c08c03b6b9afe485ac84e1698bcfec90fc6e62924f",
+        "archive": "tar.gz",
+        "binary": "prometheus"
+      },
+      "windows-amd64": {
+        "url": "https://github.com/prometheus/prometheus/releases/download/v2.54.1/prometheus-2.54.1.windows-amd64.zip",
+        "sha256": "f94b88724a6deaab5a3c3b9f93baba655e93607f5319477bfede05bbf86d192c",
+        "archive": "zip",
+        "binary": "prometheus.exe"
+      }
+    }
+  },
+  "loki": {
+    "version": "3.1.1",
+    "assets": {
+      "linux-amd64": {
+        "url": "https://github.com/grafana/loki/releases/download/v3.1.1/loki-linux-amd64.zip",
+        "sha256": "d7cf60aa461ccb159952742eb26e5576ec03b048ea59bad72e83989aa1554d9e",
+        "archive": "zip",
+        "binary": "loki-linux-amd64"
+      },
+      "windows-amd64": {
+        "url": "https://github.com/grafana/loki/releases/download/v3.1.1/loki-windows-amd64.exe.zip",
+        "sha256": "827c6da44b4427c5818e53dfe74bf1b3c3610476e1af05f93f3a283357808419",
+        "archive": "zip",
+        "binary": "loki-windows-amd64.exe"
+      }
+    }
+  }
+}

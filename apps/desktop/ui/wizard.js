@@ -1,6 +1,6 @@
 /* Setup Wizard front-end — talks to /api/wizard/* on the shell server. */
 (function () {
-  const STEPS = ["Engine", "NIC", "SSH", "Firewall", "Launch"];
+  const STEPS = ["Monitoring", "NIC", "SSH", "Firewall", "Launch"];
   let step = 0;
   let hostKey = null;
   let hostKeyPinned = false;
@@ -46,16 +46,61 @@
 
   async function refreshEnv() {
     const data = await api("/api/wizard/env");
-    $("env-json").textContent = JSON.stringify(data, null, 2);
-    const d = data.docker || {};
-    badge($("docker-badge"), !!d.healthy, d.healthy ? `Docker OK (${d.version || "?"})` : "Docker not ready");
-    $("docker-hint").textContent = d.hint || d.error || "";
+    $("env-json").textContent = JSON.stringify(
+      {
+        telemetry: data.telemetry,
+        platform: data.platform,
+        system: data.system,
+        wsl: data.wsl,
+      },
+      null,
+      2
+    );
+    const t = data.telemetry || {};
+    badge(
+      $("telemetry-badge"),
+      !!t.ready,
+      t.ready ? "Loki + Prometheus ready" : "Monitoring not ready"
+    );
+    $("telemetry-hint").textContent =
+      t.hint || t.detail || t.progress || "";
     const note = (data.wsl && data.wsl.localhost_forwarding_note) || "";
     $("localhost-note").textContent = note;
     $("localhost-note").classList.toggle("hidden", !note);
-    $("hdr-status").innerHTML = d.healthy
-      ? '<span class="badge ok">engine ready</span>'
-      : '<span class="badge warn">engine blocked</span>';
+    $("hdr-status").innerHTML = t.ready
+      ? '<span class="badge ok">monitoring ready</span>'
+      : '<span class="badge warn">prepare monitoring</span>';
+  }
+
+  async function prepareTelemetry() {
+    $("telemetry-hint").textContent = "Preparing… downloading binaries if needed.";
+    badge($("telemetry-badge"), false, "Preparing…");
+    try {
+      const gw = ($("gateway-ip") && $("gateway-ip").value) || "";
+      const data = await api("/api/wizard/telemetry/ensure", {
+        method: "POST",
+        body: JSON.stringify({ gateway_ip: gw || undefined }),
+      });
+      const t = data.telemetry || {};
+      badge(
+        $("telemetry-badge"),
+        !!t.ready,
+        t.ready ? "Loki + Prometheus ready" : "Not ready"
+      );
+      $("telemetry-hint").textContent = t.detail || t.progress || t.hint || "";
+      $("hdr-status").innerHTML = t.ready
+        ? '<span class="badge ok">monitoring ready</span>'
+        : '<span class="badge warn">prepare monitoring</span>';
+      if (!data.ok) throw new Error(t.detail || "prepare failed");
+    } catch (e) {
+      badge($("telemetry-badge"), false, "Failed");
+      $("telemetry-hint").textContent = String(e.message || e);
+    }
+  }
+
+  async function stopTelemetry() {
+    await api("/api/wizard/telemetry/stop", { method: "POST", body: "{}" });
+    await refreshEnv();
   }
 
   async function refreshNics() {
@@ -146,6 +191,30 @@
     });
     $("ssh-pass").value = "";
     $("ssh-msg").innerHTML = `<div class="okmsg">Key installed (password cleared). path=${res.ssh_key_path}</div>`;
+  }
+
+  async function provisionAgent() {
+    const msg = $("provision-msg");
+    msg.innerHTML = `<div class="okmsg">Provisioning gateway agent (may take a few minutes)…</div>`;
+    try {
+      const data = await api("/api/wizard/provision", {
+        method: "POST",
+        body: JSON.stringify({
+          host: $("ssh-host").value.trim() || undefined,
+          username: $("ssh-user").value.trim() || undefined,
+          port: Number($("ssh-port").value) || undefined,
+          gateway_id: $("ssh-gid").value.trim() || undefined,
+          gateway_ip: $("gateway-ip").value.trim() || undefined,
+        }),
+      });
+      const notes = (data.notes || []).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
+      msg.innerHTML = `<div class="okmsg">Agent installed (${escapeHtml(
+        data.backend || "agent"
+      )})</div><ul>${notes}</ul>`;
+    } catch (e) {
+      msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
+      throw e;
+    }
   }
 
   async function refreshChecklist() {
@@ -243,6 +312,12 @@
       showStep(step + 1);
     });
     $("btn-refresh-env").addEventListener("click", () => refreshEnv().catch(showErr));
+    $("btn-prepare-telemetry").addEventListener("click", () =>
+      prepareTelemetry().catch(showErr)
+    );
+    $("btn-stop-telemetry").addEventListener("click", () =>
+      stopTelemetry().catch(showErr)
+    );
     $("btn-refresh-nics").addEventListener("click", () => refreshNics().catch(showErr));
     $("btn-save-nic").addEventListener("click", () => saveNic().catch(showErr));
     $("btn-fetch-hk").addEventListener("click", () => fetchHostKey().catch(e => {
@@ -258,6 +333,9 @@
     $("btn-confirm-cl").addEventListener("click", () => confirmChecklist().catch(showErr));
     $("btn-start-svc").addEventListener("click", () => startServices().catch(showErr));
     $("btn-stop-svc").addEventListener("click", () => stopServices().catch(showErr));
+    $("btn-provision-agent").addEventListener("click", () =>
+      provisionAgent().catch(showErr)
+    );
     $("btn-open-mon").addEventListener("click", () => openMonitoring().catch(showErr));
     $("btn-open-st").addEventListener("click", () => openStreamlit().catch(showErr));
     const openActions = $("btn-open-actions");

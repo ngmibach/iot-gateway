@@ -7,30 +7,18 @@ from typing import Mapping
 
 # K11: cAdvisor port is pinned at 8080 on the gateway; do not re-parameterize here.
 _DEFAULT_TEMPLATE = """# Generated — do not edit by hand
+# Default path scrapes the monolithic gateway agent (no Docker / no cAdvisor).
 global:
   scrape_interval: 15s
 
 scrape_configs:
-  - job_name: 'node'
+  - job_name: 'iot-gateway-agent'
     scrape_interval: 5s
+    metrics_path: /metrics
     static_configs:
-      - targets: ['{{GATEWAY_IP}}:9100']
+      - targets: ['{{GATEWAY_IP}}:9139']
         labels:
           instance: 'gateway'
-
-  - job_name: 'cadvisor'
-    static_configs:
-      - targets: ['{{GATEWAY_IP}}:8080']
-        labels:
-          instance: 'gateway'
-
-  - job_name: 'node-exporter-textfile'
-    static_configs:
-      - targets: ['{{GATEWAY_IP}}:9100']
-    metric_relabel_configs:
-      - source_labels: [__name__]
-        regex: 'mqtt_connected_sensor.*'
-        action: keep
 """
 
 

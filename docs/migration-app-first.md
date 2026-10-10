@@ -14,11 +14,11 @@ This project is moving from a three-folder Docker Compose lab (gateway + monitor
 
 ## Operator checklist
 
-1. Install/run `apps/control-service` on the operator PC (`python -m api` on `127.0.0.1:9137`).
-2. Point Streamlit (host process) at `CONTROL_SERVICE_URL`; leave `USE_LEGACY_GITEA` unset.
-3. Provision the gateway over SSH (bundle upload + compose + probes; agent last).
-4. Register devices via Actions (not Gitea workflows).
-5. Collect sanitized support bundles from `support.write_support_bundle` when debugging.
+1. Download the desktop app from GitHub Releases (`desktop-latest`) — no Docker on the PC.
+2. Wizard → **Prepare monitoring** (native Loki/Prometheus) → SSH pin/key → **Install gateway agent** (native Mosquitto + monolithic agent; no Docker on the device).
+3. Register devices via Actions (not Gitea workflows).
+4. Collect sanitized support bundles from `support.write_support_bundle` when debugging.
+5. Legacy compose gateways: set `IOTGW_GATEWAY_BACKEND=compose` only if you intentionally keep Docker on the device.
 
 ## Gitea
 
@@ -26,9 +26,9 @@ This project is moving from a three-folder Docker Compose lab (gateway + monitor
 - **Brownfield:** `docker compose --profile legacy-gitea up` under `monitoring/`.
 - Workflows under `monitoring/scripts/gitea_actions/` are legacy; SSH playbooks in `apps/control-service/actions/` replace them.
 
-## Node-RED (K17)
+## Decrypt path (K17)
 
-Node-RED stays **mandatory** on the gateway in v1 (decrypt → `sensor_data.log` for IDS/dashboards). Do not remove it from `gateway/docker-compose.yaml` during migration.
+The **decrypt → `sensor_data.log` path** stays mandatory. On the default (Docker-free) path it runs inside the monolithic `iot-gateway-agent`. Legacy compose installs may still use Node-RED.
 
 ## Artifact signing (K16 / PR 14)
 

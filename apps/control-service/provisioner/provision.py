@@ -45,8 +45,10 @@ class ProvisionConfig:
     loki_probe_retries: int = DEFAULT_LOKI_PROBE_RETRIES
     # On post-upload failure, restore bak unless keep_failed is set.
     keep_failed: bool = False
-    # Compose-only in v1 (systemd needs a provisioned venv — deferred).
+    # Legacy compose agent overlay (only when backend=compose).
     agent_mode: str = "auto"  # auto | compose | skip
+    # Default: monolithic agent (no Docker). Set backend=compose for legacy.
+    backend: str = "agent"  # agent | compose
 
 
 @dataclass
@@ -57,14 +59,21 @@ class ProvisionResult:
     agent_mode: Optional[str] = None
     probes: dict[str, str] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
+    backend: str = "agent"
 
 
 def provision(ssh: SSHSession, config: ProvisionConfig) -> ProvisionResult:
     """Run the full provision sequence against an open SSH session."""
+    import os
+
     root = config.repo_root or repo_root_from_here()
     gateway_src = Path(config.gateway_src) if config.gateway_src else root / "gateway"
     install_root = config.install_root.rstrip("/") or DEFAULT_INSTALL_ROOT
     notes: list[str] = []
+
+    backend = (config.backend or os.environ.get("IOTGW_GATEWAY_BACKEND") or "agent").strip().lower()
+    if backend == "agent":
+        return _provision_agent(ssh, config, root=root, gateway_src=gateway_src)
 
     _preflight_docker(ssh)
     _preflight_disk(ssh, install_root, config.min_free_bytes)
@@ -165,6 +174,53 @@ def provision(ssh: SSHSession, config: ProvisionConfig) -> ProvisionResult:
         agent_mode=agent_mode,
         probes=probes,
         notes=notes,
+        backend="compose",
+    )
+
+
+def _provision_agent(
+    ssh: SSHSession,
+    config: ProvisionConfig,
+    *,
+    root: Path,
+    gateway_src: Path,
+) -> ProvisionResult:
+    """Docker-free path: apt mosquitto + monolithic agent systemd unit."""
+    from .agent_install import (
+        DEFAULT_AGENT_ROOT,
+        AgentInstallError,
+        provision_monolithic_agent,
+    )
+
+    notes: list[str] = []
+    _preflight_disk(ssh, DEFAULT_AGENT_ROOT, config.min_free_bytes)
+    agent_src = gateway_src / "agent"
+    try:
+        notes.extend(
+            provision_monolithic_agent(
+                ssh,
+                monitoring_ip=config.monitoring_ip,
+                gateway_ip=config.gateway_ip,
+                agent_src=agent_src,
+            )
+        )
+    except AgentInstallError as e:
+        raise ProvisionError(str(e)) from e
+
+    probes = {
+        "agent_health": f"http://{config.gateway_ip}:9139/v1/health",
+        "agent_metrics": f"http://{config.gateway_ip}:9139/metrics",
+        "mqtt": f"{config.gateway_ip}:1883",
+    }
+    notes.append("backend=agent (no Docker on gateway)")
+    return ProvisionResult(
+        install_root=DEFAULT_AGENT_ROOT,
+        backup_path=None,
+        agent_installed=True,
+        agent_mode="systemd",
+        probes=probes,
+        notes=notes,
+        backend="agent",
     )
 
 

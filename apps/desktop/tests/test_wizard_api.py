@@ -49,10 +49,14 @@ class WizardApiTests(unittest.TestCase):
 
     def test_env_and_static(self) -> None:
         env = self._get("/api/wizard/env")
-        self.assertIn("docker", env)
+        self.assertIn("telemetry", env)
+        self.assertEqual(env["telemetry"].get("backend"), "native")
+        self.assertFalse(env.get("docker_required", True))
         with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
             html = resp.read().decode("utf-8")
         self.assertIn("Setup Wizard", html)
+        self.assertIn("Local monitoring", html)
+        self.assertNotIn("lab.html", html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             html = resp.read().decode("utf-8")
         self.assertIn("Actions", html)

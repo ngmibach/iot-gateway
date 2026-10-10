@@ -36,14 +36,13 @@ class ComposeScrapeTests(unittest.TestCase):
         self.assertIn("3100:3100", desktop)
         self.assertIn("9090:9090", desktop)
 
-    def test_render_scrape_targets_hardcodes_8080(self) -> None:
+    def test_render_scrape_targets_agent_metrics(self) -> None:
         text = render_prometheus_scrape("192.168.1.50")
-        self.assertIn("192.168.1.50:9100", text)
-        self.assertIn("192.168.1.50:8080", text)
+        self.assertIn("192.168.1.50:9139", text)
+        self.assertIn("iot-gateway-agent", text)
+        self.assertIn("metrics_path: /metrics", text)
         self.assertNotIn("{{GATEWAY_IP}}", text)
         self.assertNotIn("CADVISOR_PORT", text)
-        self.assertIn("cadvisor", text)
-        self.assertIn("mqtt_connected_sensor", text)
 
     def test_write_stack_files(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

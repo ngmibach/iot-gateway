@@ -16,7 +16,7 @@ EXCLUDE_DIR_NAMES = {
     ".venv",
     "venv",
 }
-EXCLUDE_SUFFIXES = {".pyc", ".pyo"}
+EXCLUDE_SUFFIXES = {".pyc", ".pyo", ".db"}
 
 PROMTAIL_REL = Path("promtail") / "config" / "promtail-config.yaml"
 FORBIDDEN_PROMTAIL_MARKERS = ("172.17.0.1", "{{")

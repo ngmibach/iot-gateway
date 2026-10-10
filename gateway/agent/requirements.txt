@@ -1,2 +1,4 @@
-# Optional: without zeroconf the agent still serves HTTP and logs mDNS disabled.
+# Monolithic gateway agent (no Docker).
 zeroconf>=0.132.0,<1
+paho-mqtt>=2.0,<3
+cryptography>=42.0

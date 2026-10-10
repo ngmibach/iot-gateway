@@ -46,6 +46,20 @@ class WizardState:
         self.lock = threading.Lock()
         self.admin = admin_auth.AdminGate()
         self.last_signing_export: str | None = None
+        self._telemetry = None
+
+    @property
+    def telemetry(self):
+        """Lazy native Loki/Prometheus manager (no Docker on the operator PC)."""
+        if self._telemetry is None:
+            from telemetry.native import (  # type: ignore[import-not-found]
+                NativeTelemetryManager,
+            )
+
+            from .paths import ensure_data_dir
+
+            self._telemetry = NativeTelemetryManager(ensure_data_dir() / "telemetry")
+        return self._telemetry
 
 
 STATE = WizardState()
@@ -127,7 +141,88 @@ def _handle_api(
         qs = parse_qs(query)
 
         if method == "GET" and path == "/api/wizard/env":
-            _json_response(handler, 200, detect.environment_snapshot())
+            snap = detect.environment_snapshot()
+            try:
+                tel = STATE.telemetry.snapshot()
+                snap["telemetry"] = {
+                    "backend": "native",
+                    "ready": tel.ready,
+                    "binaries_present": tel.binaries_present,
+                    "loki_running": tel.loki_running,
+                    "prometheus_running": tel.prometheus_running,
+                    "detail": tel.detail,
+                    "progress": tel.progress,
+                    "hint": (
+                        "Local Loki + Prometheus run as app-managed processes. "
+                        "No Docker is required on this PC."
+                        if tel.ready
+                        else "Click Prepare monitoring — the app downloads Loki and "
+                        "Prometheus once and starts them (no browser download)."
+                    ),
+                }
+            except Exception as e:  # noqa: BLE001
+                snap["telemetry"] = {
+                    "backend": "native",
+                    "ready": False,
+                    "detail": str(e),
+                    "hint": "Native telemetry unavailable — see detail.",
+                }
+            # Docker is legacy/optional; default path does not require it.
+            snap["docker_required"] = False
+            _json_response(handler, 200, snap)
+            return
+
+        if method == "POST" and path == "/api/wizard/telemetry/ensure":
+            body = _read_json(handler)
+            gateway_ip = str(body.get("gateway_ip") or "").strip() or None
+            force = bool(body.get("force", False))
+            try:
+                if force or not STATE.telemetry.snapshot().binaries_present:
+                    STATE.telemetry.ensure_binaries(force=force)
+                settings = load_settings()
+                gw = gateway_ip or str(settings.get("gateway_ip") or "127.0.0.1")
+                st = STATE.telemetry.start(gateway_ip=gw, wait=True, ensure_bins=True)
+                tel = STATE.telemetry.snapshot()
+                _json_response(
+                    handler,
+                    200,
+                    {
+                        "ok": bool(st.running),
+                        "telemetry": {
+                            "backend": "native",
+                            "ready": tel.ready,
+                            "binaries_present": tel.binaries_present,
+                            "loki_running": tel.loki_running,
+                            "prometheus_running": tel.prometheus_running,
+                            "detail": tel.detail or st.detail,
+                            "progress": tel.progress,
+                        },
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                _json_response(handler, 500, {"error": str(e), "ok": False})
+            return
+
+        if method == "POST" and path == "/api/wizard/telemetry/stop":
+            STATE.telemetry.stop()
+            _json_response(handler, 200, {"ok": True})
+            return
+
+        if method == "GET" and path == "/api/wizard/telemetry/status":
+            tel = STATE.telemetry.snapshot()
+            _json_response(
+                handler,
+                200,
+                {
+                    "backend": "native",
+                    "ready": tel.ready,
+                    "binaries_present": tel.binaries_present,
+                    "loki_running": tel.loki_running,
+                    "prometheus_running": tel.prometheus_running,
+                    "detail": tel.detail,
+                    "progress": tel.progress,
+                },
+            )
             return
 
         if method == "GET" and path == "/api/wizard/control":
@@ -411,7 +506,91 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True, "url": url})
             return
 
-        # --- Lab (optional fake_sensor; not production) ---
+        if method == "POST" and path == "/api/wizard/provision":
+            # Docker-free monolithic agent install over SSH (uses pinned key from step 3).
+            body = _read_json(handler)
+            settings = load_settings()
+            host = str(body.get("host") or settings.get("ssh_host") or "").strip()
+            username = str(
+                body.get("username") or settings.get("ssh_user") or "ubuntu"
+            ).strip()
+            port = int(body.get("port") or settings.get("ssh_port") or 22)
+            gateway_id = str(
+                body.get("gateway_id") or settings.get("default_gateway_id") or "gateway"
+            ).strip()
+            monitoring_ip = str(
+                body.get("monitoring_ip") or settings.get("monitoring_ip") or ""
+            ).strip()
+            gateway_ip = str(
+                body.get("gateway_ip") or settings.get("gateway_ip") or host
+            ).strip()
+            if not host:
+                _json_response(handler, 400, {"error": "SSH host required (complete step 3)"})
+                return
+            if not monitoring_ip:
+                _json_response(
+                    handler,
+                    400,
+                    {"error": "MONITORING_IP required (complete step 2)"},
+                )
+                return
+            key_path = ssh_setup.key_paths_for(gateway_id).private
+            if not key_path.is_file():
+                _json_response(
+                    handler,
+                    400,
+                    {
+                        "error": "SSH key not installed yet — pin host key and install ed25519 first",
+                    },
+                )
+                return
+            try:
+                from provisioner.provision import (  # type: ignore[import-not-found]
+                    ProvisionConfig,
+                    provision,
+                )
+                from provisioner.ssh import ParamikoSSHSession  # type: ignore[import-not-found]
+
+                ssh = ParamikoSSHSession(
+                    host,
+                    username,
+                    key_filename=str(key_path),
+                    port=port,
+                )
+                try:
+                    result = provision(
+                        ssh,
+                        ProvisionConfig(
+                            gateway_ip=gateway_ip or host,
+                            monitoring_ip=monitoring_ip,
+                            backend="agent",
+                        ),
+                    )
+                finally:
+                    ssh.close()
+                settings["gateway_ip"] = gateway_ip or host
+                settings["ssh_host"] = host
+                settings["ssh_user"] = username
+                settings["ssh_port"] = port
+                settings["provision_backend"] = "agent"
+                save_settings(settings)
+                _json_response(
+                    handler,
+                    200,
+                    {
+                        "ok": True,
+                        "backend": result.backend,
+                        "install_root": result.install_root,
+                        "agent_installed": result.agent_installed,
+                        "notes": result.notes,
+                        "probes": result.probes,
+                    },
+                )
+            except Exception as e:  # noqa: BLE001
+                _json_response(handler, 500, {"error": str(e), "ok": False})
+            return
+
+        # --- Lab (optional fake_sensor; not production) — UI hidden this build ---
         if method == "GET" and path == "/api/lab/defaults":
             settings = load_settings()
             from lab.lifecycle import (  # type: ignore[import-not-found]
