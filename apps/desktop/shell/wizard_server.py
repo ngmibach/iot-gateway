@@ -180,19 +180,26 @@ def _handle_api(
                 settings = load_settings()
                 gw = gateway_ip or str(settings.get("gateway_ip") or "127.0.0.1")
                 st = STATE.telemetry.start(gateway_ip=gw, wait=True, ensure_bins=True)
+                # Prefer start() result — snapshot used to overwrite Ready with
+                # binary-fetch progress ("already present") while child handles
+                # were unset after a previous session.
                 tel = STATE.telemetry.snapshot()
+                ready = bool(st.running) or bool(tel.ready)
+                detail = st.detail or tel.detail or ""
                 _json_response(
                     handler,
                     200,
                     {
-                        "ok": bool(st.running),
+                        "ok": ready,
                         "telemetry": {
                             "backend": "native",
-                            "ready": tel.ready,
+                            "ready": ready,
                             "binaries_present": tel.binaries_present,
-                            "loki_running": tel.loki_running,
-                            "prometheus_running": tel.prometheus_running,
-                            "detail": tel.detail or st.detail,
+                            "loki_running": tel.loki_running
+                            or bool(getattr(st.loki, "ok", False)),
+                            "prometheus_running": tel.prometheus_running
+                            or bool(getattr(st.prometheus, "ok", False)),
+                            "detail": detail,
                             "progress": tel.progress,
                         },
                     },

@@ -106,12 +106,16 @@
         body: JSON.stringify({ gateway_ip: gw || undefined }),
       });
       const t = data.telemetry || {};
-      badge($("telemetry-badge"), !!t.ready, t.ready ? "Ready" : "Failed");
-      $("telemetry-hint").textContent = t.detail || t.progress || "";
-      $("hdr-status").innerHTML = t.ready
+      const ready = !!(data.ok || t.ready);
+      badge($("telemetry-badge"), ready, ready ? "Ready" : "Failed");
+      // Prefer readiness detail — never show binary-fetch progress as the result.
+      $("telemetry-hint").textContent = ready
+        ? t.detail || "Loki and Prometheus are running."
+        : t.detail || "Install failed.";
+      $("hdr-status").innerHTML = ready
         ? '<span class="badge ok">Ready</span>'
         : '<span class="badge warn">Setup</span>';
-      if (!data.ok) throw new Error(t.detail || "Install failed");
+      if (!ready) throw new Error(t.detail || "Install failed");
     } catch (e) {
       badge($("telemetry-badge"), false, "Failed");
       $("telemetry-hint").textContent = String(e.message || e);

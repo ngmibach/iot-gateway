@@ -12,11 +12,8 @@ from typing import Optional
 
 from .binary_fetch import BinaryFetchError, ensure_telemetry_binaries
 from .lifecycle import BackendStatus
-from .readiness import wait_ready
+from .readiness import check_loki, check_prometheus, wait_ready
 from .scrape import render_prometheus_scrape
-
-_ASSETS = Path(__file__).resolve().parent / "assets"
-_LOKI_TEMPLATE = _ASSETS / "loki-config.yaml"
 
 
 def _render_loki_config(data_root: Path) -> str:
@@ -135,6 +132,17 @@ class NativeTelemetryManager:
     def _running(self, proc: Optional[subprocess.Popen]) -> bool:
         return proc is not None and proc.poll() is None
 
+    def _http_ready(
+        self,
+        *,
+        loki_url: str = "http://127.0.0.1:3100",
+        prometheus_url: str = "http://127.0.0.1:9090",
+        timeout: float = 2.0,
+    ) -> tuple[bool, object, object]:
+        loki = check_loki(loki_url, timeout=timeout)
+        prom = check_prometheus(prometheus_url, timeout=timeout)
+        return bool(loki.ok and prom.ok), loki, prom
+
     def status(
         self,
         *,
@@ -143,37 +151,71 @@ class NativeTelemetryManager:
         probe: bool = True,
     ) -> BackendStatus:
         bins_ok = self._bin("loki").is_file() and self._bin("prometheus").is_file()
-        loki_up = self._running(self._loki)
-        prom_up = self._running(self._prom)
-        detail = self.last_progress
-        if not bins_ok:
-            detail = detail or "binaries not downloaded yet"
+        child_loki = self._running(self._loki)
+        child_prom = self._running(self._prom)
         status = BackendStatus(
-            running=loki_up and prom_up,
-            compose_ps=f"native loki={'up' if loki_up else 'down'} "
-            f"prometheus={'up' if prom_up else 'down'} binaries={'yes' if bins_ok else 'no'}",
-            detail=detail,
+            running=False,
+            compose_ps=(
+                f"native loki_child={'up' if child_loki else 'down'} "
+                f"prometheus_child={'up' if child_prom else 'down'} "
+                f"binaries={'yes' if bins_ok else 'no'}"
+            ),
+            detail="",
         )
-        if probe and loki_up and prom_up:
-            ready = wait_ready(
-                loki_url=loki_url, prometheus_url=prometheus_url, timeout_s=5.0
+        if not bins_ok:
+            status.detail = "Monitoring binaries are not installed yet."
+            return status
+        if not probe:
+            status.running = child_loki and child_prom
+            status.detail = (
+                "Loki and Prometheus child processes are running."
+                if status.running
+                else "Monitoring processes are not running."
             )
-            status.loki = ready.get("loki")
-            status.prometheus = ready.get("prometheus")
-            status.running = all(r.ok for r in ready.values()) if ready else False
+            return status
+
+        ok, loki, prom = self._http_ready(
+            loki_url=loki_url, prometheus_url=prometheus_url
+        )
+        status.loki = loki
+        status.prometheus = prom
+        status.running = ok
+        if ok:
+            status.detail = "Loki and Prometheus are running."
+        else:
+            parts = []
+            if not loki.ok:
+                parts.append(f"loki: {loki.detail}")
+            if not prom.ok:
+                parts.append(f"prometheus: {prom.detail}")
+            status.detail = "; ".join(parts) or "Monitoring is not ready."
         return status
 
     def snapshot(self) -> NativeTelemetryStatus:
         st = self.status(probe=True)
+        ok, loki, prom = self._http_ready()
         return NativeTelemetryStatus(
             ready=bool(st.running),
             binaries_present=self._bin("loki").is_file()
             and self._bin("prometheus").is_file(),
-            loki_running=self._running(self._loki),
-            prometheus_running=self._running(self._prom),
+            loki_running=bool(getattr(loki, "ok", False)) or self._running(self._loki),
+            prometheus_running=bool(getattr(prom, "ok", False))
+            or self._running(self._prom),
             detail=st.detail or st.compose_ps,
             progress=self.last_progress,
         )
+
+    def _popen_kwargs(self) -> dict:
+        kwargs: dict = {
+            "cwd": str(self.root),
+            "stderr": subprocess.STDOUT,
+        }
+        if os.name == "nt":
+            # Hide Loki/Prometheus console windows on Windows.
+            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        else:
+            kwargs["start_new_session"] = True
+        return kwargs
 
     def start(
         self,
@@ -190,6 +232,18 @@ class NativeTelemetryManager:
                 return BackendStatus(
                     running=False, compose_ps="native", detail=str(e)
                 )
+
+        # Already serving? Treat as success (orphans from a previous session, etc.).
+        already_ok, loki_p, prom_p = self._http_ready()
+        if already_ok:
+            return BackendStatus(
+                running=True,
+                compose_ps="native (already running)",
+                detail="Loki and Prometheus are running.",
+                loki=loki_p,
+                prometheus=prom_p,
+            )
+
         self.write_configs(gateway_ip=gateway_ip or "127.0.0.1")
         loki_bin = self._bin("loki")
         prom_bin = self._bin("prometheus")
@@ -202,25 +256,20 @@ class NativeTelemetryManager:
 
         log_dir = self.root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
+        popen_kwargs = self._popen_kwargs()
 
-        popen_kwargs: dict = {
-            "cwd": str(self.root),
-            "stderr": subprocess.STDOUT,
-        }
-        if os.name == "nt":
-            # Hide Loki/Prometheus console windows on Windows.
-            popen_kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        else:
-            popen_kwargs["start_new_session"] = True
-
-        if not self._running(self._loki):
+        if not self._running(self._loki) and not check_loki(
+            "http://127.0.0.1:3100", timeout=1.0
+        ).ok:
             loki_log = open(log_dir / "loki.log", "a", encoding="utf-8")  # noqa: SIM115
             self._loki = subprocess.Popen(
                 [str(loki_bin), f"-config.file={self.config_dir / 'loki-config.yaml'}"],
                 stdout=loki_log,
                 **popen_kwargs,
             )
-        if not self._running(self._prom):
+        if not self._running(self._prom) and not check_prometheus(
+            "http://127.0.0.1:9090", timeout=1.0
+        ).ok:
             prom_log = open(log_dir / "prometheus.log", "a", encoding="utf-8")  # noqa: SIM115
             self._prom = subprocess.Popen(
                 [
@@ -240,16 +289,18 @@ class NativeTelemetryManager:
                 prometheus_url="http://127.0.0.1:9090",
                 timeout_s=wait_timeout_s,
             )
-            st = self.status(probe=False)
-            st.loki = ready.get("loki")
-            st.prometheus = ready.get("prometheus")
-            st.running = bool(ready) and all(r.ok for r in ready.values())
+            st = BackendStatus(
+                running=bool(ready) and all(r.ok for r in ready.values()),
+                compose_ps="native",
+                loki=ready.get("loki"),
+                prometheus=ready.get("prometheus"),
+            )
             if st.running:
                 st.detail = "Loki and Prometheus are running."
             else:
                 st.detail = self._failure_detail(ready)
             return st
-        return self.status(probe=False)
+        return self.status(probe=True)
 
     def _failure_detail(self, ready: dict) -> str:
         """Build an operator-facing error from probes + recent log tails."""
@@ -269,7 +320,6 @@ class NativeTelemetryManager:
                 text = path.read_text(encoding="utf-8", errors="replace")
             except OSError:
                 continue
-            # Prefer the last error line if present.
             err_lines = [
                 ln.strip()
                 for ln in text.splitlines()
@@ -310,4 +360,7 @@ def default_native_root() -> Path:
     base = os.environ.get("IOTGW_DATA_DIR", "").strip()
     if base:
         return Path(base).expanduser() / "telemetry"
+    if os.name == "nt":
+        appdata = os.environ.get("APPDATA") or str(Path.home())
+        return Path(appdata) / "IoTGatewayMonitor" / "telemetry"
     return Path.home() / ".local" / "share" / "iot-gateway-monitor" / "telemetry"
