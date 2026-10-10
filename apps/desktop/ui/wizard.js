@@ -195,7 +195,12 @@
 
   async function provisionAgent() {
     const msg = $("provision-msg");
-    msg.innerHTML = `<div class="okmsg">Provisioning gateway agent (may take a few minutes)…</div>`;
+    const sudoPass = ($("sudo-pass") && $("sudo-pass").value) || "";
+    if (!sudoPass.trim()) {
+      msg.innerHTML = `<div class="err">Enter the gateway sudo password before Install.</div>`;
+      throw new Error("sudo password required");
+    }
+    msg.innerHTML = `<div class="okmsg">Provisioning gateway agent (apt + systemd; may take a few minutes)…</div>`;
     try {
       const data = await api("/api/wizard/provision", {
         method: "POST",
@@ -205,13 +210,16 @@
           port: Number($("ssh-port").value) || undefined,
           gateway_id: $("ssh-gid").value.trim() || undefined,
           gateway_ip: $("gateway-ip").value.trim() || undefined,
+          sudo_password: sudoPass,
         }),
       });
+      if ($("sudo-pass")) $("sudo-pass").value = "";
       const notes = (data.notes || []).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
       msg.innerHTML = `<div class="okmsg">Agent installed (${escapeHtml(
         data.backend || "agent"
       )})</div><ul>${notes}</ul>`;
     } catch (e) {
+      if ($("sudo-pass")) $("sudo-pass").value = "";
       msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
       throw e;
     }

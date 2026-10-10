@@ -524,6 +524,8 @@ def _handle_api(
             gateway_ip = str(
                 body.get("gateway_ip") or settings.get("gateway_ip") or host
             ).strip()
+            # Never persist sudo password to settings / disk / logs.
+            sudo_password = str(body.get("sudo_password") or "")
             if not host:
                 _json_response(handler, 400, {"error": "SSH host required (complete step 3)"})
                 return
@@ -532,6 +534,15 @@ def _handle_api(
                     handler,
                     400,
                     {"error": "MONITORING_IP required (complete step 2)"},
+                )
+                return
+            if not sudo_password.strip():
+                _json_response(
+                    handler,
+                    400,
+                    {
+                        "error": "Gateway sudo password required — used for apt/systemd install only",
+                    },
                 )
                 return
             key_path = ssh_setup.key_paths_for(gateway_id).private
@@ -564,10 +575,12 @@ def _handle_api(
                             gateway_ip=gateway_ip or host,
                             monitoring_ip=monitoring_ip,
                             backend="agent",
+                            sudo_password=sudo_password,
                         ),
                     )
                 finally:
                     ssh.close()
+                    sudo_password = ""  # drop local reference ASAP
                 settings["gateway_ip"] = gateway_ip or host
                 settings["ssh_host"] = host
                 settings["ssh_user"] = username

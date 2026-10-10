@@ -106,6 +106,11 @@
       <h2>5. Launch + provision gateway</h2>
       <p>Starts the local control API on <code>127.0.0.1:9137</code>. Provision installs the <strong>monolithic gateway agent</strong> over SSH (native Mosquitto + agent — <em>no Docker</em> on the device).</p>
       <div class="row">
+        <label for="sudo-pass">Gateway sudo password *</label>
+        <input id="sudo-pass" type="password" autocomplete="new-password" placeholder="Used only for apt / systemd install" />
+      </div>
+      <p class="note-box">The sudo password is sent over the existing SSH session and used only as <code>sudo -S</code> stdin for package install. It is not saved on this PC.</p>
+      <div class="row">
         <button class="primary" id="btn-start-svc">Start control service</button>
         <button class="primary" id="btn-provision-agent">Install / update gateway agent</button>
         <button class="secondary" id="btn-open-mon">Open Monitoring</button>

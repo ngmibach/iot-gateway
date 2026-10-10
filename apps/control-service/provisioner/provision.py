@@ -49,6 +49,8 @@ class ProvisionConfig:
     agent_mode: str = "auto"  # auto | compose | skip
     # Default: monolithic agent (no Docker). Set backend=compose for legacy.
     backend: str = "agent"  # agent | compose
+    # UI-provided sudo password for apt/systemd on the gateway (never persisted).
+    sudo_password: Optional[str] = None
 
 
 @dataclass
@@ -202,6 +204,7 @@ def _provision_agent(
                 monitoring_ip=config.monitoring_ip,
                 gateway_ip=config.gateway_ip,
                 agent_src=agent_src,
+                sudo_password=str(config.sudo_password or ""),
             )
         )
     except AgentInstallError as e:

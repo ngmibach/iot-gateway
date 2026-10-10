@@ -39,8 +39,17 @@ class FakeSSH:
         self._handlers.append((substr, contains, result))
         return self
 
-    def run(self, command: str, *, timeout: float = 120.0) -> CommandResult:
+    def run(
+        self,
+        command: str,
+        *,
+        timeout: float = 120.0,
+        stdin: str | None = None,
+    ) -> CommandResult:
         self.commands.append(command)
+        if stdin is not None:
+            self.stdins = getattr(self, "stdins", [])
+            self.stdins.append(stdin)
         for substr, contains, result in reversed(self._handlers):
             hit = (substr in command) if contains else (command == substr)
             if hit:
@@ -223,17 +232,85 @@ class ProvisionFlowTests(unittest.TestCase):
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))
+        ssh.when("import ensurepip", CommandResult(0, "OK\n", ""))
         ssh.when("command -v python3", CommandResult(0, "/usr/bin/python3\n", ""))
         ssh.when("python3 -m venv", CommandResult(0, "", ""))
         ssh.when("pip install", CommandResult(0, "", ""))
         ssh.when("systemctl", CommandResult(0, "", ""))
-        ssh.when("curl -fsS http://127.0.0.1:9139/v1/health", CommandResult(0, '{"status":"ok"}', ""))
-        ssh.when("sudo -n", CommandResult(0, "", ""))
-        result = provision(ssh, self._config(backend="agent", agent_mode="auto"))
+        ssh.when(
+            "curl -fsS http://127.0.0.1:9139/v1/health",
+            CommandResult(0, '{"status":"ok"}', ""),
+        )
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        result = provision(
+            ssh,
+            self._config(
+                backend="agent",
+                agent_mode="auto",
+                sudo_password="test-sudo-secret",
+            ),
+        )
         self.assertEqual(result.backend, "agent")
         self.assertTrue(result.agent_installed)
         self.assertTrue(any("no Docker" in n for n in result.notes))
         self.assertFalse(any("docker info" in c for c in ssh.commands))
+        # Password must never appear on remote argv.
+        self.assertFalse(any("test-sudo-secret" in c for c in ssh.commands))
+
+    def test_agent_backend_apt_uses_sudo_stdin(self) -> None:
+        ssh = _ok_ssh()
+        ssh.when("command -v mosquitto", CommandResult(1, "", "missing"))
+        ssh.when("import ensurepip", CommandResult(1, "", "missing"))
+        ssh.when("command -v python3", CommandResult(0, "/usr/bin/python3\n", ""))
+        ssh.when("python3 -m venv", CommandResult(0, "", ""))
+        ssh.when("pip install", CommandResult(0, "", ""))
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        # After apt, mosquitto becomes available — FakeSSH matches last handler first,
+        # so append a successful check after installs by using contains on later calls.
+        # Simpler: make "command -v mosquitto" return OK always after first fail via custom.
+        calls = {"n": 0}
+
+        def _run(command, *, timeout=120.0, stdin=None):
+            ssh.commands.append(command)
+            if stdin is not None:
+                ssh.stdins = getattr(ssh, "stdins", [])
+                ssh.stdins.append(stdin)
+            if "command -v mosquitto" in command:
+                calls["n"] += 1
+                if calls["n"] == 1:
+                    return CommandResult(1, "", "missing")
+                return CommandResult(0, "OK\n", "")
+            if "import ensurepip" in command:
+                return CommandResult(1, "", "")
+            if "curl -fsS http://127.0.0.1:9139" in command:
+                return CommandResult(0, '{"status": "ok"}', "")
+            if "sudo -S" in command:
+                return CommandResult(0, "", "")
+            if "command -v python3" in command:
+                return CommandResult(0, "/usr/bin/python3\n", "")
+            if "df -Pk" in command:
+                return CommandResult(0, "/dev/sda1 20000000 1000000 5000000 5% /opt\n", "")
+            return CommandResult(0, "", "")
+
+        ssh.run = _run  # type: ignore[method-assign]
+        result = provision(
+            ssh,
+            self._config(
+                backend="agent",
+                sudo_password="s3cret-sudo",
+            ),
+        )
+        self.assertEqual(result.backend, "agent")
+        self.assertTrue(any("installed via apt" in n for n in result.notes))
+        self.assertTrue(any("sudo -S" in c for c in ssh.commands))
+        self.assertFalse(any("s3cret-sudo" in c for c in ssh.commands))
+        self.assertTrue(any("s3cret-sudo" in s for s in getattr(ssh, "stdins", [])))
+
+    def test_agent_backend_requires_sudo_password(self) -> None:
+        ssh = _ok_ssh()
+        with self.assertRaises(ProvisionError) as ctx:
+            provision(ssh, self._config(backend="agent", sudo_password=""))
+        self.assertIn("sudo password", str(ctx.exception).lower())
 
     def test_happy_path_skips_agent(self) -> None:
         ssh = _ok_ssh()

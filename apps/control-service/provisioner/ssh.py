@@ -27,7 +27,13 @@ class CommandResult:
 class SSHSession(Protocol):
     """Minimal remote ops used by the provisioner (mockable in tests)."""
 
-    def run(self, command: str, *, timeout: float = 120.0) -> CommandResult: ...
+    def run(
+        self,
+        command: str,
+        *,
+        timeout: float = 120.0,
+        stdin: Optional[str] = None,
+    ) -> CommandResult: ...
 
     def upload_file(
         self, local_path: Path, remote_path: str, *, mode: int = 0o644
@@ -96,12 +102,25 @@ class ParamikoSSHSession:
         else:  # pragma: no cover
             raise SSHError(f"SSH connect failed for {host}: {last_err}")
 
-    def run(self, command: str, *, timeout: float = 120.0) -> CommandResult:
-        stdin, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+    def run(
+        self,
+        command: str,
+        *,
+        timeout: float = 120.0,
+        stdin: Optional[str] = None,
+    ) -> CommandResult:
+        # Secrets (e.g. sudo password) must go on stdin — never on remote argv.
+        chan_in, stdout, stderr = self._client.exec_command(command, timeout=timeout)
         try:
-            stdin.close()
+            if stdin is not None:
+                chan_in.write(stdin if stdin.endswith("\n") else stdin + "\n")
+                chan_in.flush()
+            chan_in.channel.shutdown_write()
         except Exception:  # noqa: BLE001
-            pass
+            try:
+                chan_in.close()
+            except Exception:  # noqa: BLE001
+                pass
         out = stdout.read().decode("utf-8", errors="replace")
         err = stderr.read().decode("utf-8", errors="replace")
         code = stdout.channel.recv_exit_status()

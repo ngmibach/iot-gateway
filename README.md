@@ -28,7 +28,7 @@ No Docker on the operator PC. No Docker on the gateway. No Lab / fake-sensor pan
 2. **NIC** — pick MONITORING_IP (LAN address the gateway will push logs to).
 3. **SSH** — pin host key, install ed25519 key (one-time password).
 4. **Firewall** (Windows) — optional guided checklist for Loki `:3100`.
-5. **Launch** — start control service, then **Install / update gateway agent** (apt mosquitto + agent over SSH; no Docker on the device).
+5. **Launch** — start control service, enter the **gateway sudo password**, then **Install / update gateway agent** (apt packages + agent over SSH via `sudo -S`; password is not saved on the PC; no Docker on the device).
 
 Then use **Actions** (register devices / certs) and **Monitoring**.
 
