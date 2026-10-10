@@ -10,7 +10,7 @@ ARCH="${IOTGW_ARCH:-x86_64}"
 
 cd "$ROOT"
 python3 -m pip install -U pip wheel
-python3 -m pip install pyinstaller \
+python3 -m pip install pyinstaller pillow \
   -r "$DESKTOP/requirements.txt" \
   -r "$ROOT/apps/control-service/requirements.txt"
 
@@ -32,7 +32,11 @@ if [[ ! -x "$BIN_DIR/IoTGatewayMonitor" ]]; then
 fi
 
 rm -rf "$APPDIR"
-mkdir -p "$APPDIR/usr/bin" "$APPDIR/usr/share/applications" "$APPDIR/usr/share/icons/hicolor/256x256/apps"
+mkdir -p \
+  "$APPDIR/usr/bin" \
+  "$APPDIR/usr/lib" \
+  "$APPDIR/usr/share/applications" \
+  "$APPDIR/usr/share/icons/hicolor/256x256/apps"
 
 # Payload: whole onedir next to a thin AppRun that execs the binary.
 cp -a "$BIN_DIR" "$APPDIR/usr/lib/iot-gateway-monitor"

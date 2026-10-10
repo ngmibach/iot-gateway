@@ -9,7 +9,8 @@ OUT="${IOTGW_DIST:-$DESKTOP/dist}"
 
 cd "$ROOT"
 python -m pip install -U pip wheel
-python -m pip install pyinstaller \
+# Pillow converts icon.png → .ico for the Windows EXE resource.
+python -m pip install pyinstaller pillow \
   -r "$DESKTOP/requirements.txt" \
   -r "$ROOT/apps/control-service/requirements.txt"
 
