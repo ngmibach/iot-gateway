@@ -1,11 +1,24 @@
-/* Setup Wizard front-end — talks to /api/wizard/* on the shell server. */
+/* Setup Wizard — /api/wizard/* */
 (function () {
-  const STEPS = ["Monitoring", "NIC", "SSH", "Firewall", "Launch"];
+  const FULL_STEPS = ["Monitoring", "Network", "SSH", "Firewall", "Finish"];
+  const MONITOR_STEPS = ["Monitoring", "Network", "Finish"];
   let step = 0;
   let hostKey = null;
   let hostKeyPinned = false;
+  let setupPath = "monitoring"; // monitoring | full
 
   const $ = (id) => document.getElementById(id);
+
+  function steps() {
+    return setupPath === "full" ? FULL_STEPS : MONITOR_STEPS;
+  }
+
+  function panelForLogical(i) {
+    // Map logical step index → data-step on panels.
+    if (setupPath === "full") return i;
+    // monitoring: 0 Monitoring, 1 Network, 2 Finish(panel 4)
+    return [0, 1, 4][i];
+  }
 
   async function api(path, opts) {
     const res = await fetch(path, {
@@ -17,27 +30,50 @@
     return data;
   }
 
+  function applyPathVisibility() {
+    document.querySelectorAll(".gateway-only").forEach((el) => {
+      el.classList.toggle("hidden-path", setupPath !== "full");
+    });
+  }
+
   function showStep(n) {
-    step = Math.max(0, Math.min(STEPS.length - 1, n));
+    const list = steps();
+    step = Math.max(0, Math.min(list.length - 1, n));
+    const panelStep = panelForLogical(step);
     document.querySelectorAll(".step").forEach((el) => {
-      el.classList.toggle("hidden", Number(el.dataset.step) !== step);
+      const ds = Number(el.dataset.step);
+      let visible = ds === panelStep;
+      if (setupPath !== "full" && el.classList.contains("gateway-only") && ds !== 4) {
+        visible = false;
+      }
+      el.classList.toggle("hidden", !visible);
     });
     document.querySelectorAll("#step-tabs button").forEach((btn, i) => {
       btn.classList.toggle("active", i === step);
     });
     $("btn-prev").disabled = step === 0;
-    $("btn-next").textContent = step === STEPS.length - 1 ? "Done" : "Next";
+    $("btn-next").textContent = step === list.length - 1 ? "Done" : "Next";
   }
 
   function buildTabs() {
     const nav = $("step-tabs");
     nav.innerHTML = "";
-    STEPS.forEach((label, i) => {
+    steps().forEach((label, i) => {
       const b = document.createElement("button");
       b.textContent = `${i + 1}. ${label}`;
       b.addEventListener("click", () => showStep(i));
       nav.appendChild(b);
     });
+  }
+
+  function setSetupPath(path) {
+    setupPath = path === "full" ? "full" : "monitoring";
+    try {
+      localStorage.setItem("iotgw_setup_path", setupPath);
+    } catch (_) {}
+    applyPathVisibility();
+    buildTabs();
+    showStep(0);
   }
 
   function badge(el, ok, text) {
@@ -46,35 +82,23 @@
 
   async function refreshEnv() {
     const data = await api("/api/wizard/env");
-    $("env-json").textContent = JSON.stringify(
-      {
-        telemetry: data.telemetry,
-        platform: data.platform,
-        system: data.system,
-        wsl: data.wsl,
-      },
-      null,
-      2
-    );
     const t = data.telemetry || {};
     badge(
       $("telemetry-badge"),
       !!t.ready,
-      t.ready ? "Loki + Prometheus ready" : "Monitoring not ready"
+      t.ready ? "Ready" : "Not installed"
     );
-    $("telemetry-hint").textContent =
-      t.hint || t.detail || t.progress || "";
-    const note = (data.wsl && data.wsl.localhost_forwarding_note) || "";
-    $("localhost-note").textContent = note;
-    $("localhost-note").classList.toggle("hidden", !note);
+    $("telemetry-hint").textContent = t.ready
+      ? t.detail || "Loki and Prometheus are running."
+      : t.progress || t.detail || "Click Install monitoring to continue.";
     $("hdr-status").innerHTML = t.ready
-      ? '<span class="badge ok">monitoring ready</span>'
-      : '<span class="badge warn">prepare monitoring</span>';
+      ? '<span class="badge ok">Ready</span>'
+      : '<span class="badge warn">Setup</span>';
   }
 
   async function prepareTelemetry() {
-    $("telemetry-hint").textContent = "Preparing… downloading binaries if needed.";
-    badge($("telemetry-badge"), false, "Preparing…");
+    $("telemetry-hint").textContent = "Installing…";
+    badge($("telemetry-badge"), false, "Installing…");
     try {
       const gw = ($("gateway-ip") && $("gateway-ip").value) || "";
       const data = await api("/api/wizard/telemetry/ensure", {
@@ -82,16 +106,12 @@
         body: JSON.stringify({ gateway_ip: gw || undefined }),
       });
       const t = data.telemetry || {};
-      badge(
-        $("telemetry-badge"),
-        !!t.ready,
-        t.ready ? "Loki + Prometheus ready" : "Not ready"
-      );
-      $("telemetry-hint").textContent = t.detail || t.progress || t.hint || "";
+      badge($("telemetry-badge"), !!t.ready, t.ready ? "Ready" : "Failed");
+      $("telemetry-hint").textContent = t.detail || t.progress || "";
       $("hdr-status").innerHTML = t.ready
-        ? '<span class="badge ok">monitoring ready</span>'
-        : '<span class="badge warn">prepare monitoring</span>';
-      if (!data.ok) throw new Error(t.detail || "prepare failed");
+        ? '<span class="badge ok">Ready</span>'
+        : '<span class="badge warn">Setup</span>';
+      if (!data.ok) throw new Error(t.detail || "Install failed");
     } catch (e) {
       badge($("telemetry-badge"), false, "Failed");
       $("telemetry-hint").textContent = String(e.message || e);
@@ -104,7 +124,7 @@
   }
 
   async function refreshNics() {
-    const mode = $("net-mode").value;
+    const mode = $("net-mode") ? $("net-mode").value : "";
     const q =
       mode === "" || mode == null
         ? ""
@@ -126,7 +146,7 @@
     }
     if (!sel.options.length) {
       const opt = document.createElement("option");
-      opt.textContent = "(no candidates)";
+      opt.textContent = "(none found)";
       opt.value = "";
       sel.appendChild(opt);
     }
@@ -134,16 +154,16 @@
 
   async function saveNic() {
     const raw = $("nic-select").value;
-    if (!raw) throw new Error("No NIC selected");
+    if (!raw) throw new Error("Select a LAN address");
     const c = JSON.parse(raw);
     const body = {
       monitoring_ip: c.ip,
       nic_name: c.name,
-      gateway_ip: $("gateway-ip").value.trim() || undefined,
-      windows_net_mode: $("net-mode").value || undefined,
+      gateway_ip: ($("gateway-ip") && $("gateway-ip").value.trim()) || undefined,
+      windows_net_mode: ($("net-mode") && $("net-mode").value) || undefined,
     };
     await api("/api/wizard/nics/select", { method: "POST", body: JSON.stringify(body) });
-    $("nic-msg").innerHTML = `<div class="okmsg">Saved MONITORING_IP=${c.ip}</div>`;
+    $("nic-msg").innerHTML = `<div class="okmsg">Saved ${c.ip}</div>`;
   }
 
   async function fetchHostKey() {
@@ -156,27 +176,24 @@
         port: Number($("ssh-port").value) || 22,
       }),
     });
-    $("hk-info").textContent =
-      `${hostKey.key_type}\n${hostKey.fingerprint_sha256}\n(base64 length ${hostKey.base64.length})`;
+    $("hk-info").textContent = `${hostKey.key_type}  ${hostKey.fingerprint_sha256}`;
     $("btn-pin-hk").disabled = false;
-    $("ssh-msg").innerHTML = `<div class="okmsg">Verify fingerprint on the device console, then Pin (required before Install).</div>`;
+    $("ssh-msg").innerHTML = `<div class="okmsg">Verify fingerprint, then Pin.</div>`;
   }
 
   async function pinHostKey() {
-    if (!hostKey) throw new Error("Fetch host key first");
+    if (!hostKey) throw new Error("Fetch the host key first");
     await api("/api/wizard/ssh/pin-host-key", {
       method: "POST",
       body: JSON.stringify(hostKey),
     });
     hostKeyPinned = true;
     $("btn-install-key").disabled = false;
-    $("ssh-msg").innerHTML = `<div class="okmsg">Pinned ${hostKey.fingerprint_sha256} — Install is now enabled.</div>`;
+    $("ssh-msg").innerHTML = `<div class="okmsg">Pinned.</div>`;
   }
 
   async function installKey() {
-    if (!hostKeyPinned || !hostKey) {
-      throw new Error("Pin the host key before installing");
-    }
+    if (!hostKeyPinned || !hostKey) throw new Error("Pin the host key first");
     const body = {
       host: $("ssh-host").value.trim(),
       port: Number($("ssh-port").value) || 22,
@@ -185,22 +202,22 @@
       gateway_id: $("ssh-gid").value.trim() || "gateway",
       host_key_base64: hostKey.base64,
     };
-    const res = await api("/api/wizard/ssh/install-key", {
+    await api("/api/wizard/ssh/install-key", {
       method: "POST",
       body: JSON.stringify(body),
     });
     $("ssh-pass").value = "";
-    $("ssh-msg").innerHTML = `<div class="okmsg">Key installed (password cleared). path=${res.ssh_key_path}</div>`;
+    $("ssh-msg").innerHTML = `<div class="okmsg">SSH key installed.</div>`;
   }
 
   async function provisionAgent() {
     const msg = $("provision-msg");
     const sudoPass = ($("sudo-pass") && $("sudo-pass").value) || "";
     if (!sudoPass.trim()) {
-      msg.innerHTML = `<div class="err">Enter the gateway sudo password before Install.</div>`;
+      msg.innerHTML = `<div class="err">Sudo password required.</div>`;
       throw new Error("sudo password required");
     }
-    msg.innerHTML = `<div class="okmsg">Provisioning gateway agent (apt + systemd; may take a few minutes)…</div>`;
+    msg.innerHTML = `<div class="okmsg">Installing…</div>`;
     try {
       const data = await api("/api/wizard/provision", {
         method: "POST",
@@ -214,10 +231,8 @@
         }),
       });
       if ($("sudo-pass")) $("sudo-pass").value = "";
-      const notes = (data.notes || []).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
-      msg.innerHTML = `<div class="okmsg">Agent installed (${escapeHtml(
-        data.backend || "agent"
-      )})</div><ul>${notes}</ul>`;
+      const notes = (data.notes || []).slice(0, 4).map((n) => `<li>${escapeHtml(n)}</li>`).join("");
+      msg.innerHTML = `<div class="okmsg">Gateway installed.</div><ul>${notes}</ul>`;
     } catch (e) {
       if ($("sudo-pass")) $("sudo-pass").value = "";
       msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
@@ -229,21 +244,26 @@
     const data = await api("/api/wizard/checklist");
     const wrap = $("checklist-wrap");
     wrap.innerHTML = "";
-    if (data.localhost_forwarding_note) {
-      $("localhost-note").textContent = data.localhost_forwarding_note;
-      $("localhost-note").classList.remove("hidden");
+    const note = $("localhost-note");
+    if (note) {
+      // Keep firewall guidance short — full WSL essay is not shown.
+      note.textContent = "";
+      note.classList.add("hidden");
     }
     if (!data.applicable) {
-      wrap.innerHTML = `<p>${data.reason || "Not applicable on this host."}</p>`;
+      wrap.innerHTML = `<p>${escapeHtml(data.reason || "Not required on this host.")}</p>`;
       return;
     }
     (data.items || []).forEach((item, idx) => {
       const div = document.createElement("div");
       div.className = "checklist-item";
-      div.innerHTML = `<strong>${idx + 1}. ${item.title}</strong>
-        ${item.command ? `<div class="row"><code class="mono">${escapeHtml(item.command)}</code>
-        <button class="secondary btn-copy" data-cmd="${escapeAttr(item.command)}">Copy</button></div>` : ""}
-        ${item.notes ? `<p>${escapeHtml(item.notes)}</p>` : ""}`;
+      div.innerHTML = `<strong>${idx + 1}. ${escapeHtml(item.title)}</strong>
+        ${
+          item.command
+            ? `<div class="row"><code class="mono">${escapeHtml(item.command)}</code>
+        <button class="secondary btn-copy" data-cmd="${escapeAttr(item.command)}">Copy</button></div>`
+            : ""
+        }`;
       wrap.appendChild(div);
     });
     wrap.querySelectorAll(".btn-copy").forEach((btn) => {
@@ -252,12 +272,12 @@
           await navigator.clipboard.writeText(btn.dataset.cmd || "");
           btn.textContent = "Copied";
         } catch (_) {
-          btn.textContent = "Copy failed";
+          btn.textContent = "Failed";
         }
       });
     });
     if (data.confirmed) {
-      $("cl-msg").innerHTML = `<div class="okmsg">Checklist previously confirmed.</div>`;
+      $("cl-msg").innerHTML = `<div class="okmsg">Confirmed.</div>`;
     }
   }
 
@@ -273,53 +293,48 @@
 
   async function confirmChecklist() {
     await api("/api/wizard/checklist/confirm", { method: "POST", body: "{}" });
-    $("cl-msg").innerHTML = `<div class="okmsg">Confirmed. Wizard will re-show commands if WSL IP changes.</div>`;
+    $("cl-msg").innerHTML = `<div class="okmsg">Confirmed.</div>`;
   }
 
   async function startServices() {
     $("svc-msg").textContent = "Starting…";
-    const wantSt = !!($("chk-streamlit") && $("chk-streamlit").checked);
     const data = await api("/api/wizard/services/start", {
       method: "POST",
-      body: JSON.stringify({ streamlit: wantSt }),
+      body: JSON.stringify({ streamlit: false }),
     });
-    $("svc-status").textContent = JSON.stringify(data, null, 2);
     const ok = data.control && data.control.healthy;
     $("svc-msg").innerHTML = ok
-      ? `<div class="okmsg">Control service healthy. Open <a href="monitoring.html">Monitoring</a>. Streamlit=${wantSt ? (data.streamlit && data.streamlit.healthy) : "skipped"}</div>`
-      : `<div class="err">Control service not healthy — check ~/.local/share/iot-gateway-monitor/control-service.log (or %APPDATA%)</div>`;
+      ? `<div class="okmsg">Control service running.</div>`
+      : `<div class="err">Control service failed to start.</div>`;
   }
 
   async function stopServices() {
     await api("/api/wizard/services/stop", { method: "POST", body: "{}" });
-    $("svc-status").textContent = JSON.stringify(await api("/api/wizard/services/status"), null, 2);
     $("svc-msg").innerHTML = `<div class="okmsg">Stopped.</div>`;
   }
 
-  async function openMonitoring() {
-    window.location.href = "monitoring.html";
-  }
-
-  async function openStreamlit() {
-    try {
-      await api("/api/wizard/open-streamlit", {
-        method: "POST",
-        body: JSON.stringify({ url: "http://127.0.0.1:8501" }),
-      });
-    } catch (e) {
-      $("svc-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-      throw e;
-    }
-  }
-
   function wire() {
+    try {
+      const saved = localStorage.getItem("iotgw_setup_path");
+      if (saved === "full" || saved === "monitoring") setupPath = saved;
+    } catch (_) {}
+    document.querySelectorAll('input[name="setup-path"]').forEach((el) => {
+      el.checked = el.value === setupPath;
+      el.addEventListener("change", () => {
+        if (el.checked) setSetupPath(el.value);
+      });
+    });
+    applyPathVisibility();
     buildTabs();
+
     $("btn-prev").addEventListener("click", () => showStep(step - 1));
     $("btn-next").addEventListener("click", () => {
-      if (step === STEPS.length - 1) return;
+      if (step === steps().length - 1) {
+        window.location.href = "monitoring.html";
+        return;
+      }
       showStep(step + 1);
     });
-    $("btn-refresh-env").addEventListener("click", () => refreshEnv().catch(showErr));
     $("btn-prepare-telemetry").addEventListener("click", () =>
       prepareTelemetry().catch(showErr)
     );
@@ -328,15 +343,21 @@
     );
     $("btn-refresh-nics").addEventListener("click", () => refreshNics().catch(showErr));
     $("btn-save-nic").addEventListener("click", () => saveNic().catch(showErr));
-    $("btn-fetch-hk").addEventListener("click", () => fetchHostKey().catch(e => {
-      $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-    }));
-    $("btn-pin-hk").addEventListener("click", () => pinHostKey().catch(e => {
-      $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-    }));
-    $("btn-install-key").addEventListener("click", () => installKey().catch(e => {
-      $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-    }));
+    $("btn-fetch-hk").addEventListener("click", () =>
+      fetchHostKey().catch((e) => {
+        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+      })
+    );
+    $("btn-pin-hk").addEventListener("click", () =>
+      pinHostKey().catch((e) => {
+        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+      })
+    );
+    $("btn-install-key").addEventListener("click", () =>
+      installKey().catch((e) => {
+        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+      })
+    );
     $("btn-refresh-cl").addEventListener("click", () => refreshChecklist().catch(showErr));
     $("btn-confirm-cl").addEventListener("click", () => confirmChecklist().catch(showErr));
     $("btn-start-svc").addEventListener("click", () => startServices().catch(showErr));
@@ -344,8 +365,9 @@
     $("btn-provision-agent").addEventListener("click", () =>
       provisionAgent().catch(showErr)
     );
-    $("btn-open-mon").addEventListener("click", () => openMonitoring().catch(showErr));
-    $("btn-open-st").addEventListener("click", () => openStreamlit().catch(showErr));
+    $("btn-open-mon").addEventListener("click", () => {
+      window.location.href = "monitoring.html";
+    });
     const openActions = $("btn-open-actions");
     if (openActions) {
       openActions.addEventListener("click", () => {

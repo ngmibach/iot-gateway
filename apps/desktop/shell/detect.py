@@ -120,14 +120,7 @@ def detect_wsl() -> WslStatus:
     wsl_ip = _wsl_eth0_ip() if inside else ""
     note = ""
     if inside or on_windows:
-        note = (
-            "Tauri / WebView → FastAPI :9137 and Streamlit :8501 require Windows "
-            "localhostForwarding (default on modern Win11). Set in %UserProfile%\\.wslconfig:\n"
-            "[wsl2]\nlocalhostForwarding=true\n"
-            "Then run: wsl --shutdown and relaunch. "
-            "Do NOT use netsh portproxy for :9137/:8501 — only Loki :3100 uses the "
-            "guided portproxy/firewall checklist."
-        )
+        note = "Ensure WSL localhostForwarding is enabled if services run inside WSL2."
     return WslStatus(
         on_windows=on_windows or inside,
         in_wsl=inside,

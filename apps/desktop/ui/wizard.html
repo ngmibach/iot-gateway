@@ -3,17 +3,19 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IoT Gateway — Setup Wizard</title>
+  <title>IoT Gateway Monitor — Setup</title>
   <link rel="stylesheet" href="wizard.css" />
 </head>
 <body>
-    <header>
+  <header>
     <div>
-      <h1>IoT Gateway Monitor — Setup Wizard</h1>
-      <div class="sub">Local monitoring · NIC · SSH · firewall · Monitoring
-        <a href="actions.html">Actions →</a>
-        <a href="monitoring.html">Monitoring →</a>
-        <a href="admin.html">Admin →</a>
+      <h1>IoT Gateway Monitor</h1>
+      <div class="sub">
+        <a href="actions.html">Actions</a>
+        ·
+        <a href="monitoring.html">Monitoring</a>
+        ·
+        <a href="admin.html">Admin</a>
       </div>
     </div>
     <div id="hdr-status"></div>
@@ -22,45 +24,56 @@
     <nav class="steps" id="step-tabs"></nav>
 
     <section class="panel step" data-step="0" id="step-engine">
-      <h2>1. Local monitoring</h2>
-      <p>This PC does <strong>not</strong> need Docker. The app downloads Loki and Prometheus once and runs them as local processes. You stay in this window — no external installers.</p>
+      <h2>Monitoring</h2>
+      <div class="path-choice" role="radiogroup" aria-label="Setup path">
+        <label class="path-option">
+          <input type="radio" name="setup-path" value="monitoring" checked />
+          <span>
+            <strong>Monitoring only</strong>
+            <small>Install Loki and Prometheus on this PC. Skip gateway setup.</small>
+          </span>
+        </label>
+        <label class="path-option">
+          <input type="radio" name="setup-path" value="full" />
+          <span>
+            <strong>Full setup</strong>
+            <small>Monitoring, then SSH and gateway agent install.</small>
+          </span>
+        </label>
+      </div>
       <div class="row">
-        <button class="primary" id="btn-prepare-telemetry">Prepare monitoring</button>
-        <button class="secondary" id="btn-refresh-env">Re-detect</button>
+        <button class="primary" id="btn-prepare-telemetry">Install monitoring</button>
         <button class="secondary" id="btn-stop-telemetry">Stop</button>
         <span id="telemetry-badge"></span>
       </div>
       <div class="note-box" id="telemetry-hint"></div>
-      <pre class="mono" id="env-json"></pre>
     </section>
 
     <section class="panel step hidden" data-step="1" id="step-nic">
-      <h2>2. MONITORING_IP / NIC</h2>
-      <p>Select the LAN IPv4 Promtail should push to. On WSL2 NAT, pick a <strong>Windows host</strong> address — never the WSL 172.x eth0 IP.</p>
+      <h2>Network</h2>
       <div class="row">
-        <label for="nic-select">NIC / IP</label>
+        <label for="nic-select">LAN address</label>
         <select id="nic-select"></select>
         <button class="secondary" id="btn-refresh-nics">Refresh</button>
       </div>
-      <div class="row">
-        <label for="gateway-ip">Gateway IP (optional)</label>
+      <div class="row gateway-only">
+        <label for="gateway-ip">Gateway IP</label>
         <input id="gateway-ip" placeholder="192.168.1.50" />
       </div>
-      <div class="row">
-        <label for="net-mode">Windows net mode</label>
+      <div class="row gateway-only">
+        <label for="net-mode">Windows mode</label>
         <select id="net-mode">
-          <option value="">auto</option>
-          <option value="nat">nat (WSL2 default)</option>
-          <option value="mirrored">mirrored</option>
+          <option value="">Auto</option>
+          <option value="nat">NAT</option>
+          <option value="mirrored">Mirrored</option>
         </select>
       </div>
-      <button class="primary" id="btn-save-nic">Save MONITORING_IP</button>
+      <button class="primary" id="btn-save-nic">Save</button>
       <div id="nic-msg"></div>
     </section>
 
-    <section class="panel step hidden" data-step="2" id="step-ssh">
-      <h2>3. SSH host-key pin + ed25519 key</h2>
-      <p>Pin the gateway host key, then install an app-generated ed25519 pubkey (one-time password). Password is stored via OS keyring ref.</p>
+    <section class="panel step hidden gateway-only" data-step="2" id="step-ssh">
+      <h2>SSH</h2>
       <div class="row">
         <label for="ssh-host">Host</label>
         <input id="ssh-host" placeholder="192.168.1.50" />
@@ -70,62 +83,59 @@
         <input id="ssh-port" type="number" value="22" style="min-width:6rem" />
       </div>
       <div class="row">
-        <label for="ssh-user">Username</label>
+        <label for="ssh-user">User</label>
         <input id="ssh-user" placeholder="ubuntu" />
       </div>
       <div class="row">
-        <label for="ssh-pass">Password (one-time)</label>
+        <label for="ssh-pass">Password</label>
         <input id="ssh-pass" type="password" autocomplete="off" />
       </div>
       <div class="row">
-        <label for="ssh-gid">Gateway id</label>
-        <input id="ssh-gid" placeholder="gateway" value="gateway" />
+        <label for="ssh-gid">Gateway ID</label>
+        <input id="ssh-gid" value="gateway" />
       </div>
       <div class="row">
-        <button class="secondary" id="btn-fetch-hk">Fetch host key</button>
-        <button class="primary" id="btn-pin-hk" disabled>Pin fingerprint</button>
-        <button class="primary" id="btn-install-key" disabled title="Pin host key first">Install ed25519 key</button>
+        <button class="secondary" id="btn-fetch-hk">Fetch key</button>
+        <button class="primary" id="btn-pin-hk" disabled>Pin</button>
+        <button class="primary" id="btn-install-key" disabled>Install key</button>
       </div>
       <div id="hk-info" class="mono"></div>
       <div id="ssh-msg"></div>
     </section>
 
-    <section class="panel step hidden" data-step="3" id="step-fw">
-      <h2>4. Windows firewall / portproxy (guided checklist)</h2>
-      <p><strong>K18:</strong> Display only — the app will <em>not</em> auto-apply these. Loki <code>:3100</code> only. Do not portproxy <code>:9137</code> / <code>:8501</code>.</p>
-      <div class="note-box" id="localhost-note"></div>
+    <section class="panel step hidden gateway-only" data-step="3" id="step-fw">
+      <h2>Firewall</h2>
+      <p>Allow inbound Loki traffic on port 3100 if the gateway is on another host.</p>
+      <div class="note-box hidden" id="localhost-note"></div>
       <div id="checklist-wrap"></div>
       <div class="row">
-        <button class="secondary" id="btn-refresh-cl">Refresh checklist</button>
-        <button class="primary" id="btn-confirm-cl">I have run these</button>
+        <button class="secondary" id="btn-refresh-cl">Refresh</button>
+        <button class="primary" id="btn-confirm-cl">Confirm</button>
       </div>
       <div id="cl-msg"></div>
     </section>
 
     <section class="panel step hidden" data-step="4" id="step-launch">
-      <h2>5. Launch + provision gateway</h2>
-      <p>Starts the local control API on <code>127.0.0.1:9137</code>. Provision installs the <strong>monolithic gateway agent</strong> over SSH (native Mosquitto + agent — <em>no Docker</em> on the device).</p>
-      <div class="row">
-        <label for="sudo-pass">Gateway sudo password *</label>
-        <input id="sudo-pass" type="password" autocomplete="new-password" placeholder="Used only for apt / systemd install" />
-      </div>
-      <p class="note-box">The sudo password is sent over the existing SSH session and used only as <code>sudo -S</code> stdin for package install. It is not saved on this PC.</p>
+      <h2>Finish</h2>
       <div class="row">
         <button class="primary" id="btn-start-svc">Start control service</button>
-        <button class="primary" id="btn-provision-agent">Install / update gateway agent</button>
         <button class="secondary" id="btn-open-mon">Open Monitoring</button>
         <button class="secondary" id="btn-open-actions" type="button">Open Actions</button>
         <button class="danger" id="btn-stop-svc">Stop</button>
       </div>
-      <div id="provision-msg"></div>
-      <div class="row">
-        <label class="chk" style="min-width:auto">
-          <input type="checkbox" id="chk-streamlit" />
-          Also start Streamlit
-        </label>
-      </div>
-      <pre class="mono" id="svc-status"></pre>
       <div id="svc-msg"></div>
+
+      <div class="gateway-only provision-block">
+        <h3>Gateway agent</h3>
+        <div class="row">
+          <label for="sudo-pass">Sudo password</label>
+          <input id="sudo-pass" type="password" autocomplete="new-password" />
+        </div>
+        <div class="row">
+          <button class="primary" id="btn-provision-agent">Install gateway</button>
+        </div>
+        <div id="provision-msg"></div>
+      </div>
     </section>
 
     <div class="nav">

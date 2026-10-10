@@ -54,8 +54,9 @@ class WizardApiTests(unittest.TestCase):
         self.assertFalse(env.get("docker_required", True))
         with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
             html = resp.read().decode("utf-8")
-        self.assertIn("Setup Wizard", html)
-        self.assertIn("Local monitoring", html)
+        self.assertIn("IoT Gateway Monitor", html)
+        self.assertIn("Monitoring only", html)
+        self.assertIn("Full setup", html)
         self.assertNotIn("lab.html", html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             html = resp.read().decode("utf-8")

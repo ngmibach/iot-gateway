@@ -55,7 +55,33 @@ main { max-width: 920px; margin: 0 auto; padding: 1.25rem; }
   margin-bottom: 1rem;
 }
 .panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+.panel h3 { margin: 1.25rem 0 0.5rem; font-size: 0.95rem; font-weight: 600; }
 .panel p, .panel li { color: var(--muted); font-size: 0.9rem; line-height: 1.45; }
+.path-choice { display: flex; flex-direction: column; gap: 0.5rem; margin: 0 0 1rem; }
+.path-option {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+  min-width: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  cursor: pointer;
+}
+.path-option:has(input:checked) {
+  border-color: var(--accent);
+  background: #1e2a3d;
+}
+.path-option input { margin-top: 0.2rem; min-width: auto; }
+.path-option strong { display: block; color: var(--text); font-size: 0.9rem; }
+.path-option small { display: block; color: var(--muted); font-size: 0.8rem; margin-top: 0.15rem; }
+.provision-block {
+  margin-top: 1rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border);
+}
+.gateway-only.hidden-path { display: none !important; }
 .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
 label { font-size: 0.85rem; color: var(--muted); min-width: 7rem; }
 input, select, textarea {

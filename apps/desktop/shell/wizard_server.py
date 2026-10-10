@@ -153,11 +153,9 @@ def _handle_api(
                     "detail": tel.detail,
                     "progress": tel.progress,
                     "hint": (
-                        "Local Loki + Prometheus run as app-managed processes. "
-                        "No Docker is required on this PC."
+                        "Loki and Prometheus are running."
                         if tel.ready
-                        else "Click Prepare monitoring — the app downloads Loki and "
-                        "Prometheus once and starts them (no browser download)."
+                        else "Install monitoring to download and start Loki and Prometheus."
                     ),
                 }
             except Exception as e:  # noqa: BLE001
@@ -165,7 +163,7 @@ def _handle_api(
                     "backend": "native",
                     "ready": False,
                     "detail": str(e),
-                    "hint": "Native telemetry unavailable — see detail.",
+                    "hint": "Monitoring is unavailable.",
                 }
             # Docker is legacy/optional; default path does not require it.
             snap["docker_required"] = False
