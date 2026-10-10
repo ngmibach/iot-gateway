@@ -5,8 +5,8 @@
   "identifier": "com.iotgateway.monitor",
   "build": {
     "frontendDist": "../ui",
-    "devUrl": "http://127.0.0.1:9138",
-    "beforeDevCommand": "PYTHONPATH=..:../../control-service python -m shell --no-browser",
+    "devUrl": "http://127.0.0.1:9138/wizard.html",
+    "beforeDevCommand": "PYTHONPATH=..:../../control-service python -m shell --start-services --no-browser",
     "beforeBuildCommand": ""
   },
   "app": {
@@ -15,7 +15,8 @@
         "title": "IoT Gateway Monitor",
         "width": 1100,
         "height": 800,
-        "resizable": true
+        "resizable": true,
+        "url": "splash.html"
       }
     ],
     "security": {
@@ -28,19 +29,34 @@
     "icon": [
       "icons/icon.png"
     ],
+    "resources": [
+      "../shell",
+      "../ui",
+      "../requirements.txt",
+      "../../control-service"
+    ],
     "linux": {
       "appimage": {
         "bundleMediaFramework": false
+      },
+      "deb": {
+        "depends": ["python3"]
       }
     },
     "windows": {
       "webviewInstallMode": {
         "type": "downloadBootstrapper"
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "createDesktopShortcut": "always",
+        "createStartMenuShortcut": true
       }
     },
-    "longDescription": "Phase-0: Setup Wizard + WebView to Streamlit on 127.0.0.1:8501; control API on :9137 via localhostForwarding on Windows (not portproxy).",
-    "shortDescription": "IoT Gateway monitoring control plane"
+    "longDescription": "Double-click desktop app: Setup Wizard, Actions, native Monitoring, Lab, and Admin Code Signing. Starts local Python control services automatically.",
+    "shortDescription": "IoT Gateway Monitor — clickable desktop control plane"
   },
+
   "plugins": {
     "shell": {
       "open": true

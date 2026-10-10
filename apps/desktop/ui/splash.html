@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway Monitor</title>
+  <style>
+    body {
+      margin: 0; font-family: system-ui, sans-serif; background: #0f1419; color: #e7ecf3;
+      display: flex; align-items: center; justify-content: center; min-height: 100vh;
+    }
+    .card { text-align: center; max-width: 28rem; padding: 2rem; }
+    .spin {
+      width: 2rem; height: 2rem; border: 3px solid #334; border-top-color: #5b9cff;
+      border-radius: 50%; animation: r 0.8s linear infinite; margin: 0 auto 1rem;
+    }
+    @keyframes r { to { transform: rotate(360deg); } }
+    .err { color: #ff8a8a; margin-top: 1rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="spin" id="spin"></div>
+    <h1>IoT Gateway Monitor</h1>
+    <p id="msg">Starting local services…</p>
+    <p class="err" id="err"></p>
+  </div>
+  <script>
+    const WIZARD = "http://127.0.0.1:9138/wizard.html";
+    const ENV = "http://127.0.0.1:9138/api/wizard/env";
+    const msg = document.getElementById("msg");
+    const err = document.getElementById("err");
+    let tries = 0;
+    async function tick() {
+      tries += 1;
+      try {
+        const r = await fetch(ENV, { cache: "no-store" });
+        if (r.ok) {
+          msg.textContent = "Opening Setup Wizard…";
+          window.location.href = WIZARD;
+          return;
+        }
+      } catch (_) {}
+      if (tries > 90) {
+        document.getElementById("spin").style.display = "none";
+        msg.textContent = "Could not start the local wizard.";
+        err.textContent =
+          "The app should start Python services automatically.\\n" +
+          "Try: apps/desktop/scripts/run-app.sh\\n" +
+          "Or check that port 9138 is free.";
+        return;
+      }
+      msg.textContent = "Starting local services… (" + tries + ")";
+      setTimeout(tick, 500);
+    }
+    tick();
+  </script>
+</body>
+</html>

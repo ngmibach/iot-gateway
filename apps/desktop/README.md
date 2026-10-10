@@ -1,45 +1,78 @@
-# IoT Gateway Monitor — desktop (Phase-0/1)
+# IoT Gateway Monitor — desktop app (Phase-0/1)
 
-Setup Wizard + Actions chrome + process launcher for the Python control service (`127.0.0.1:9137`) and **native Monitoring** UI (`/monitoring.html`). Streamlit (`127.0.0.1:8501`) remains optional. Tauri 2 hosts the wizard/Actions and can WebView-navigate to Monitoring.
+**Double-clickable application** (Ubuntu + Windows): opens a real app window with Setup Wizard, Actions, native Monitoring, Lab, and Admin Code Signing. You do **not** need to run CLI commands for normal use.
+
+## Install & open (Ubuntu — recommended right now)
+
+From the repo:
+
+```bash
+apps/desktop/scripts/install-desktop-shortcut.sh
+```
+
+That creates **IoT Gateway Monitor** on your Desktop and in the app menu. Double-click it.
+
+What the shortcut does:
+
+1. Starts the local control API (`:9137`) and wizard server (`:9138`)
+2. Opens an app window (Chromium `--app=` mode — no address bar)
+3. Quits services when you close the window
+
+First run may download Chromium (Playwright) and extract a few Chrome runtime `.deb` libs into `apps/desktop/.local-libs/` (no `sudo`).
+
+Manual launch (same as the shortcut):
+
+```bash
+apps/desktop/scripts/run-app.sh
+```
+
+## Windows / Ubuntu installers (Tauri)
+
+CI builds installers via `.github/workflows/desktop-packages.yml`:
+
+| OS | Artifact |
+|----|----------|
+| Ubuntu | `.AppImage` — chmod +x and double-click |
+| Windows | `.msi` / NSIS `.exe` — Start Menu + Desktop shortcut |
+
+Local Tauri build (needs Rust + WebKitGTK on Linux, WebView2 on Windows):
+
+```bash
+cargo install tauri-cli --version "^2"
+cd apps/desktop
+cargo tauri build
+# → src-tauri/target/release/bundle/appimage|msi|nsis/
+```
+
+On launch, Tauri starts `python -m shell --start-services`, shows `splash.html`, then navigates to the wizard. Sign release binaries via **Admin → Code Signing**.
 
 ## What ships
 
 | Piece | Role |
 |-------|------|
-| `shell/` | Working Python shell: Docker/WSL detect, NIC pick, SSH host-key pin + ed25519 install, **guided** Windows firewall/portproxy checklist (K18 — display only), OS keyring refs, start/stop API (+ optional Streamlit), Admin PIN |
-| `ui/` | Setup Wizard + **Actions** + native Monitoring + Lab (`lab.html`) + **Admin / Code Signing** |
-
-| `src-tauri/` | Tauri 2 scaffold — Linux AppImage / Windows MSI·NSIS packaging stubs |
+| `shell/` | Desktop backend: Docker/WSL detect, NIC, SSH pin, firewall checklist, launcher, Admin PIN, **`--gui` app window** |
+| `ui/` | Setup Wizard + Actions + Monitoring + Lab + Admin |
+| `src-tauri/` | Tauri 2 — AppImage / MSI / NSIS packaging |
+| `scripts/run-app.sh` | Double-click entrypoint |
+| `scripts/install-desktop-shortcut.sh` | Installs Desktop + app-menu shortcut |
 
 **Windows networking**
 
 - UI ports `:9137` / `:8501` → Windows **`localhostForwarding`** only (`.wslconfig`). **No** `netsh portproxy` for these.
 - Loki `:3100` → Setup Wizard shows copyable `netsh` portproxy + firewall commands; user runs elevated and confirms. App never auto-applies firewall rules.
 
-## Quick start (Python shell — no Rust required)
+## CLI / developer mode
 
 ```bash
 # From repo root
 python3 -m venv apps/desktop/.venv
 apps/desktop/.venv/bin/pip install -r apps/desktop/requirements.txt \
   -r apps/control-service/requirements.txt
-# Optional Streamlit embed:
-# apps/desktop/.venv/bin/pip install -r monitoring/build/streamlit/requirements.txt
 
 export PYTHONPATH=apps/desktop:apps/control-service
-export IOTGW_DATA_DIR="${IOTGW_DATA_DIR:-$HOME/.local/share/iot-gateway-monitor}"
-
-# Detection only
+apps/desktop/.venv/bin/python -m shell --gui          # app window
 apps/desktop/.venv/bin/python -m shell --detect-only
-
-# Wizard UI on http://127.0.0.1:9138/wizard.html
-# Actions  on http://127.0.0.1:9138/actions.html  (calls FastAPI :9137)
-apps/desktop/.venv/bin/python -m shell --no-browser
-# Start control API (native Monitoring is default; add --with-streamlit if needed):
-apps/desktop/.venv/bin/python -m shell --start-services --no-browser
-# Monitoring MUST be loaded from the wizard origin (same-origin /api/v1 proxy + token):
-#   http://127.0.0.1:9138/monitoring.html
-# Do not open ui/monitoring.html from Tauri frontendDist / file:// — those skip the proxy.
+IOTGW_FORCE_CLI=1 apps/desktop/.venv/bin/python -m shell --no-browser
 ```
 
 Smoke:
@@ -47,25 +80,6 @@ Smoke:
 ```bash
 apps/desktop/scripts/smoke.sh
 ```
-
-## Tauri build (`cargo tauri build`)
-
-Prereqs: Rust stable, Node (for `@tauri-apps/cli` optional), platform WebView (WebKitGTK on Linux, WebView2 on Windows).
-
-```bash
-# Install CLI once
-cargo install tauri-cli --version "^2"
-
-cd apps/desktop
-# Dev: starts Python wizard (beforeDevCommand) + Tauri window on ui/
-cargo tauri dev
-
-# Release bundles: AppImage (Linux), MSI/NSIS (Windows)
-cargo tauri build
-# Artifacts under src-tauri/target/release/bundle/
-```
-
-`tauri.conf.json` bundle targets: `appimage`, `msi`, `nsis`. Replace `src-tauri/icons/icon.png` with brand assets before shipping; sign outputs via **Admin → Code Signing** (see `apps/control-service/signing/README.md`).
 
 ## Admin Code Signing (K16)
 

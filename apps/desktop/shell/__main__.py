@@ -1,15 +1,19 @@
-"""python -m shell  → Setup Wizard + optional service launch.
+"""python -m shell  → clickable Setup Wizard app (or CLI server).
 
 Usage:
-  PYTHONPATH=apps/desktop:apps/control-service python -m shell
+  PYTHONPATH=apps/desktop:apps/control-service python -m shell --gui
   PYTHONPATH=... python -m shell --no-browser --port 9138
   PYTHONPATH=... python -m shell --start-services   # API then wizard (native Monitoring)
+
+``--gui`` (default when DISPLAY/Wayland is set and stdin is not a TTY pipe) starts
+control-service + wizard and opens a real app window — no browser URL typing.
 """
 
 from __future__ import annotations
 
 import argparse
 import logging
+import os
 import sys
 
 from . import detect
@@ -18,10 +22,35 @@ from .paths import CONTROL_HOST, CONTROL_PORT, STREAMLIT_PORT, WIZARD_PORT
 from .wizard_server import run_forever
 
 
+def _want_gui_by_default(argv: list[str]) -> bool:
+    """Prefer GUI when a desktop session is available and user passed no mode flags."""
+    if any(
+        a in argv
+        for a in (
+            "--gui",
+            "--no-browser",
+            "--start-services",
+            "--detect-only",
+            "--help",
+            "-h",
+        )
+    ):
+        return False
+    if os.environ.get("IOTGW_FORCE_CLI", "").strip() in ("1", "true", "yes"):
+        return False
+    return bool(os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"))
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="IoT Gateway Monitor — desktop shell")
+    raw = list(sys.argv[1:] if argv is None else argv)
+    parser = argparse.ArgumentParser(description="IoT Gateway Monitor — desktop app")
     parser.add_argument("--host", default=CONTROL_HOST)
     parser.add_argument("--port", type=int, default=WIZARD_PORT)
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Open as a desktop app window (starts control-service + wizard)",
+    )
     parser.add_argument("--no-browser", action="store_true")
     parser.add_argument(
         "--start-services",
@@ -39,7 +68,7 @@ def main(argv: list[str] | None = None) -> int:
         help="Print Docker/WSL detection JSON and exit",
     )
     parser.add_argument("-v", "--verbose", action="store_true")
-    args = parser.parse_args(argv)
+    args = parser.parse_args(raw)
 
     logging.basicConfig(
         level=logging.DEBUG if args.verbose else logging.INFO,
@@ -51,6 +80,16 @@ def main(argv: list[str] | None = None) -> int:
 
         print(json.dumps(detect.environment_snapshot(), indent=2))
         return 0
+
+    if args.gui or _want_gui_by_default(raw):
+        from .gui import run_gui
+
+        return run_gui(
+            host=args.host,
+            port=args.port,
+            start_control=True,
+            with_streamlit=args.with_streamlit,
+        )
 
     mgr: ProcessManager | None = None
     if args.start_services:
