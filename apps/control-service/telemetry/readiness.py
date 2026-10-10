@@ -82,16 +82,21 @@ def wait_ready(
     interval_s: float = 2.0,
     probe_timeout: float = 5.0,
 ) -> dict[str, ProbeResult]:
-    """Poll until Loki/Prometheus are ready or ``timeout_s`` elapses."""
+    """Poll until Loki/Prometheus are ready or ``timeout_s`` elapses.
+
+    Defaults probe local native backends on :3100 / :9090 when URLs are omitted.
+    """
+    if loki_url is None:
+        loki_url = "http://127.0.0.1:3100"
+    if prometheus_url is None:
+        prometheus_url = "http://127.0.0.1:9090"
     deadline = time.monotonic() + timeout_s
     results: dict[str, ProbeResult] = {}
     while True:
-        if loki_url:
-            results["loki"] = check_loki(loki_url, timeout=probe_timeout)
-        if prometheus_url:
-            results["prometheus"] = check_prometheus(
-                prometheus_url, timeout=probe_timeout
-            )
+        results["loki"] = check_loki(loki_url, timeout=probe_timeout)
+        results["prometheus"] = check_prometheus(
+            prometheus_url, timeout=probe_timeout
+        )
         pending = [k for k, r in results.items() if not r.ok]
         if not pending:
             return results
