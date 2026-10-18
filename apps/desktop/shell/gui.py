@@ -32,6 +32,31 @@ logger = logging.getLogger(__name__)
 WIZARD_URL = f"http://{CONTROL_HOST}:{WIZARD_PORT}/wizard.html"
 
 
+def _visible_error(message: str) -> None:
+    """Surface a startup failure. The packaged .exe has no console."""
+    print(message, file=sys.stderr)
+    if os.name != "nt":
+        return
+    try:
+        import ctypes
+
+        ctypes.windll.user32.MessageBoxW(None, message, "IoT Gateway Monitor", 0x10)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not show error dialog: %s", message)
+
+
+def _popen_window(cmd: list[str], env: dict[str, str]) -> subprocess.Popen:
+    """Start a GUI browser. ``start_new_session`` is POSIX-only."""
+    kwargs: dict = {
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "env": env,
+    }
+    if os.name != "nt":
+        kwargs["start_new_session"] = True
+    return subprocess.Popen(cmd, **kwargs)
+
+
 def _local_lib_dir() -> Path:
     """Optional user-extracted Chrome runtime libs (no sudo): apps/desktop/.local-libs."""
     return Path(__file__).resolve().parents[1] / ".local-libs" / "usr" / "lib" / "x86_64-linux-gnu"
@@ -109,24 +134,12 @@ def _open_app_window(url: str) -> subprocess.Popen | None:
     chrome = _playwright_chrome()
     if chrome is not None:
         logger.info("Opening app window with Playwright Chromium: %s", chrome)
-        return subprocess.Popen(
-            [str(chrome), *args_common],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
+        return _popen_window([str(chrome), *args_common], env)
 
     system = _system_chrome()
     if system:
         logger.info("Opening app window with system browser: %s", system)
-        return subprocess.Popen(
-            [system, *args_common],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            start_new_session=True,
-            env=env,
-        )
+        return _popen_window([system, *args_common], env)
 
     # pywebview fallback
     try:
@@ -172,10 +185,9 @@ def run_gui(
         if start_control:
             ctrl = mgr.start_control_service()
             if not wait_http(ctrl.url, timeout=45, path="/health"):
-                print(
+                _visible_error(
                     "control-service failed to become healthy on "
-                    f"http://{CONTROL_HOST}:{CONTROL_PORT}",
-                    file=sys.stderr,
+                    f"http://{CONTROL_HOST}:{CONTROL_PORT}"
                 )
                 mgr.stop_all()
                 return 1
@@ -191,8 +203,11 @@ def run_gui(
         thread.start()
 
         wizard = f"http://{host}:{port}/wizard.html"
-        if not wait_http(f"http://{host}:{port}", timeout=20, path="/api/wizard/env"):
-            print("wizard server failed to start", file=sys.stderr)
+        # Do not wait on /api/wizard/env here. That handler probes Loki and
+        # Prometheus, and on a fresh PC those closed ports are slow to refuse,
+        # so the windowed .exe exited before any UI appeared.
+        if not wait_http(f"http://{host}:{port}", timeout=20, path="/wizard.html"):
+            _visible_error("The setup wizard failed to start.")
             return 1
 
         browser = _open_app_window(wizard)

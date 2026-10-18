@@ -64,6 +64,17 @@ class NativeHelperTests(unittest.TestCase):
             self.assertFalse(st.running)
             self.assertIn("3100", st.detail)
 
+    def test_snapshot_does_not_probe_before_binaries_exist(self) -> None:
+        """Fresh PC: no Loki/Prometheus files, so status must not touch the ports."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            with mock.patch.object(mgr, "_http_ready") as probe:
+                snap = mgr.snapshot()
+            probe.assert_not_called()
+            self.assertFalse(snap.ready)
+            self.assertFalse(snap.binaries_present)
+            self.assertIn("not installed", snap.detail.lower())
+
     def test_start_reuses_already_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mgr = nv.NativeTelemetryManager(tmp)

@@ -179,6 +179,7 @@ class NativeTelemetryManager:
         loki_url: str = "http://127.0.0.1:3100",
         prometheus_url: str = "http://127.0.0.1:9090",
         probe: bool = True,
+        probe_timeout: float = 2.0,
     ) -> BackendStatus:
         bins_ok = self._bin("loki").is_file() and self._bin("prometheus").is_file()
         child_loki = self._running(self._loki)
@@ -205,7 +206,9 @@ class NativeTelemetryManager:
             return status
 
         ok, loki, prom = self._http_ready(
-            loki_url=loki_url, prometheus_url=prometheus_url
+            loki_url=loki_url,
+            prometheus_url=prometheus_url,
+            timeout=probe_timeout,
         )
         status.loki = loki
         status.prometheus = prom
@@ -222,14 +225,18 @@ class NativeTelemetryManager:
         return status
 
     def snapshot(self) -> NativeTelemetryStatus:
-        st = self.status(probe=True)
-        ok, loki, prom = self._http_ready()
+        # The wizard calls this before any window work. On Windows a closed
+        # 127.0.0.1 port can take ~2s to refuse (WSL localhost relay). Probe
+        # once, with a short timeout, and skip probes until binaries exist so
+        # a fresh PC is not stuck for several seconds per request.
+        st = self.status(probe=True, probe_timeout=0.8)
         return NativeTelemetryStatus(
             ready=bool(st.running),
             binaries_present=self._bin("loki").is_file()
             and self._bin("prometheus").is_file(),
-            loki_running=bool(getattr(loki, "ok", False)) or self._running(self._loki),
-            prometheus_running=bool(getattr(prom, "ok", False))
+            loki_running=bool(getattr(st.loki, "ok", False))
+            or self._running(self._loki),
+            prometheus_running=bool(getattr(st.prometheus, "ok", False))
             or self._running(self._prom),
             detail=st.detail or st.compose_ps,
             progress=self.last_progress,
