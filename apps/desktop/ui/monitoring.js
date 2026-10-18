@@ -1,14 +1,20 @@
 /* Native Monitoring tabs — talks to control-service via wizard /api/v1 proxy. */
 (function () {
   const TABS = [
-    { id: "gateway", label: "Gateway" },
-    { id: "raspi", label: "Host" },
-    { id: "sensors", label: "Sensors" },
+    { id: "metric", label: "Gateway Metric" },
+    { id: "activities", label: "Gateway Activities" },
   ];
   const WIZARD_MONITORING = "http://127.0.0.1:9138/monitoring.html";
-  let tab = "gateway";
+  let tab = "metric";
   let timer = null;
   let lastWarnings = [];
+
+  function tabFromHash() {
+    const h = (location.hash || "").replace(/^#/, "").toLowerCase();
+    if (h === "activities" || h === "gateway") return "activities";
+    if (h === "metric" || h === "raspi" || h === "host") return "metric";
+    return "metric";
+  }
 
   const $ = (id) => document.getElementById(id);
 
@@ -122,19 +128,27 @@
       b.textContent = t.label;
       b.dataset.tab = t.id;
       b.classList.toggle("active", t.id === tab);
-      b.addEventListener("click", () => showTab(t.id));
+      b.addEventListener("click", () => showTab(t.id, { syncHash: true }));
       nav.appendChild(b);
     });
   }
 
-  function showTab(id) {
-    tab = id;
+  function showTab(id, opts) {
+    const next = id === "activities" ? "activities" : "metric";
+    tab = next;
     document.querySelectorAll(".mon-panel").forEach((el) => {
       el.classList.toggle("hidden", el.dataset.tab !== tab);
     });
     document.querySelectorAll("#mon-tabs button").forEach((btn) => {
       btn.classList.toggle("active", btn.dataset.tab === tab);
     });
+    const wantHash = "#" + tab;
+    if ((opts || {}).syncHash !== false && location.hash !== wantHash) {
+      history.replaceState(null, "", wantHash);
+    }
+    if (typeof window.iotgwRefreshNav === "function") {
+      window.iotgwRefreshNav();
+    }
   }
 
   async function loadGateways() {
@@ -258,9 +272,12 @@
   async function refresh() {
     setStatusBadge("warn", "loading…");
     try {
-      if (tab === "gateway") await refreshGateway();
-      else if (tab === "raspi") await refreshRaspi();
-      else await refreshSensors();
+      if (tab === "metric") {
+        await refreshRaspi();
+      } else {
+        await refreshGateway();
+        await refreshSensors();
+      }
       if (lastWarnings.length) {
         setStatusBadge("warn", "degraded");
       } else {
@@ -290,12 +307,16 @@
 
   function wire() {
     buildTabs();
-    showTab("gateway");
+    showTab(tabFromHash(), { syncHash: true });
+    window.addEventListener("hashchange", () => {
+      showTab(tabFromHash(), { syncHash: false });
+      refresh().catch(console.error);
+    });
     const originBanner = $("origin-banner");
     if (!onWizardOrigin() && originBanner) {
       originBanner.classList.remove("hidden");
       originBanner.innerHTML =
-        `Monitoring must be opened from the Setup Wizard shell so <code>/api/v1</code> is proxied ` +
+        `Monitoring must be opened from the app shell so <code>/api/v1</code> is proxied ` +
         `(with optional <code>IOTGW_API_TOKEN</code>). Use ` +
         `<a class="link" href="${WIZARD_MONITORING}">${WIZARD_MONITORING}</a>.`;
       setStatusBadge("bad", "wrong origin");
@@ -303,11 +324,11 @@
     $("btn-refresh").addEventListener("click", () => refresh().catch(console.error));
     $("auto-refresh").addEventListener("change", scheduleAuto);
     $("show-all").addEventListener("change", () => {
-      if (tab === "sensors") refresh().catch(console.error);
+      if (tab === "activities") refresh().catch(console.error);
     });
     $("range").addEventListener("change", () => refresh().catch(console.error));
     $("gateway-id").addEventListener("change", () => {
-      if (tab === "sensors") refresh().catch(console.error);
+      if (tab === "activities") refresh().catch(console.error);
     });
     $("mon-tabs").addEventListener("click", () => refresh().catch(console.error));
     if (!onWizardOrigin()) return;

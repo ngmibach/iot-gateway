@@ -29,7 +29,9 @@ from .wizard_server import serve
 
 logger = logging.getLogger(__name__)
 
-WIZARD_URL = f"http://{CONTROL_HOST}:{WIZARD_PORT}/wizard.html"
+# Splash routes first-run → wizard, returning installs → monitoring shell.
+SPLASH_URL = f"http://{CONTROL_HOST}:{WIZARD_PORT}/splash.html"
+WIZARD_URL = SPLASH_URL
 
 
 def _visible_error(message: str) -> None:
@@ -191,7 +193,7 @@ def _open_app_window(url: str) -> subprocess.Popen | None:
         "--no-first-run",
         "--no-default-browser-check",
         "--disable-features=TranslateUI",
-        "--window-size=1100,800",
+        "--window-size=1280,840",
     ]
 
     env = _with_local_libs(os.environ.copy())
@@ -266,17 +268,18 @@ def run_gui(
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)
         thread.start()
 
-        wizard = f"http://{host}:{port}/wizard.html"
-        # Do not wait on /api/wizard/env here. That handler probes Loki and
-        # Prometheus, and on a fresh PC those closed ports are slow to refuse,
-        # so the windowed .exe exited before any UI appeared.
-        if not wait_http(f"http://{host}:{port}", timeout=20, path="/wizard.html"):
+        splash = f"http://{host}:{port}/splash.html"
+        # Wait on a static page, not /api/wizard/env. Env probes Loki/Prometheus
+        # and on a fresh PC closed ports are slow to refuse, so the windowed
+        # .exe used to exit before any UI appeared. Splash then routes to the
+        # wizard (first run) or monitoring shell (setup already complete).
+        if not wait_http(f"http://{host}:{port}", timeout=20, path="/splash.html"):
             _visible_error("The setup wizard failed to start.")
             return 1
 
         profile = ensure_data_dir() / "chromium-profile"
-        browser = _open_app_window(wizard)
-        print(f"IoT Gateway Monitor running — {wizard}")
+        browser = _open_app_window(splash)
+        print(f"IoT Gateway Monitor running — {splash}")
         print(f"App data: {data_dir()}")
         print("Close the app window or press Ctrl+C to quit.")
 

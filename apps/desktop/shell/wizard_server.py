@@ -218,6 +218,7 @@ def _handle_api(
 
         if method == "GET" and path == "/api/wizard/env":
             snap = detect.environment_snapshot()
+            settings = load_settings()
             try:
                 tel = STATE.telemetry.snapshot()
                 job = STATE.telemetry_job_snapshot()
@@ -247,7 +248,23 @@ def _handle_api(
             # Packaged path: native Loki/Prometheus. Docker and WSL are optional.
             snap["docker_required"] = False
             snap["wsl_required"] = False
+            # First-run vs returning operator: wizard only until setup finishes.
+            setup_complete = bool(settings.get("setup_complete"))
+            tel_ready = bool((snap.get("telemetry") or {}).get("ready"))
+            snap["setup_complete"] = setup_complete or tel_ready
+            snap["entry"] = "app" if snap["setup_complete"] else "wizard"
             _json_response(handler, 200, snap)
+            return
+
+        if method == "POST" and path == "/api/wizard/setup/complete":
+            settings = load_settings()
+            settings["setup_complete"] = True
+            save_settings(settings)
+            _json_response(
+                handler,
+                200,
+                {"ok": True, "setup_complete": True, "entry": "app"},
+            )
             return
 
         if method == "POST" and path == "/api/wizard/telemetry/ensure":
@@ -1259,7 +1276,7 @@ class WizardHandler(BaseHTTPRequestHandler):
     def _serve_static(self, path: str) -> None:
         ui = desktop_ui_dir()
         if path in ("", "/"):
-            path = "/wizard.html"
+            path = "/splash.html"
         # Prevent path traversal
         rel = path.lstrip("/").replace("..", "")
         file_path = (ui / rel).resolve()
@@ -1288,8 +1305,8 @@ def serve(
     open_browser: bool = True,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), WizardHandler)
-    url = f"http://{host}:{port}/wizard.html"
-    logger.info("Setup Wizard at %s", url)
+    url = f"http://{host}:{port}/splash.html"
+    logger.info("IoT Gateway Monitor UI at %s", url)
     if open_browser:
         threading.Timer(0.5, lambda: open_in_browser(url)).start()
     return server

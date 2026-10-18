@@ -19,6 +19,8 @@ class PathsTests(unittest.TestCase):
         ui = paths.desktop_ui_dir()
         self.assertTrue(ui.is_dir(), msg=ui)
         self.assertTrue((ui / "wizard.html").is_file())
+        self.assertTrue((ui / "app-shell.js").is_file())
+        self.assertTrue((ui / "splash.html").is_file())
 
     def test_control_service_dir_source(self) -> None:
         cs = paths.control_service_dir()

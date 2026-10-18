@@ -1,9 +1,9 @@
 //! Clickable Tauri desktop app: spawn Python shell, open Setup Wizard window.
 //!
 //! On launch the Rust side starts `python -m shell --start-services --no-browser`
-//! (wizard on :9138, control API on :9137). The WebView loads `splash.html` then
-//! navigates to the wizard once `/api/wizard/env` responds — so Monitoring's
-//! same-origin `/api/v1` proxy works.
+//! (wizard on :9138, control API on :9137). The WebView loads `splash.html`, which
+//! routes to the first-run wizard or the post-install monitoring shell once
+//! `/api/wizard/env` responds — so Monitoring's same-origin `/api/v1` proxy works.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 

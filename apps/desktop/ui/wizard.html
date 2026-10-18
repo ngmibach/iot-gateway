@@ -6,21 +6,21 @@
   <title>IoT Gateway Monitor — Setup</title>
   <link rel="stylesheet" href="wizard.css" />
 </head>
-<body>
+<body class="first-run" data-page="wizard">
   <header>
     <div>
       <h1>IoT Gateway Monitor</h1>
-      <div class="sub">
-        <a href="actions.html">Actions</a>
-        ·
-        <a href="monitoring.html">Monitoring</a>
-        ·
-        <a href="admin.html">Admin</a>
-      </div>
+      <div class="sub" id="hdr-sub">First-time setup</div>
     </div>
     <div id="hdr-status"></div>
   </header>
   <main>
+    <div class="first-run-banner" id="first-run-banner">
+      <strong>Welcome.</strong> Install monitoring on this PC. After setup finishes,
+      the app opens with a left navigation bar (Monitoring and Settings). You will
+      not see this installer again until you uninstall.
+    </div>
+
     <nav class="steps" id="step-tabs"></nav>
 
     <section class="panel step" data-step="0" id="step-engine">
@@ -150,7 +150,7 @@
       <div class="row">
         <button class="primary" id="btn-start-svc">Start control service</button>
         <button class="secondary" id="btn-open-mon">Open Monitoring</button>
-        <button class="secondary" id="btn-open-actions" type="button">Open Actions</button>
+        <button class="secondary" id="btn-open-actions" type="button">Open Control Plane</button>
         <button class="danger" id="btn-stop-svc">Stop</button>
       </div>
       <div id="svc-msg"></div>
@@ -173,6 +173,7 @@
       <button class="primary" id="btn-next">Next</button>
     </div>
   </main>
+  <script src="app-shell.js"></script>
   <script src="wizard.js"></script>
 </body>
 </html>

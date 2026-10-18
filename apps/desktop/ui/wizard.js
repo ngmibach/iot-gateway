@@ -104,6 +104,7 @@
 
   async function refreshEnv() {
     const data = await api("/api/wizard/env");
+    applyShellMode(!!data.setup_complete);
     const t = data.telemetry || {};
     const job = t.job || {};
     if (job.state === "running") {
@@ -172,6 +173,26 @@
     }
   }
 
+  async function markSetupComplete() {
+    if (typeof window.iotgwMarkSetupComplete === "function") {
+      await window.iotgwMarkSetupComplete();
+      return;
+    }
+    try {
+      await api("/api/wizard/setup/complete", {
+        method: "POST",
+        body: "{}",
+      });
+    } catch (_) {
+      /* telemetry.ready still routes returning launches */
+    }
+  }
+
+  async function enterApp(path) {
+    await markSetupComplete();
+    window.location.href = path;
+  }
+
   async function openMonitoring() {
     // Monitoring UI needs the control service query API in front of Loki/Prometheus.
     const hint = $("telemetry-hint");
@@ -183,7 +204,31 @@
       /* startServices paints svc-msg on Finish; continue to Monitoring anyway */
     }
     if (hint && prev) hint.textContent = prev;
-    window.location.href = "monitoring.html";
+    await enterApp("monitoring.html#metric");
+  }
+
+  /** Returning operators see the left rail; first-run stays installer-only. */
+  function applyShellMode(setupComplete) {
+    const body = document.body;
+    const banner = $("first-run-banner");
+    const sub = $("hdr-sub");
+    if (setupComplete) {
+      body.classList.remove("first-run");
+      if (banner) banner.classList.add("hidden");
+      if (sub) sub.textContent = "Setup";
+      if (typeof window.iotgwMountShell === "function") {
+        window.iotgwMountShell();
+      }
+    } else {
+      if (typeof window.iotgwUnmountShell === "function") {
+        window.iotgwUnmountShell();
+      } else {
+        body.classList.add("first-run");
+        body.classList.remove("has-app-shell");
+      }
+      if (banner) banner.classList.remove("hidden");
+      if (sub) sub.textContent = "First-time setup";
+    }
   }
 
   async function stopTelemetry() {
@@ -253,6 +298,7 @@
       await refreshEnv();
       if (monitoring) {
         setTelemetryReadyUi(false, "Monitoring removed — Install again when ready.");
+        applyShellMode(false);
       }
       setTimeout(closeUninstallModal, 1200);
     } catch (e) {
@@ -463,7 +509,9 @@
       if (step === steps().length - 1) {
         openMonitoring().catch((e) => {
           showErr(e);
-          window.location.href = "monitoring.html";
+          enterApp("monitoring.html#metric").catch(() => {
+            window.location.href = "monitoring.html#metric";
+          });
         });
         return;
       }
@@ -527,7 +575,9 @@
     const openActions = $("btn-open-actions");
     if (openActions) {
       openActions.addEventListener("click", () => {
-        window.location.href = "actions.html";
+        enterApp("actions.html").catch(() => {
+          window.location.href = "actions.html";
+        });
       });
     }
     showStep(0);

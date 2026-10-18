@@ -52,6 +52,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("telemetry", env)
         self.assertEqual(env["telemetry"].get("backend"), "native")
         self.assertFalse(env.get("docker_required", True))
+        self.assertIn("setup_complete", env)
+        self.assertIn(env.get("entry"), ("wizard", "app"))
         with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
             wizard_html = resp.read().decode("utf-8")
         self.assertIn("IoT Gateway Monitor", wizard_html)
@@ -60,23 +62,55 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Open Monitoring", wizard_html)
         self.assertIn("Uninstall", wizard_html)
         self.assertIn("uninstall-modal", wizard_html)
+        self.assertIn("first-run", wizard_html)
+        self.assertIn("app-shell.js", wizard_html)
+        # First-run installer must not expose the post-install top nav links.
+        self.assertNotIn('href="actions.html"', wizard_html)
+        self.assertNotIn('href="monitoring.html"', wizard_html)
+        self.assertNotIn('href="admin.html"', wizard_html)
         self.assertNotIn("lab.html", wizard_html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")
-        self.assertIn("Actions", actions_html)
+        self.assertIn("Control Plane", actions_html)
         self.assertIn("Rotate CA", actions_html)
+        self.assertIn("app-shell.js", actions_html)
         with urllib.request.urlopen(self.base + "/monitoring.html", timeout=5) as resp:
             mon = resp.read().decode("utf-8")
         self.assertIn("Monitoring", mon)
+        self.assertIn("Gateway Metric", mon)
         self.assertIn("monitoring.js", mon)
+        self.assertIn("app-shell.js", mon)
+        with urllib.request.urlopen(self.base + "/app-shell.js", timeout=5) as resp:
+            shell = resp.read().decode("utf-8")
+        self.assertIn("Monitoring", shell)
+        self.assertIn("Settings", shell)
+        self.assertIn("Gateway Metric", shell)
+        self.assertIn("Control Plane", shell)
         with urllib.request.urlopen(self.base + "/wizard.js", timeout=5) as resp:
             wjs = resp.read().decode("utf-8")
         self.assertIn("background: true", wjs)
         self.assertIn("iotgw_setup_path", wjs)
         self.assertIn("/api/wizard/uninstall", wjs)
+        self.assertIn("/api/wizard/setup/complete", wjs)
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             js = resp.read().decode("utf-8")
         self.assertIn("/api/v1/query/summaries", js)
+        self.assertIn("Gateway Metric", js)
+        with urllib.request.urlopen(self.base + "/splash.html", timeout=5) as resp:
+            splash = resp.read().decode("utf-8")
+        self.assertIn("setup_complete", splash)
+        self.assertIn("monitoring.html#metric", splash)
+
+    def test_setup_complete_marks_entry_app(self) -> None:
+        env = self._get("/api/wizard/env")
+        self.assertFalse(env.get("setup_complete"))
+        self.assertEqual(env.get("entry"), "wizard")
+        out = self._post("/api/wizard/setup/complete", {})
+        self.assertTrue(out.get("ok"))
+        self.assertTrue(out.get("setup_complete"))
+        env2 = self._get("/api/wizard/env")
+        self.assertTrue(env2.get("setup_complete"))
+        self.assertEqual(env2.get("entry"), "app")
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")
