@@ -57,6 +57,116 @@ def _popen_window(cmd: list[str], env: dict[str, str]) -> subprocess.Popen:
     return subprocess.Popen(cmd, **kwargs)
 
 
+def _profile_marker(profile: Path) -> str:
+    """Normalized substring used to spot our ``--user-data-dir`` in process lists."""
+    return str(profile.resolve()).replace("/", "\\").lower()
+
+
+def _windows_browser_command_lines() -> list[str] | None:
+    """Command lines for Chrome / Edge / Brave on Windows.
+
+    Returns ``None`` when the process list could not be read (caller must not
+    treat that as \"browser closed\").
+    """
+    ps = (
+        "Get-CimInstance Win32_Process -Filter "
+        "\"Name = 'chrome.exe' OR Name = 'msedge.exe' OR Name = 'brave.exe'\" | "
+        "ForEach-Object { $_.CommandLine }"
+    )
+    for exe in ("powershell.exe", "pwsh.exe"):
+        try:
+            proc = subprocess.run(
+                [exe, "-NoProfile", "-Command", ps],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+            continue
+        if proc.returncode != 0:
+            continue
+        return [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
+    return None
+
+
+def _posix_browser_using_profile(marker: str) -> bool | None:
+    try:
+        proc = subprocess.run(
+            ["ps", "-eo", "args="],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        return None
+    if proc.returncode != 0:
+        return None
+    needle = marker.replace("\\", "/").lower()
+    for line in (proc.stdout or "").splitlines():
+        low = line.lower()
+        if "user-data-dir" in low and needle in low.replace("\\", "/"):
+            return True
+    return False
+
+
+def _browser_using_profile(profile: Path) -> bool | None:
+    """Whether a Chromium-based browser still holds our user-data-dir.
+
+    ``None`` means the process list is unavailable — do not shut down.
+    """
+    marker = _profile_marker(profile)
+    if os.name == "nt":
+        lines = _windows_browser_command_lines()
+        if lines is None:
+            return None
+        for line in lines:
+            low = line.replace("/", "\\").lower()
+            if "user-data-dir" in low and marker in low:
+                return True
+        return False
+    return _posix_browser_using_profile(marker)
+
+
+def _wait_while_app_window_open(
+    browser: subprocess.Popen | None,
+    profile: Path,
+    *,
+    startup_grace_s: float = 8.0,
+    poll_s: float = 0.5,
+) -> None:
+    """Keep serving until the app-mode browser for ``profile`` has exited.
+
+    Chromium/Edge often spawn a short-lived broker: ``browser.wait()`` returns
+    while the real window stays open. If we shut down then, the UI shows
+    ERR_CONNECTION_REFUSED on 127.0.0.1.
+    """
+    if browser is None:
+        while True:
+            time.sleep(1.0)
+
+    deadline = time.time() + startup_grace_s
+    saw_profile_browser = False
+    while True:
+        in_use = _browser_using_profile(profile)
+        if in_use is True:
+            saw_profile_browser = True
+        elif in_use is False and saw_profile_browser:
+            return
+
+        launcher_done = browser.poll() is not None
+        if (
+            launcher_done
+            and in_use is False
+            and time.time() >= deadline
+            and not saw_profile_browser
+        ):
+            # Broker exited and no browser ever attached to our profile.
+            return
+        time.sleep(poll_s)
+
+
 def _local_lib_dir() -> Path:
     """Optional user-extracted Chrome runtime libs (no sudo): apps/desktop/.local-libs."""
     return Path(__file__).resolve().parents[1] / ".local-libs" / "usr" / "lib" / "x86_64-linux-gnu"
@@ -210,18 +320,16 @@ def run_gui(
             _visible_error("The setup wizard failed to start.")
             return 1
 
+        profile = ensure_data_dir() / "chromium-profile"
         browser = _open_app_window(wizard)
         print(f"IoT Gateway Monitor running — {wizard}")
         print(f"App data: {data_dir()}")
         print("Close the app window or press Ctrl+C to quit.")
 
-        # Stay alive while the window process runs (or forever for webview/browser).
+        # Stay alive while the real browser window uses our profile. Do not
+        # trust browser.wait() alone — Chromium's broker often exits first.
         try:
-            if browser is not None:
-                browser.wait()
-            else:
-                while True:
-                    time.sleep(1.0)
+            _wait_while_app_window_open(browser, profile)
         except KeyboardInterrupt:
             print("\nShutting down…")
         return 0
