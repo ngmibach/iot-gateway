@@ -46,9 +46,59 @@
 
     <section class="panel mon-panel" data-tab="metric" id="tab-metric">
       <h2>Gateway Metric</h2>
+      <p class="muted metric-caption">Raspberry Pi / host health from Prometheus (node-exporter + cAdvisor). Charts stay visible when scrapes are empty.</p>
+
+      <h3>General Status</h3>
       <div class="metrics" id="raspi-metrics"></div>
-      <h3>CPU sparkline</h3>
-      <div id="raspi-spark" class="spark-lg"></div>
+      <div class="metrics" id="raspi-metrics-extra"></div>
+      <div class="gauge-row" id="raspi-gauges"></div>
+      <div class="fs-bar-wrap" id="raspi-fs-bar"></div>
+
+      <h3>Hardware charts</h3>
+      <div class="chart-grid">
+        <article class="chart-panel" data-chart="cpu_pct">
+          <header class="chart-head"><span class="chart-title">CPU busy</span><span class="chart-unit">%</span></header>
+          <div class="chart-body" id="chart-cpu_pct"></div>
+        </article>
+        <article class="chart-panel" data-chart="mem_used_pct">
+          <header class="chart-head"><span class="chart-title">Memory used</span><span class="chart-unit">%</span></header>
+          <div class="chart-body" id="chart-mem_used_pct"></div>
+        </article>
+        <article class="chart-panel" data-chart="load1">
+          <header class="chart-head"><span class="chart-title">Load average (1m)</span><span class="chart-unit">load</span></header>
+          <div class="chart-body" id="chart-load1"></div>
+        </article>
+        <article class="chart-panel" data-chart="fs_used_pct">
+          <header class="chart-head"><span class="chart-title">Root filesystem used</span><span class="chart-unit">%</span></header>
+          <div class="chart-body" id="chart-fs_used_pct"></div>
+        </article>
+        <article class="chart-panel" data-chart="net_rx_mbps">
+          <header class="chart-head"><span class="chart-title">Network receive</span><span class="chart-unit">Mbps</span></header>
+          <div class="chart-body" id="chart-net_rx_mbps"></div>
+        </article>
+        <article class="chart-panel" data-chart="net_tx_mbps">
+          <header class="chart-head"><span class="chart-title">Network transmit</span><span class="chart-unit">Mbps</span></header>
+          <div class="chart-body" id="chart-net_tx_mbps"></div>
+        </article>
+        <article class="chart-panel chart-panel-wide" data-chart="temp_c">
+          <header class="chart-head"><span class="chart-title">Temperature</span><span class="chart-unit">°C</span></header>
+          <div class="chart-body" id="chart-temp_c"></div>
+        </article>
+      </div>
+
+      <h3>Containers</h3>
+      <div class="metrics" id="raspi-container-metrics"></div>
+      <div class="chart-grid chart-grid-2">
+        <article class="chart-panel" data-chart="container_cpu">
+          <header class="chart-head"><span class="chart-title">CPU per container</span><span class="chart-unit">cores</span></header>
+          <div class="chart-body" id="chart-container_cpu"></div>
+        </article>
+        <article class="chart-panel" data-chart="container_mem">
+          <header class="chart-head"><span class="chart-title">Memory per container</span><span class="chart-unit">MiB</span></header>
+          <div class="chart-body" id="chart-container_mem"></div>
+        </article>
+      </div>
+
       <div id="raspi-msg" class="muted"></div>
     </section>
 
