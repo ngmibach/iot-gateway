@@ -1,7 +1,7 @@
 """HTTP Setup Wizard UI + JSON API (stdlib).
 
 Serves ``ui/`` and exposes wizard steps that shell out to detect / nic /
-checklist / ssh_setup / launcher. Firewall commands are display-only (K18).
+checklist / ssh_setup / launcher. Native Windows applies Loki :3100 firewall when elevated.
 """
 
 from __future__ import annotations
@@ -17,7 +17,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from . import admin_auth, detect, keyring_store, ssh_setup, uninstall as uninstall_mod
+from . import (
+    admin_auth,
+    detect,
+    discover,
+    firewall_apply,
+    keyring_store,
+    ssh_setup,
+    uninstall as uninstall_mod,
+)
 from .launcher import ProcessManager, open_in_browser, wait_http
 from .paths import (
     CONTROL_HOST,
@@ -563,6 +571,67 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True, "settings": settings})
             return
 
+        if method == "POST" and path == "/api/wizard/discover/gateways":
+            body = _read_json(handler)
+            try:
+                port = int(body.get("port") or discover.DEFAULT_SSH_PORT)
+            except (TypeError, ValueError):
+                _json_response(handler, 400, {"error": "invalid port"})
+                return
+            try:
+                timeout_s = float(body.get("timeout_s") or discover.DEFAULT_TIMEOUT_S)
+            except (TypeError, ValueError):
+                timeout_s = discover.DEFAULT_TIMEOUT_S
+            monitoring_ip = str(body.get("monitoring_ip") or "").strip() or None
+            prefix = body.get("prefix")
+            try:
+                pref = int(prefix) if prefix is not None and prefix != "" else None
+            except (TypeError, ValueError):
+                _json_response(handler, 400, {"error": "invalid prefix"})
+                return
+            try:
+                out = discover.discover_gateways(
+                    monitoring_ip=monitoring_ip,
+                    prefix=pref,
+                    port=port,
+                    timeout_s=timeout_s,
+                )
+                _json_response(handler, 200, out)
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                logger.exception("gateway discover failed")
+                _json_response(handler, 500, {"error": str(e)})
+            return
+
+        if method == "GET" and path == "/api/wizard/firewall/status":
+            try:
+                st = firewall_apply.firewall_status()
+                st["confirmed"] = STATE.firewall_confirmed or bool(
+                    st.get("rule_present")
+                )
+                _json_response(handler, 200, st)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("firewall status failed")
+                _json_response(handler, 500, {"error": str(e)})
+            return
+
+        if method == "POST" and path == "/api/wizard/firewall/apply":
+            try:
+                out = firewall_apply.apply_loki_firewall()
+                if out.get("ok"):
+                    STATE.firewall_confirmed = True
+                    settings = load_settings()
+                    settings["firewall_checklist_confirmed"] = True
+                    save_settings(settings)
+                _json_response(handler, 200, out)
+            except firewall_apply.FirewallError as e:
+                _json_response(handler, 403, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                logger.exception("firewall apply failed")
+                _json_response(handler, 500, {"ok": False, "error": str(e)})
+            return
+
         if method == "GET" and path == "/api/wizard/checklist":
             from telemetry.checklist import (  # type: ignore[import-not-found]
                 format_checklist_for_display,
@@ -575,8 +644,10 @@ def _handle_api(
             wsl = detect.detect_wsl()
             runtime = detect.operator_runtime()
             monitoring_ip = str(settings.get("monitoring_ip") or "").strip() or None
+            fw = firewall_apply.firewall_status()
 
             # Packaged Windows .exe: native Loki on 0.0.0.0:3100 — firewall only.
+            # Prefer in-app apply when elevated; keep commands as fallback detail.
             if runtime == "windows":
                 items = generate_windows_native_checklist(monitoring_ip=monitoring_ip)
                 payload_items = [
@@ -588,6 +659,7 @@ def _handle_api(
                     }
                     for i in items
                 ]
+                confirmed = STATE.firewall_confirmed or bool(fw.get("rule_present"))
                 _json_response(
                     handler,
                     200,
@@ -597,13 +669,15 @@ def _handle_api(
                         "monitoring_ip": monitoring_ip,
                         "items": payload_items,
                         "display": format_checklist_for_display(items),
-                        "auto_apply": False,
+                        "auto_apply": True,
+                        "elevated": fw.get("elevated"),
+                        "rule_present": fw.get("rule_present"),
                         "note": (
-                            "Display only — run elevated yourself; the app will not "
-                            "change Windows Firewall (K18). WSL is not required."
+                            "The app applies the Windows Firewall rule when run as "
+                            "Administrator (inbound TCP 3100). WSL is not required."
                         ),
                         "localhost_forwarding_note": wsl.localhost_forwarding_note,
-                        "confirmed": STATE.firewall_confirmed,
+                        "confirmed": confirmed,
                     },
                 )
                 return

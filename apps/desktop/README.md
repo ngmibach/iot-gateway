@@ -17,7 +17,7 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
    - **Monitoring:** Gateway Metric · Gateway Activities · Control Plane
    - **Gateways:** Registration · Settings · Clean up
    - **Settings:** Remove (panel) · Admin
-4. Register gateways under **Gateways → Registration**. Configure them under **Gateways → Settings**. Remove one gateway under **Gateways → Clean up**.
+4. Register gateways under **Gateways → Registration**: save this PC’s LAN, **Scan LAN for SSH**, select a detected device, pin SSH, **Apply firewall** (run the app as Administrator), then install the agent. Configure under **Gateways → Settings**. Remove one gateway under **Gateways → Clean up**.
 5. **Settings → Remove** uninstalls the monitoring panel on this PC (and every gateway registered to it). Returns you to the first-run wizard.
 
 ## Maintainers

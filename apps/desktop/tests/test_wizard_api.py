@@ -119,6 +119,15 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("/api/wizard/provision", gjs)
         self.assertIn("monitoring: false", gjs)
         self.assertIn("/api/wizard/settings/gateway", gjs)
+        self.assertIn("/api/wizard/discover/gateways", gjs)
+        self.assertIn("/api/wizard/firewall/apply", gjs)
+        self.assertNotIn("checklist-wrap", gjs)
+        with urllib.request.urlopen(self.base + "/gateways.html", timeout=5) as resp:
+            gw_html2 = resp.read().decode("utf-8")
+        self.assertIn("Scan LAN for SSH", gw_html2)
+        self.assertIn("Apply firewall", gw_html2)
+        self.assertNotIn("checklist-wrap", gw_html2)
+        self.assertNotIn('id="gateway-ip"', gw_html2)
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             js = resp.read().decode("utf-8")
         self.assertIn("/api/v1/query/summaries", js)
@@ -177,12 +186,67 @@ class WizardApiTests(unittest.TestCase):
             data = self._get("/api/wizard/checklist")
         self.assertTrue(data.get("applicable"))
         self.assertEqual(data.get("path"), "windows_native")
-        self.assertFalse(data.get("auto_apply"))
+        self.assertTrue(data.get("auto_apply"))
         cmds = [i["command"] for i in data["items"] if i.get("command")]
         self.assertTrue(any("advfirewall" in c for c in cmds))
         self.assertFalse(any("portproxy" in c for c in cmds))
         conf = self._post("/api/wizard/checklist/confirm", {})
         self.assertTrue(conf["confirmed"])
+
+    def test_discover_gateways_requires_monitoring_ip(self) -> None:
+        req = urllib.request.Request(
+            self.base + "/api/wizard/discover/gateways",
+            data=b"{}",
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 400)
+
+    def test_discover_gateways_returns_hosts(self) -> None:
+        from unittest import mock
+
+        from shell.paths import save_settings
+
+        save_settings({"monitoring_ip": "192.168.1.20"})
+        with mock.patch(
+            "shell.discover.scan_ssh_hosts",
+            return_value=[
+                {"ip": "192.168.1.50", "port": 22, "open": True},
+                {"ip": "192.168.1.60", "port": 22, "open": True},
+            ],
+        ):
+            data = self._post("/api/wizard/discover/gateways", {})
+        self.assertTrue(data.get("ok"))
+        self.assertEqual(data.get("count"), 2)
+        ips = {h["ip"] for h in data.get("hosts") or []}
+        self.assertEqual(ips, {"192.168.1.50", "192.168.1.60"})
+
+    def test_firewall_apply_skips_non_windows(self) -> None:
+        from unittest import mock
+
+        with mock.patch("shell.detect.operator_runtime", return_value="linux"):
+            with mock.patch("shell.firewall_apply.is_elevated", return_value=None):
+                data = self._post("/api/wizard/firewall/apply", {})
+        self.assertTrue(data.get("ok"))
+        self.assertTrue(data.get("skipped"))
+        self.assertFalse(data.get("applicable"))
+
+    def test_firewall_apply_requires_admin_on_windows(self) -> None:
+        from unittest import mock
+
+        with mock.patch("shell.detect.operator_runtime", return_value="windows"):
+            with mock.patch("shell.firewall_apply.is_elevated", return_value=False):
+                req = urllib.request.Request(
+                    self.base + "/api/wizard/firewall/apply",
+                    data=b"{}",
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with self.assertRaises(urllib.error.HTTPError) as ctx:
+                    urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(ctx.exception.code, 403)
 
     def test_nic_select_persists(self) -> None:
         out = self._post(
