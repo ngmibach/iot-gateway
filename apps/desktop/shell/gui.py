@@ -57,76 +57,24 @@ def _popen_window(cmd: list[str], env: dict[str, str]) -> subprocess.Popen:
     return subprocess.Popen(cmd, **kwargs)
 
 
-def _profile_marker(profile: Path) -> str:
-    """Normalized substring used to spot our ``--user-data-dir`` in process lists."""
-    return str(profile.resolve()).replace("/", "\\").lower()
-
-
-def _windows_browser_command_lines() -> list[str] | None:
-    """Command lines for Chrome / Edge / Brave on Windows.
-
-    Returns ``None`` when the process list could not be read (caller must not
-    treat that as \"browser closed\").
-    """
-    ps = (
-        "Get-CimInstance Win32_Process -Filter "
-        "\"Name = 'chrome.exe' OR Name = 'msedge.exe' OR Name = 'brave.exe'\" | "
-        "ForEach-Object { $_.CommandLine }"
-    )
-    for exe in ("powershell.exe", "pwsh.exe"):
-        try:
-            proc = subprocess.run(
-                [exe, "-NoProfile", "-Command", ps],
-                check=False,
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-        except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-            continue
-        if proc.returncode != 0:
-            continue
-        return [ln.strip() for ln in (proc.stdout or "").splitlines() if ln.strip()]
-    return None
-
-
-def _posix_browser_using_profile(marker: str) -> bool | None:
-    try:
-        proc = subprocess.run(
-            ["ps", "-eo", "args="],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
-        return None
-    if proc.returncode != 0:
-        return None
-    needle = marker.replace("\\", "/").lower()
-    for line in (proc.stdout or "").splitlines():
-        low = line.lower()
-        if "user-data-dir" in low and needle in low.replace("\\", "/"):
-            return True
-    return False
+# Chromium/Edge create these under --user-data-dir while the profile is held.
+_CHROMIUM_LOCK_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
 
 
 def _browser_using_profile(profile: Path) -> bool | None:
     """Whether a Chromium-based browser still holds our user-data-dir.
 
-    ``None`` means the process list is unavailable — do not shut down.
+    Uses profile lock files only. Do **not** spawn PowerShell/``ps`` here — the
+    wait loop polls often and would open a console on every tick.
+    ``None`` means the profile dir could not be read — do not shut down.
     """
-    marker = _profile_marker(profile)
-    if os.name == "nt":
-        lines = _windows_browser_command_lines()
-        if lines is None:
-            return None
-        for line in lines:
-            low = line.replace("/", "\\").lower()
-            if "user-data-dir" in low and marker in low:
+    try:
+        for name in _CHROMIUM_LOCK_NAMES:
+            if (profile / name).exists():
                 return True
         return False
-    return _posix_browser_using_profile(marker)
+    except OSError:
+        return None
 
 
 def _wait_while_app_window_open(
