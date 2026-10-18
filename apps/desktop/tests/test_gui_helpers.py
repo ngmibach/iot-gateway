@@ -21,6 +21,12 @@ class GuiHelperTests(unittest.TestCase):
         if path is not None:
             self.assertTrue(path.is_file())
 
+    def test_browser_using_profile_reads_windows_lockfile(self) -> None:
+        profile = Path(tempfile.mkdtemp())
+        self.assertFalse(gui._browser_using_profile(profile))
+        (profile / "lockfile").write_text("", encoding="utf-8")
+        self.assertTrue(gui._browser_using_profile(profile))
+
     def test_browser_using_profile_reads_singleton_lock(self) -> None:
         profile = Path(tempfile.mkdtemp())
         self.assertFalse(gui._browser_using_profile(profile))

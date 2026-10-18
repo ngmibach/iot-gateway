@@ -58,7 +58,13 @@ def _popen_window(cmd: list[str], env: dict[str, str]) -> subprocess.Popen:
 
 
 # Chromium/Edge create these under --user-data-dir while the profile is held.
-_CHROMIUM_LOCK_NAMES = ("SingletonLock", "SingletonSocket", "SingletonCookie")
+# Windows Chrome uses ``lockfile``; Linux/macOS use the Singleton* names.
+_CHROMIUM_LOCK_NAMES = (
+    "lockfile",
+    "SingletonLock",
+    "SingletonSocket",
+    "SingletonCookie",
+)
 
 
 def _browser_using_profile(profile: Path) -> bool | None:

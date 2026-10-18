@@ -21,10 +21,18 @@
   }
 
   async function api(path, opts) {
-    const res = await fetch(path, {
-      headers: { "Content-Type": "application/json", ...(opts && opts.headers) },
-      ...opts,
-    });
+    let res;
+    try {
+      res = await fetch(path, {
+        headers: { "Content-Type": "application/json", ...(opts && opts.headers) },
+        ...opts,
+      });
+    } catch (e) {
+      throw new Error(
+        "Cannot reach the local app server (Failed to fetch). " +
+          "Close this window and start IoT Gateway Monitor again."
+      );
+    }
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || res.statusText || "request failed");
     return data;
