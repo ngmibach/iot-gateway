@@ -21,6 +21,8 @@ class PathsTests(unittest.TestCase):
         self.assertTrue((ui / "wizard.html").is_file())
         self.assertTrue((ui / "app-shell.js").is_file())
         self.assertTrue((ui / "splash.html").is_file())
+        self.assertTrue((ui / "settings.html").is_file())
+        self.assertTrue((ui / "settings.js").is_file())
 
     def test_control_service_dir_source(self) -> None:
         cs = paths.control_service_dir()

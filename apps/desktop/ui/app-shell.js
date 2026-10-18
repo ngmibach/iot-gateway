@@ -32,6 +32,7 @@
       label: "Settings",
       items: [
         { id: "setup", label: "Setup", href: "wizard.html", page: "wizard" },
+        { id: "remove", label: "Remove", href: "settings.html", page: "settings" },
         { id: "admin", label: "Admin", href: "admin.html", page: "admin" },
       ],
     },
@@ -44,6 +45,7 @@
     if (name.indexOf("wizard") === 0) return "wizard";
     if (name.indexOf("monitoring") === 0) return "monitoring";
     if (name.indexOf("actions") === 0) return "actions";
+    if (name.indexOf("settings") === 0) return "settings";
     if (name.indexOf("admin") === 0) return "admin";
     return "";
   }

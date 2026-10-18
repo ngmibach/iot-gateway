@@ -16,8 +16,9 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
 3. Click **Install monitoring** — the app downloads Loki + Prometheus and starts them (progress is polled; no Docker).
 4. Click **Open Monitoring** (or Finish → Done). The next launch skips the installer and opens the app shell:
    - **Monitoring:** Gateway Metric · Gateway Activities · Control Plane
-   - **Settings:** Setup · Admin
-5. Gateway SSH/agent steps stay optional until you pick Full setup. Uninstall Monitoring returns you to the first-run wizard.
+   - **Settings:** Setup · Remove · Admin
+5. Gateway SSH/agent steps stay optional until you pick Full setup.
+6. **Settings → Remove:** Gateway only (keeps Loki/Prometheus), or Monitoring panel (also removes every gateway registered to that panel and wipes local app data). Returns you to the first-run wizard after a Monitoring wipe.
 
 ## Maintainers
 

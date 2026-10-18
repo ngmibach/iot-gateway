@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Remove</title>
+  <link rel="stylesheet" href="wizard.css" />
+</head>
+<body data-page="settings">
+  <header>
+    <div>
+      <h1>Remove</h1>
+      <div class="sub">Uninstall Gateway and/or Monitoring on this PC</div>
+    </div>
+    <div id="hdr-status"></div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>What to remove</h2>
+      <p class="muted" id="targets-hint">
+        Choose Gateway only to keep Loki and Prometheus. Choosing Monitoring
+        also removes every gateway registered to this monitoring panel and
+        clears local app data. The downloaded <code>.exe</code> is left for you
+        to delete.
+      </p>
+
+      <label class="path-option remove-option">
+        <input type="radio" name="remove-target" value="gateway" checked />
+        <span>
+          <strong>Gateway only</strong>
+          <small id="gw-option-detail">
+            Remove the agent on the Raspberry Pi (and its registry row). Monitoring stays installed.
+          </small>
+        </span>
+      </label>
+      <label class="path-option remove-option">
+        <input type="radio" name="remove-target" value="monitoring" />
+        <span>
+          <strong>Monitoring panel</strong>
+          <small>
+            Stop Loki/Prometheus, wipe local app data, and remove every gateway
+            registered to this panel.
+          </small>
+        </span>
+      </label>
+
+      <div id="gateway-pick" class="gateway-pick">
+        <div class="row">
+          <label for="rm-gateway-id">Gateway</label>
+          <select id="rm-gateway-id"></select>
+          <button type="button" class="secondary" id="btn-refresh-targets">Refresh</button>
+        </div>
+        <div class="note-box" id="registered-list"></div>
+      </div>
+
+      <div id="sudo-wrap" class="row">
+        <label for="rm-sudo">Gateway sudo password</label>
+        <input
+          id="rm-sudo"
+          type="password"
+          autocomplete="off"
+          placeholder="required to remove the agent over SSH"
+        />
+      </div>
+
+      <div class="note-box danger" id="rm-summary"></div>
+      <div class="row">
+        <button class="danger" id="btn-rm-confirm" disabled>Confirm remove</button>
+      </div>
+      <div id="rm-msg"></div>
+    </section>
+  </main>
+  <script src="app-shell.js"></script>
+  <script src="settings.js"></script>
+</body>
+</html>

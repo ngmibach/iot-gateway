@@ -44,45 +44,17 @@
       <div class="row">
         <button class="primary" id="btn-prepare-telemetry">Install monitoring</button>
         <button class="secondary" id="btn-stop-telemetry">Stop</button>
-        <button class="secondary" id="btn-uninstall">Uninstall…</button>
         <button class="secondary" id="btn-open-mon-early" disabled>
           Open Monitoring
         </button>
         <span id="telemetry-badge"></span>
       </div>
       <div class="note-box" id="telemetry-hint"></div>
+      <p class="muted" id="remove-hint" hidden>
+        After setup, use <strong>Settings → Remove</strong> to uninstall Gateway
+        or the Monitoring panel.
+      </p>
     </section>
-
-    <div id="uninstall-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="uninstall-title">
-      <div class="modal-card">
-        <h2 id="uninstall-title">Uninstall</h2>
-        <p class="muted">
-          Choose what to remove. Monitoring wipe also removes Gateway and clears
-          local app data under this PC (binaries, registry, settings, Chromium profile).
-          The downloaded <code>.exe</code> is left for you to delete.
-        </p>
-        <label class="chk">
-          <input type="checkbox" id="un-gateway" />
-          Gateway (agent on the Raspberry Pi)
-        </label>
-        <label class="chk">
-          <input type="checkbox" id="un-monitoring" />
-          Monitoring (Loki + Prometheus + full local app data; requires Gateway)
-        </label>
-        <div id="un-gateway-fields" class="hidden">
-          <div class="row">
-            <label for="un-sudo">Gateway sudo password</label>
-            <input id="un-sudo" type="password" autocomplete="off" placeholder="required if a gateway was provisioned on the Pi" />
-          </div>
-        </div>
-        <div class="note-box danger" id="un-summary"></div>
-        <div class="row">
-          <button class="secondary" id="btn-un-cancel">Cancel</button>
-          <button class="primary" id="btn-un-confirm" disabled>Confirm uninstall</button>
-        </div>
-        <div id="un-msg"></div>
-      </div>
-    </div>
 
     <section class="panel step hidden" data-step="1" id="step-nic">
       <h2>Network</h2>

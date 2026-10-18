@@ -118,6 +118,9 @@ body.first-run main { max-width: 720px; }
   line-height: 1.45;
 }
 .first-run-banner strong { color: var(--text); }
+.remove-option { margin-bottom: 0.5rem; }
+.gateway-pick { margin: 0.75rem 0; }
+.gateway-pick.hidden { display: none !important; }
 .steps {
   display: flex;
   gap: 0.35rem;

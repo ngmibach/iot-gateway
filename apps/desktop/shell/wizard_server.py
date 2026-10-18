@@ -365,11 +365,19 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True})
             return
 
+        if method == "GET" and path == "/api/wizard/uninstall/targets":
+            try:
+                _json_response(handler, 200, uninstall_mod.uninstall_targets())
+            except Exception as e:  # noqa: BLE001
+                logger.exception("uninstall targets failed")
+                _json_response(handler, 500, {"ok": False, "error": str(e)})
+            return
+
         if method == "POST" and path == "/api/wizard/uninstall":
             body = _read_json(handler)
             do_gateway = bool(body.get("gateway", False))
             do_monitoring = bool(body.get("monitoring", False))
-            # Coupling: Monitoring always pulls Gateway when caller forgot.
+            # Coupling: Monitoring always removes every registered gateway.
             if do_monitoring:
                 do_gateway = True
             sudo_password = str(body.get("sudo_password") or "")
@@ -379,7 +387,7 @@ def _handle_api(
                     gateway=do_gateway,
                     monitoring=do_monitoring,
                     sudo_password=sudo_password,
-                    gateway_id=gateway_id,
+                    gateway_id=None if do_monitoring else gateway_id,
                     stop_telemetry=lambda: STATE.telemetry.stop(),
                     stop_services=lambda: STATE.manager.stop_all(),
                     telemetry_uninstall=lambda: STATE.telemetry.uninstall(),

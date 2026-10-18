@@ -60,8 +60,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Monitoring only", wizard_html)
         self.assertIn("Full setup", wizard_html)
         self.assertIn("Open Monitoring", wizard_html)
-        self.assertIn("Uninstall", wizard_html)
-        self.assertIn("uninstall-modal", wizard_html)
+        self.assertNotIn("uninstall-modal", wizard_html)
+        self.assertNotIn("btn-uninstall", wizard_html)
         self.assertIn("first-run", wizard_html)
         self.assertIn("app-shell.js", wizard_html)
         # First-run installer must not expose the post-install top nav links.
@@ -69,6 +69,12 @@ class WizardApiTests(unittest.TestCase):
         self.assertNotIn('href="monitoring.html"', wizard_html)
         self.assertNotIn('href="admin.html"', wizard_html)
         self.assertNotIn("lab.html", wizard_html)
+        with urllib.request.urlopen(self.base + "/settings.html", timeout=5) as resp:
+            settings_html = resp.read().decode("utf-8")
+        self.assertIn("Remove", settings_html)
+        self.assertIn("Monitoring panel", settings_html)
+        self.assertIn("settings.js", settings_html)
+        self.assertIn("app-shell.js", settings_html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")
         self.assertIn("Control Plane", actions_html)
@@ -86,11 +92,17 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Settings", shell)
         self.assertIn("Gateway Metric", shell)
         self.assertIn("Control Plane", shell)
+        self.assertIn("settings.html", shell)
+        self.assertIn("Remove", shell)
         with urllib.request.urlopen(self.base + "/wizard.js", timeout=5) as resp:
             wjs = resp.read().decode("utf-8")
         self.assertIn("background: true", wjs)
         self.assertIn("iotgw_setup_path", wjs)
-        self.assertIn("/api/wizard/uninstall", wjs)
+        self.assertNotIn("/api/wizard/uninstall", wjs)
+        with urllib.request.urlopen(self.base + "/settings.js", timeout=5) as resp:
+            sjs = resp.read().decode("utf-8")
+        self.assertIn("/api/wizard/uninstall", sjs)
+        self.assertIn("/api/wizard/uninstall/targets", sjs)
         self.assertIn("/api/wizard/setup/complete", wjs)
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             js = resp.read().decode("utf-8")
@@ -365,7 +377,8 @@ class WizardApiTests(unittest.TestCase):
         # wipe recreates empty data dir
         self.assertTrue(data_dir().is_dir())
 
-    def test_uninstall_monitoring_requires_gateway_when_provisioned(self) -> None:
+    def test_uninstall_monitoring_forces_all_gateways(self) -> None:
+        """Monitoring wipe auto-includes every registered gateway (needs sudo)."""
         from pathlib import Path
 
         from shell.paths import save_settings
@@ -375,11 +388,12 @@ class WizardApiTests(unittest.TestCase):
                 "ssh_host": "192.168.1.50",
                 "ssh_user": "ubuntu",
                 "gateway_ip": "192.168.1.50",
+                "default_gateway_id": "gateway",
             }
         )
-        # Call run_uninstall directly with monitoring=True gateway=False to hit coupling.
         from shell import uninstall as uninstall_mod
 
+        # monitoring=True with gateway=False still couples and needs sudo for SSH.
         with self.assertRaises(uninstall_mod.UninstallError) as ctx:
             uninstall_mod.run_uninstall(
                 gateway=False,
@@ -388,9 +402,9 @@ class WizardApiTests(unittest.TestCase):
                 stop_services=lambda: None,
                 telemetry_uninstall=lambda: {"ok": True},
             )
-        self.assertIn("requires Gateway", str(ctx.exception))
+        self.assertIn("sudo password", str(ctx.exception).lower())
 
-        # Wizard API forces gateway=True when monitoring — without sudo → 409.
+        # API: monitoring alone → gateway forced → 409 without sudo.
         req = urllib.request.Request(
             self.base + "/api/wizard/uninstall",
             data=json.dumps({"monitoring": True}).encode("utf-8"),
@@ -400,8 +414,92 @@ class WizardApiTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as http_ctx:
             urllib.request.urlopen(req, timeout=10)
         self.assertEqual(http_ctx.exception.code, 409)
-        # silence unused
         self.assertTrue(Path(self._td.name).is_dir())
+
+    def test_uninstall_targets_lists_registry_gateways(self) -> None:
+        from registry.registry import Registry
+        from shell.paths import ensure_data_dir
+
+        reg = Registry(str(ensure_data_dir() / "registry.sqlite"))
+        try:
+            reg.upsert_gateway(
+                "gw-a",
+                host="192.168.1.10",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="aa",
+            )
+            reg.upsert_gateway(
+                "gw-b",
+                host="192.168.1.11",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="bb",
+            )
+        finally:
+            reg.close()
+        data = self._get("/api/wizard/uninstall/targets")
+        ids = {g["id"] for g in data.get("gateways") or []}
+        self.assertIn("gw-a", ids)
+        self.assertIn("gw-b", ids)
+        self.assertIn("monitoring_hint", data)
+
+    def test_uninstall_monitoring_removes_all_registry_gateways(self) -> None:
+        from pathlib import Path
+        from unittest import mock
+
+        from registry.registry import Registry
+        from shell import uninstall as uninstall_mod
+        from shell.paths import ensure_data_dir
+
+        reg_path = ensure_data_dir() / "registry.sqlite"
+        reg = Registry(str(reg_path))
+        try:
+            reg.upsert_gateway(
+                "gw-a",
+                host="192.168.1.10",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="aa",
+            )
+            reg.upsert_gateway(
+                "gw-b",
+                host="192.168.1.11",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="bb",
+            )
+        finally:
+            reg.close()
+
+        with mock.patch.object(
+            uninstall_mod,
+            "uninstall_gateway_over_ssh",
+            return_value=["stopped"],
+        ) as ssh_un:
+            with mock.patch.object(uninstall_mod, "clear_local_secrets"):
+                out = uninstall_mod.run_uninstall(
+                    gateway=False,
+                    monitoring=True,
+                    sudo_password="secret",
+                    stop_telemetry=lambda: None,
+                    stop_services=lambda: None,
+                    telemetry_uninstall=lambda: {
+                        "ok": True,
+                        "root": str(Path(self._td.name) / "telemetry"),
+                        "errors": [],
+                    },
+                )
+        self.assertEqual(ssh_un.call_count, 2)
+        self.assertTrue(out.get("ok"))
+        self.assertEqual(sorted(out["gateway"]["ids"]), ["gw-a", "gw-b"])
+        # wipe_app_data removes registry; re-open should be empty / missing.
+        if reg_path.is_file():
+            reg2 = Registry(str(reg_path))
+            try:
+                self.assertEqual(reg2.list_gateways(), [])
+            finally:
+                reg2.close()
 
     def test_uninstall_gateway_only_keeps_telemetry(self) -> None:
         from pathlib import Path
