@@ -121,6 +121,14 @@ body.first-run main { max-width: 720px; }
 .remove-option { margin-bottom: 0.5rem; }
 .gateway-pick { margin: 0.75rem 0; }
 .gateway-pick.hidden { display: none !important; }
+.remove-list {
+  margin: 0.75rem 0 1rem;
+  padding-left: 1.25rem;
+  color: var(--muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.remove-list li { margin: 0.25rem 0; }
 .steps {
   display: flex;
   gap: 0.35rem;

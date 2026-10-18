@@ -17,28 +17,25 @@
   <main>
     <section class="panel">
       <h2>Remove monitoring panel</h2>
-      <p class="muted" id="targets-hint">
-        Removes Loki, Prometheus, and local app data on this PC. Every gateway
-        registered to this panel is also removed. The downloaded
-        <code>.exe</code> is left for you to delete. To remove a single gateway
-        and keep monitoring, use <strong>Gateways → Clean up</strong>.
-      </p>
+      <p class="muted">This removes the monitoring install on this PC.</p>
+      <ul class="remove-list" id="rm-list">
+        <li>Loki and Prometheus</li>
+        <li>Local app data (settings, registry, keyring, Chromium profile)</li>
+        <li id="rm-gateways-item">Registered gateways linked to this panel</li>
+      </ul>
 
-      <div class="note-box" id="registered-list"></div>
-
-      <div id="sudo-wrap" class="row">
+      <div id="sudo-wrap" class="row hidden">
         <label for="rm-sudo">Gateway sudo password</label>
         <input
           id="rm-sudo"
           type="password"
           autocomplete="off"
-          placeholder="required when gateways need SSH uninstall"
+          placeholder="required to remove gateway agents over SSH"
         />
       </div>
 
-      <div class="note-box danger" id="rm-summary"></div>
       <div class="row">
-        <button class="danger" id="btn-rm-confirm">Confirm remove panel</button>
+        <button class="danger" id="btn-rm-confirm">Confirm remove</button>
       </div>
       <div id="rm-msg"></div>
     </section>

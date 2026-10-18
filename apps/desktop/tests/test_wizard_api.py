@@ -79,8 +79,10 @@ class WizardApiTests(unittest.TestCase):
             settings_html = resp.read().decode("utf-8")
         self.assertIn("Remove", settings_html)
         self.assertIn("monitoring panel", settings_html.lower())
-        self.assertIn("Gateways → Clean up", settings_html)
+        self.assertIn("Loki and Prometheus", settings_html)
+        self.assertIn("Local app data", settings_html)
         self.assertNotIn("Gateway only", settings_html)
+        self.assertNotIn("Gateways → Clean up", settings_html)
         self.assertIn("settings.js", settings_html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")

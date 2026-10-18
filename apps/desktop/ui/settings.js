@@ -35,46 +35,28 @@
 
   function updateSummary() {
     const list = targets.gateways || [];
-    const lines = [
-      "• Stop Loki/Prometheus and wipe local app data (registry, settings, keyring fallback, Chromium profile).",
-    ];
+    const item = $("rm-gateways-item");
     if (list.length) {
-      lines.push(
-        "• Every registered gateway will also be removed: " +
-          list.map((g) => (g.host ? `${g.id} @ ${g.host}` : g.id)).join(", ")
-      );
+      item.textContent =
+        "Registered gateways: " +
+        list.map((g) => (g.host ? `${g.id} @ ${g.host}` : g.id)).join(", ");
+      item.hidden = false;
     } else if (targets.provisioned) {
-      lines.push(
-        "• The provisioned gateway agent will be removed over SSH, then local data is wiped."
-      );
+      item.textContent =
+        "Provisioned gateway agent" +
+        (targets.ssh_host ? ` (${targets.ssh_host})` : "");
+      item.hidden = false;
     } else {
-      lines.push("• No gateways are registered — monitoring wipe only.");
+      item.hidden = true;
     }
-    lines.push("• The downloaded .exe is left for you to delete.");
-    $("rm-summary").textContent = lines.join("\n");
-
-    const needSudo = list.length > 0 || targets.provisioned;
-    $("sudo-wrap").classList.toggle("hidden", !needSudo);
+    $("sudo-wrap").classList.toggle(
+      "hidden",
+      !(list.length > 0 || targets.provisioned)
+    );
   }
 
   async function refreshTargets() {
     targets = await api("/api/wizard/uninstall/targets");
-    const reg = $("registered-list");
-    if (!(targets.gateways || []).length) {
-      reg.textContent = targets.provisioned
-        ? `Provisioned SSH host: ${targets.ssh_host || "—"} (will be removed with the panel).`
-        : "No gateways registered to this monitoring panel.";
-    } else {
-      reg.innerHTML =
-        "<strong>Gateways that will be removed with this panel</strong><br/>" +
-        targets.gateways
-          .map(
-            (g) =>
-              escapeHtml(g.id) +
-              (g.host ? " — " + escapeHtml(g.host) : "")
-          )
-          .join("<br/>");
-    }
     updateSummary();
     $("hdr-status").innerHTML = '<span class="badge ok">Ready</span>';
   }
