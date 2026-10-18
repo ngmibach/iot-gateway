@@ -76,8 +76,9 @@ def uninstall_targets() -> dict[str, Any]:
         "ssh_user": str(settings.get("ssh_user") or "ubuntu"),
         "ssh_port": int(settings.get("ssh_port") or 22),
         "monitoring_hint": (
-            "Removing Monitoring also removes every gateway registered to this "
-            "panel and clears local app data on this PC."
+            "Removing the monitoring panel also removes every gateway "
+            "registered to this panel and clears local app data on this PC. "
+            "Use Gateways → Clean up to remove a single gateway."
         ),
     }
 

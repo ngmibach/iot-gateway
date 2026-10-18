@@ -520,17 +520,45 @@ def _handle_api(
             body = _read_json(handler)
             ip = str(body.get("monitoring_ip") or "").strip()
             nic = str(body.get("nic_name") or "").strip()
-            if not ip:
-                _json_response(handler, 400, {"error": "monitoring_ip required"})
+            gateway_ip = str(body.get("gateway_ip") or "").strip()
+            if not ip and not gateway_ip:
+                _json_response(
+                    handler, 400, {"error": "monitoring_ip or gateway_ip required"}
+                )
                 return
             settings = load_settings()
-            settings["monitoring_ip"] = ip
+            if ip:
+                settings["monitoring_ip"] = ip
             if nic:
                 settings["nic_name"] = nic
             if body.get("windows_net_mode"):
                 settings["windows_net_mode"] = body["windows_net_mode"]
-            if body.get("gateway_ip"):
-                settings["gateway_ip"] = str(body["gateway_ip"]).strip()
+            if gateway_ip:
+                settings["gateway_ip"] = gateway_ip
+            save_settings(settings)
+            _json_response(handler, 200, {"ok": True, "settings": settings})
+            return
+
+        if method == "POST" and path == "/api/wizard/settings/gateway":
+            body = _read_json(handler)
+            settings = load_settings()
+            gid = str(body.get("gateway_id") or "").strip()
+            host = str(body.get("ssh_host") or body.get("gateway_ip") or "").strip()
+            if not host:
+                _json_response(handler, 400, {"error": "ssh_host or gateway_ip required"})
+                return
+            if gid:
+                settings["default_gateway_id"] = gid
+            settings["gateway_ip"] = str(body.get("gateway_ip") or host).strip()
+            settings["ssh_host"] = host
+            if body.get("ssh_user") is not None:
+                settings["ssh_user"] = str(body.get("ssh_user") or "ubuntu").strip()
+            if body.get("ssh_port") is not None:
+                try:
+                    settings["ssh_port"] = int(body.get("ssh_port") or 22)
+                except (TypeError, ValueError):
+                    _json_response(handler, 400, {"error": "invalid ssh_port"})
+                    return
             save_settings(settings)
             _json_response(handler, 200, {"ok": True, "settings": settings})
             return

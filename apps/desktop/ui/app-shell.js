@@ -28,10 +28,36 @@
       ],
     },
     {
+      id: "gateways",
+      label: "Gateways",
+      items: [
+        {
+          id: "registration",
+          label: "Registration",
+          href: "gateways.html#registration",
+          page: "gateways",
+          hash: "registration",
+        },
+        {
+          id: "gw-settings",
+          label: "Settings",
+          href: "gateways.html#settings",
+          page: "gateways",
+          hash: "settings",
+        },
+        {
+          id: "cleanup",
+          label: "Clean up",
+          href: "gateways.html#cleanup",
+          page: "gateways",
+          hash: "cleanup",
+        },
+      ],
+    },
+    {
       id: "settings",
       label: "Settings",
       items: [
-        { id: "setup", label: "Setup", href: "wizard.html", page: "wizard" },
         { id: "remove", label: "Remove", href: "settings.html", page: "settings" },
         { id: "admin", label: "Admin", href: "admin.html", page: "admin" },
       ],
@@ -45,6 +71,7 @@
     if (name.indexOf("wizard") === 0) return "wizard";
     if (name.indexOf("monitoring") === 0) return "monitoring";
     if (name.indexOf("actions") === 0) return "actions";
+    if (name.indexOf("gateways") === 0) return "gateways";
     if (name.indexOf("settings") === 0) return "settings";
     if (name.indexOf("admin") === 0) return "admin";
     return "";
@@ -56,9 +83,9 @@
 
   function isActive(item, page, hash) {
     if (item.page !== page) return false;
-    if (page === "monitoring") {
-      const want = item.hash || "metric";
-      const have = hash || "metric";
+    if (page === "monitoring" || page === "gateways") {
+      const want = item.hash || "";
+      const have = hash || (page === "monitoring" ? "metric" : "registration");
       return want === have;
     }
     return true;
@@ -189,4 +216,3 @@
 
   window.addEventListener("hashchange", refreshActiveNav);
 })();
-

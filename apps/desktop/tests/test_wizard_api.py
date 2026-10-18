@@ -57,24 +57,31 @@ class WizardApiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/wizard.html", timeout=5) as resp:
             wizard_html = resp.read().decode("utf-8")
         self.assertIn("IoT Gateway Monitor", wizard_html)
-        self.assertIn("Monitoring only", wizard_html)
-        self.assertIn("Full setup", wizard_html)
+        self.assertIn("Install monitoring", wizard_html)
         self.assertIn("Open Monitoring", wizard_html)
+        self.assertNotIn("Full setup", wizard_html)
+        self.assertNotIn("Monitoring only", wizard_html)
         self.assertNotIn("uninstall-modal", wizard_html)
         self.assertNotIn("btn-uninstall", wizard_html)
         self.assertIn("first-run", wizard_html)
         self.assertIn("app-shell.js", wizard_html)
-        # First-run installer must not expose the post-install top nav links.
         self.assertNotIn('href="actions.html"', wizard_html)
         self.assertNotIn('href="monitoring.html"', wizard_html)
         self.assertNotIn('href="admin.html"', wizard_html)
         self.assertNotIn("lab.html", wizard_html)
+        with urllib.request.urlopen(self.base + "/gateways.html", timeout=5) as resp:
+            gw_html = resp.read().decode("utf-8")
+        self.assertIn("Registration", gw_html)
+        self.assertIn("Clean up", gw_html)
+        self.assertIn("gateways.js", gw_html)
+        self.assertIn("app-shell.js", gw_html)
         with urllib.request.urlopen(self.base + "/settings.html", timeout=5) as resp:
             settings_html = resp.read().decode("utf-8")
         self.assertIn("Remove", settings_html)
-        self.assertIn("Monitoring panel", settings_html)
+        self.assertIn("monitoring panel", settings_html.lower())
+        self.assertIn("Gateways → Clean up", settings_html)
+        self.assertNotIn("Gateway only", settings_html)
         self.assertIn("settings.js", settings_html)
-        self.assertIn("app-shell.js", settings_html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")
         self.assertIn("Control Plane", actions_html)
@@ -89,21 +96,29 @@ class WizardApiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/app-shell.js", timeout=5) as resp:
             shell = resp.read().decode("utf-8")
         self.assertIn("Monitoring", shell)
+        self.assertIn("Gateways", shell)
+        self.assertIn("Registration", shell)
+        self.assertIn("Clean up", shell)
         self.assertIn("Settings", shell)
-        self.assertIn("Gateway Metric", shell)
-        self.assertIn("Control Plane", shell)
+        self.assertIn("gateways.html", shell)
         self.assertIn("settings.html", shell)
         self.assertIn("Remove", shell)
+        self.assertNotIn("wizard.html", shell)
         with urllib.request.urlopen(self.base + "/wizard.js", timeout=5) as resp:
             wjs = resp.read().decode("utf-8")
         self.assertIn("background: true", wjs)
-        self.assertIn("iotgw_setup_path", wjs)
+        self.assertNotIn("iotgw_setup_path", wjs)
         self.assertNotIn("/api/wizard/uninstall", wjs)
+        self.assertIn("/api/wizard/setup/complete", wjs)
         with urllib.request.urlopen(self.base + "/settings.js", timeout=5) as resp:
             sjs = resp.read().decode("utf-8")
         self.assertIn("/api/wizard/uninstall", sjs)
-        self.assertIn("/api/wizard/uninstall/targets", sjs)
-        self.assertIn("/api/wizard/setup/complete", wjs)
+        self.assertIn("monitoring: true", sjs)
+        with urllib.request.urlopen(self.base + "/gateways.js", timeout=5) as resp:
+            gjs = resp.read().decode("utf-8")
+        self.assertIn("/api/wizard/provision", gjs)
+        self.assertIn("monitoring: false", gjs)
+        self.assertIn("/api/wizard/settings/gateway", gjs)
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             js = resp.read().decode("utf-8")
         self.assertIn("/api/v1/query/summaries", js)
@@ -123,6 +138,26 @@ class WizardApiTests(unittest.TestCase):
         env2 = self._get("/api/wizard/env")
         self.assertTrue(env2.get("setup_complete"))
         self.assertEqual(env2.get("entry"), "app")
+
+    def test_settings_gateway_persists_ssh(self) -> None:
+        from shell.paths import load_settings
+
+        out = self._post(
+            "/api/wizard/settings/gateway",
+            {
+                "gateway_id": "gw-lab",
+                "gateway_ip": "192.168.1.60",
+                "ssh_host": "192.168.1.60",
+                "ssh_user": "pi",
+                "ssh_port": 2222,
+            },
+        )
+        self.assertTrue(out.get("ok"))
+        s = load_settings()
+        self.assertEqual(s.get("default_gateway_id"), "gw-lab")
+        self.assertEqual(s.get("ssh_host"), "192.168.1.60")
+        self.assertEqual(s.get("ssh_user"), "pi")
+        self.assertEqual(s.get("ssh_port"), 2222)
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")
