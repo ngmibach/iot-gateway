@@ -58,6 +58,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Monitoring only", wizard_html)
         self.assertIn("Full setup", wizard_html)
         self.assertIn("Open Monitoring", wizard_html)
+        self.assertIn("Uninstall", wizard_html)
+        self.assertIn("uninstall-modal", wizard_html)
         self.assertNotIn("lab.html", wizard_html)
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")
@@ -71,6 +73,7 @@ class WizardApiTests(unittest.TestCase):
             wjs = resp.read().decode("utf-8")
         self.assertIn("background: true", wjs)
         self.assertIn("iotgw_setup_path", wjs)
+        self.assertIn("/api/wizard/uninstall", wjs)
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             js = resp.read().decode("utf-8")
         self.assertIn("/api/v1/query/summaries", js)
@@ -285,6 +288,129 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("http://127.0.0.1:9137/api/v1/gateways", captured["url"])
         headers = {k.lower(): v for k, v in captured["headers"].items()}
         self.assertEqual(headers.get("x-api-token"), "secret-token")
+
+    def test_uninstall_monitoring_without_gateway(self) -> None:
+        from pathlib import Path
+
+        from shell import wizard_server as ws
+        from shell.paths import data_dir
+
+        tel_root = Path(self._td.name) / "telemetry"
+        tel_root.mkdir(parents=True)
+        (tel_root / "bin").mkdir()
+        (tel_root / "bin" / "loki").write_text("x", encoding="utf-8")
+        (Path(self._td.name) / "settings.json").write_text(
+            '{"monitoring_ip":"192.168.1.20"}', encoding="utf-8"
+        )
+
+        class _FakeTel:
+            def stop(self):
+                return None
+
+            def uninstall(self):
+                import shutil
+
+                if tel_root.is_dir():
+                    shutil.rmtree(tel_root)
+                return {"ok": True, "root": str(tel_root), "removed": ["bin"], "errors": []}
+
+        class _FakeMgr:
+            def stop_all(self):
+                return None
+
+        with mock.patch.object(ws.STATE, "_telemetry", _FakeTel()):
+            with mock.patch.object(ws.STATE, "manager", _FakeMgr()):
+                out = self._post(
+                    "/api/wizard/uninstall",
+                    {"monitoring": True, "gateway": True},
+                )
+        self.assertTrue(out.get("ok"))
+        self.assertIsNotNone(out.get("monitoring"))
+        self.assertIsNotNone(out.get("app_data"))
+        self.assertFalse(tel_root.exists())
+        # wipe recreates empty data dir
+        self.assertTrue(data_dir().is_dir())
+
+    def test_uninstall_monitoring_requires_gateway_when_provisioned(self) -> None:
+        from pathlib import Path
+
+        from shell.paths import save_settings
+
+        save_settings(
+            {
+                "ssh_host": "192.168.1.50",
+                "ssh_user": "ubuntu",
+                "gateway_ip": "192.168.1.50",
+            }
+        )
+        # Call run_uninstall directly with monitoring=True gateway=False to hit coupling.
+        from shell import uninstall as uninstall_mod
+
+        with self.assertRaises(uninstall_mod.UninstallError) as ctx:
+            uninstall_mod.run_uninstall(
+                gateway=False,
+                monitoring=True,
+                stop_telemetry=lambda: None,
+                stop_services=lambda: None,
+                telemetry_uninstall=lambda: {"ok": True},
+            )
+        self.assertIn("requires Gateway", str(ctx.exception))
+
+        # Wizard API forces gateway=True when monitoring — without sudo → 409.
+        req = urllib.request.Request(
+            self.base + "/api/wizard/uninstall",
+            data=json.dumps({"monitoring": True}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with self.assertRaises(urllib.error.HTTPError) as http_ctx:
+            urllib.request.urlopen(req, timeout=10)
+        self.assertEqual(http_ctx.exception.code, 409)
+        # silence unused
+        self.assertTrue(Path(self._td.name).is_dir())
+
+    def test_uninstall_gateway_only_keeps_telemetry(self) -> None:
+        from pathlib import Path
+
+        from shell import uninstall as uninstall_mod
+        from shell.paths import save_settings
+
+        tel = Path(self._td.name) / "telemetry" / "bin"
+        tel.mkdir(parents=True)
+        (tel / "loki").write_text("x", encoding="utf-8")
+        save_settings(
+            {
+                "ssh_host": "192.168.1.50",
+                "ssh_user": "ubuntu",
+                "ssh_port": 22,
+                "gateway_ip": "192.168.1.50",
+                "default_gateway_id": "gateway",
+                "monitoring_ip": "192.168.1.20",
+            }
+        )
+        with mock.patch.object(
+            uninstall_mod,
+            "uninstall_gateway_over_ssh",
+            return_value=["systemd stopped"],
+        ) as ssh_un:
+            with mock.patch.object(
+                uninstall_mod, "remove_gateway_from_registry", return_value=True
+            ):
+                with mock.patch.object(uninstall_mod, "clear_local_secrets"):
+                    out = uninstall_mod.run_uninstall(
+                        gateway=True,
+                        monitoring=False,
+                        sudo_password="secret",
+                        stop_telemetry=lambda: None,
+                        stop_services=lambda: None,
+                        telemetry_uninstall=lambda: (_ for _ in ()).throw(
+                            AssertionError("must not wipe telemetry")
+                        ),
+                    )
+        ssh_un.assert_called_once()
+        self.assertTrue(out["ok"])
+        self.assertTrue((tel / "loki").is_file())
+
 
 if __name__ == "__main__":
     unittest.main()

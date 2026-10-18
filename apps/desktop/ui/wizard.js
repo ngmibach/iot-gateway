@@ -191,6 +191,76 @@
     await refreshEnv();
   }
 
+  function uninstallSummary() {
+    const gw = $("un-gateway").checked;
+    const mon = $("un-monitoring").checked;
+    const lines = [];
+    if (!gw && !mon) {
+      lines.push("Select at least one target.");
+    }
+    if (gw) {
+      lines.push(
+        "• Gateway: stop systemd unit, delete /opt/iot-gateway-agent and /var/lib/iot-gateway-agent (mosquitto apt packages stay)."
+      );
+    }
+    if (mon) {
+      lines.push(
+        "• Monitoring: stop Loki/Prometheus, delete telemetry binaries/data, and wipe local app data (registry, settings, keyring fallback, Chromium profile). Locked profile files may be skipped until the app window closes."
+      );
+      lines.push("• Gateway is included whenever Monitoring is selected.");
+    }
+    $("un-summary").textContent = lines.join("\n");
+    $("btn-un-confirm").disabled = !(gw || mon);
+    $("un-gateway-fields").classList.toggle("hidden", !gw);
+  }
+
+  function openUninstallModal() {
+    $("un-gateway").checked = false;
+    $("un-monitoring").checked = false;
+    $("un-sudo").value = "";
+    $("un-msg").textContent = "";
+    uninstallSummary();
+    $("uninstall-modal").classList.remove("hidden");
+  }
+
+  function closeUninstallModal() {
+    $("uninstall-modal").classList.add("hidden");
+    $("un-sudo").value = "";
+  }
+
+  async function confirmUninstall() {
+    const gateway = $("un-gateway").checked;
+    const monitoring = $("un-monitoring").checked;
+    if (!gateway && !monitoring) return;
+    const sudo_password = $("un-sudo").value || "";
+    $("un-msg").textContent = "Uninstalling…";
+    $("btn-un-confirm").disabled = true;
+    try {
+      const data = await api("/api/wizard/uninstall", {
+        method: "POST",
+        body: JSON.stringify({
+          gateway,
+          monitoring,
+          sudo_password: gateway ? sudo_password : undefined,
+        }),
+      });
+      const notes = (data.notes || []).join(" · ");
+      $("un-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.ok === false
+          ? "Finished with some errors. " + notes
+          : "Uninstall complete. " + notes
+      )}</div>`;
+      await refreshEnv();
+      if (monitoring) {
+        setTelemetryReadyUi(false, "Monitoring removed — Install again when ready.");
+      }
+      setTimeout(closeUninstallModal, 1200);
+    } catch (e) {
+      $("un-msg").innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
+      $("btn-un-confirm").disabled = false;
+    }
+  }
+
   async function refreshNics() {
     const data = await api("/api/wizard/nics");
     const sel = $("nic-select");
@@ -405,6 +475,24 @@
     $("btn-stop-telemetry").addEventListener("click", () =>
       stopTelemetry().catch(showErr)
     );
+    $("btn-uninstall").addEventListener("click", openUninstallModal);
+    $("btn-un-cancel").addEventListener("click", closeUninstallModal);
+    $("btn-un-confirm").addEventListener("click", () =>
+      confirmUninstall().catch(showErr)
+    );
+    $("un-monitoring").addEventListener("change", () => {
+      if ($("un-monitoring").checked) {
+        $("un-gateway").checked = true;
+        $("un-gateway").disabled = true;
+      } else {
+        $("un-gateway").disabled = false;
+      }
+      uninstallSummary();
+    });
+    $("un-gateway").addEventListener("change", uninstallSummary);
+    $("uninstall-modal").addEventListener("click", (ev) => {
+      if (ev.target === $("uninstall-modal")) closeUninstallModal();
+    });
     const earlyMon = $("btn-open-mon-early");
     if (earlyMon) {
       earlyMon.addEventListener("click", () => openMonitoring().catch(showErr));

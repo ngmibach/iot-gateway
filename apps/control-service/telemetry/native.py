@@ -424,6 +424,53 @@ class NativeTelemetryManager:
         self._prom = None
         self._loki = None
 
+    def uninstall(self, *, grace: float = 5.0) -> dict[str, object]:
+        """Stop Loki/Prometheus and delete binaries, configs, and data under ``root``.
+
+        Idempotent: a missing tree is success. Does not delete the parent
+        app-data directory (only contents of the telemetry root).
+        """
+        import shutil
+
+        self.stop(grace=grace)
+        removed: list[str] = []
+        errors: list[str] = []
+        root = self.root
+        if root.is_dir():
+            for child in sorted(root.iterdir(), key=lambda p: p.name):
+                try:
+                    if child.is_dir():
+                        shutil.rmtree(child)
+                    else:
+                        child.unlink(missing_ok=True)
+                    removed.append(child.name)
+                except OSError as exc:
+                    # Locked files (Windows) — best-effort second pass.
+                    try:
+                        if child.is_dir():
+                            shutil.rmtree(child, ignore_errors=True)
+                        elif child.is_file():
+                            child.unlink(missing_ok=True)
+                        if not child.exists():
+                            removed.append(child.name)
+                            continue
+                    except OSError:
+                        pass
+                    errors.append(f"{child.name}: {exc}")
+            try:
+                if root.is_dir() and not any(root.iterdir()):
+                    root.rmdir()
+                    removed.append(".")
+            except OSError:
+                pass
+        self.last_progress = ""
+        return {
+            "ok": not errors,
+            "root": str(root),
+            "removed": removed,
+            "errors": errors,
+        }
+
 
 def default_native_root() -> Path:
     """Prefer IOTGW_DATA_DIR/telemetry when set by the desktop shell."""

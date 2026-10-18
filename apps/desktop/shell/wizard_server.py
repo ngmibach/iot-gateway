@@ -17,7 +17,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import parse_qs, urlparse
 
-from . import admin_auth, detect, keyring_store, ssh_setup
+from . import admin_auth, detect, keyring_store, ssh_setup, uninstall as uninstall_mod
 from .launcher import ProcessManager, open_in_browser, wait_http
 from .paths import (
     CONTROL_HOST,
@@ -346,6 +346,43 @@ def _handle_api(
                         "error": None,
                     }
             _json_response(handler, 200, {"ok": True})
+            return
+
+        if method == "POST" and path == "/api/wizard/uninstall":
+            body = _read_json(handler)
+            do_gateway = bool(body.get("gateway", False))
+            do_monitoring = bool(body.get("monitoring", False))
+            # Coupling: Monitoring always pulls Gateway when caller forgot.
+            if do_monitoring:
+                do_gateway = True
+            sudo_password = str(body.get("sudo_password") or "")
+            gateway_id = str(body.get("gateway_id") or "").strip() or None
+            try:
+                out = uninstall_mod.run_uninstall(
+                    gateway=do_gateway,
+                    monitoring=do_monitoring,
+                    sudo_password=sudo_password,
+                    gateway_id=gateway_id,
+                    stop_telemetry=lambda: STATE.telemetry.stop(),
+                    stop_services=lambda: STATE.manager.stop_all(),
+                    telemetry_uninstall=lambda: STATE.telemetry.uninstall(),
+                    reset_telemetry_mgr=lambda: setattr(STATE, "_telemetry", None),
+                )
+                with STATE.lock:
+                    STATE._telemetry_job = {
+                        "state": "idle",
+                        "detail": "Uninstalled." if out.get("ok") else "Uninstall finished with errors.",
+                        "error": None if out.get("ok") else "uninstall errors",
+                    }
+                    STATE.firewall_confirmed = False
+                # Never echo sudo password back.
+                sudo_password = ""
+                _json_response(handler, 200 if out.get("ok") else 207, out)
+            except uninstall_mod.UninstallError as e:
+                _json_response(handler, 409, {"ok": False, "error": str(e)})
+            except Exception as e:  # noqa: BLE001
+                logger.exception("uninstall failed")
+                _json_response(handler, 500, {"ok": False, "error": str(e)})
             return
 
         if method == "GET" and path == "/api/wizard/telemetry/status":
