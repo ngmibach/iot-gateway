@@ -2,7 +2,7 @@
 
 Cross-platform desktop app: **download → double-click → Setup Wizard → provision gateway agent → Monitoring + Actions**.
 
-No Docker on the operator PC. No Docker on the gateway. No Lab / fake-sensor panel in this build.
+No Docker on the operator PC. No WSL required on Windows. No Docker on the gateway. No Lab / fake-sensor panel in this build.
 
 | Piece | Role |
 |-------|------|
@@ -19,7 +19,7 @@ No Docker on the operator PC. No Docker on the gateway. No Lab / fake-sensor pan
 
 | Platform | File | How to run |
 |----------|------|------------|
-| **Windows** | `IoTGatewayMonitor.exe` | Download → double-click. If SmartScreen says unrecognized: **More info → Run anyway** (sign via Admin → Code Signing for full trust). |
+| **Windows** | `IoTGatewayMonitor.exe` | Download → double-click (WSL not required). If SmartScreen says unrecognized: **More info → Run anyway** (sign via Admin → Code Signing for full trust). |
 | **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | `chmod +x` once → double-click |
 
 ### First-run Wizard (all in the UI)

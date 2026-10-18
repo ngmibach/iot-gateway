@@ -63,14 +63,6 @@
         <label for="gateway-ip">Gateway IP</label>
         <input id="gateway-ip" placeholder="192.168.1.50" />
       </div>
-      <div class="row gateway-only">
-        <label for="net-mode">Windows mode</label>
-        <select id="net-mode">
-          <option value="">Auto</option>
-          <option value="nat">NAT</option>
-          <option value="mirrored">Mirrored</option>
-        </select>
-      </div>
       <button class="primary" id="btn-save-nic">Save</button>
       <div id="nic-msg"></div>
     </section>
@@ -108,7 +100,10 @@
 
     <section class="panel step hidden gateway-only" data-step="3" id="step-fw">
       <h2>Firewall</h2>
-      <p>Allow inbound Loki traffic on port 3100 if the gateway is on another host.</p>
+      <p>
+        On Windows, Loki runs as a native process on this PC. Allow inbound TCP
+        3100 so the gateway can push logs. WSL is not required.
+      </p>
       <div class="note-box hidden" id="localhost-note"></div>
       <div id="checklist-wrap"></div>
       <div class="row">

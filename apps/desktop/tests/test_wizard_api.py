@@ -81,21 +81,22 @@ class WizardApiTests(unittest.TestCase):
         self.assertTrue(data["url"].startswith("http://127.0.0.1:"))
         self.assertNotIn("actions_path", data)
 
-    def test_checklist_no_auto_apply(self) -> None:
-        # Force a fake WSL IP via settings + detect mock
+    def test_checklist_windows_native_no_portproxy(self) -> None:
+        from unittest import mock
+
         from shell.paths import load_settings, save_settings
 
         s = load_settings()
-        s["wsl2_ip"] = "172.28.1.5"
         s["monitoring_ip"] = "192.168.1.20"
         save_settings(s)
-        data = self._get("/api/wizard/checklist")
+        with mock.patch("shell.detect.operator_runtime", return_value="windows"):
+            data = self._get("/api/wizard/checklist")
         self.assertTrue(data.get("applicable"))
+        self.assertEqual(data.get("path"), "windows_native")
         self.assertFalse(data.get("auto_apply"))
         cmds = [i["command"] for i in data["items"] if i.get("command")]
-        self.assertTrue(any("portproxy" in c for c in cmds))
         self.assertTrue(any("advfirewall" in c for c in cmds))
-        # Confirm does not execute anything — just flips flag
+        self.assertFalse(any("portproxy" in c for c in cmds))
         conf = self._post("/api/wizard/checklist/confirm", {})
         self.assertTrue(conf["confirmed"])
 

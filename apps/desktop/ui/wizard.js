@@ -184,12 +184,7 @@
   }
 
   async function refreshNics() {
-    const mode = $("net-mode") ? $("net-mode").value : "";
-    const q =
-      mode === "" || mode == null
-        ? ""
-        : `?windows_net_mode=${encodeURIComponent(mode)}`;
-    const data = await api("/api/wizard/nics" + q);
+    const data = await api("/api/wizard/nics");
     const sel = $("nic-select");
     sel.innerHTML = "";
     (data.candidates || []).forEach((c) => {
@@ -220,7 +215,6 @@
       monitoring_ip: c.ip,
       nic_name: c.name,
       gateway_ip: ($("gateway-ip") && $("gateway-ip").value.trim()) || undefined,
-      windows_net_mode: ($("net-mode") && $("net-mode").value) || undefined,
     };
     await api("/api/wizard/nics/select", { method: "POST", body: JSON.stringify(body) });
     $("nic-msg").innerHTML = `<div class="okmsg">Saved ${c.ip}</div>`;
@@ -306,7 +300,6 @@
     wrap.innerHTML = "";
     const note = $("localhost-note");
     if (note) {
-      // Keep firewall guidance short — full WSL essay is not shown.
       note.textContent = "";
       note.classList.add("hidden");
     }

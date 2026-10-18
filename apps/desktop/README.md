@@ -1,6 +1,6 @@
 # IoT Gateway Monitor — desktop app
 
-**Double-clickable** Windows `.exe` / Linux AppImage. Setup Wizard, Actions, Monitoring, Admin — **no Docker on this PC**, no Lab panel in this build.
+**Double-clickable** Windows `.exe` / Linux AppImage. Setup Wizard, Actions, Monitoring, Admin — **no Docker and no WSL on the Windows PC**, no Lab panel in this build.
 
 ## End users
 
@@ -8,7 +8,7 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
 
 | Platform | File | First run |
 |----------|------|-----------|
-| Windows | `IoTGatewayMonitor.exe` | If SmartScreen says the app is unrecognized: **More info → Run anyway**. The EXE carries product metadata + icon; full trust needs Admin → Code Signing. |
+| Windows | `IoTGatewayMonitor.exe` | Double-click. **WSL is not required.** Loki and Prometheus run as native Windows processes under `%APPDATA%\\IoTGatewayMonitor`. If SmartScreen says unrecognized: **More info → Run anyway**. |
 | Linux | `IoTGatewayMonitor-*.AppImage` | `chmod +x` once, then double-click. |
 
 1. Choose **Monitoring only** (default) or **Full setup**.

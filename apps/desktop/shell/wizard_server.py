@@ -244,8 +244,9 @@ def _handle_api(
                     "hint": "Monitoring is unavailable.",
                     "job": STATE.telemetry_job_snapshot(),
                 }
-            # Docker is legacy/optional; default path does not require it.
+            # Packaged path: native Loki/Prometheus. Docker and WSL are optional.
             snap["docker_required"] = False
+            snap["wsl_required"] = False
             _json_response(handler, 200, snap)
             return
 
@@ -475,21 +476,61 @@ def _handle_api(
         if method == "GET" and path == "/api/wizard/checklist":
             from telemetry.checklist import (  # type: ignore[import-not-found]
                 format_checklist_for_display,
+                generate_windows_native_checklist,
                 generate_wsl2_nat_checklist,
                 refresh_checklist_on_wsl_ip_change,
             )
 
             settings = load_settings()
             wsl = detect.detect_wsl()
-            wsl_ip = str(settings.get("wsl2_ip") or wsl.wsl_ip or "").strip()
+            runtime = detect.operator_runtime()
             monitoring_ip = str(settings.get("monitoring_ip") or "").strip() or None
-            if not wsl_ip:
+
+            # Packaged Windows .exe: native Loki on 0.0.0.0:3100 — firewall only.
+            if runtime == "windows":
+                items = generate_windows_native_checklist(monitoring_ip=monitoring_ip)
+                payload_items = [
+                    {
+                        "id": i.id,
+                        "title": i.title,
+                        "command": i.command,
+                        "notes": i.notes,
+                    }
+                    for i in items
+                ]
+                _json_response(
+                    handler,
+                    200,
+                    {
+                        "applicable": True,
+                        "path": "windows_native",
+                        "monitoring_ip": monitoring_ip,
+                        "items": payload_items,
+                        "display": format_checklist_for_display(items),
+                        "auto_apply": False,
+                        "note": (
+                            "Display only — run elevated yourself; the app will not "
+                            "change Windows Firewall (K18). WSL is not required."
+                        ),
+                        "localhost_forwarding_note": wsl.localhost_forwarding_note,
+                        "confirmed": STATE.firewall_confirmed,
+                    },
+                )
+                return
+
+            # Legacy: app running inside WSL2 still uses portproxy guidance.
+            wsl_ip = str(settings.get("wsl2_ip") or wsl.wsl_ip or "").strip()
+            if runtime != "wsl" or not wsl_ip:
                 _json_response(
                     handler,
                     200,
                     {
                         "applicable": False,
-                        "reason": "No WSL2 IP detected — checklist is for Windows NAT path only.",
+                        "path": runtime,
+                        "reason": (
+                            "Firewall checklist is for Windows. On Linux, allow "
+                            "TCP 3100 on MONITORING_IP if the gateway is remote."
+                        ),
                         "items": [],
                         "display": "",
                         "localhost_forwarding_note": wsl.localhost_forwarding_note,
@@ -521,6 +562,7 @@ def _handle_api(
                 200,
                 {
                     "applicable": True,
+                    "path": "wsl2_nat",
                     "wsl2_ip": wsl_ip,
                     "monitoring_ip": monitoring_ip,
                     "items": payload_items,
@@ -540,11 +582,12 @@ def _handle_api(
             STATE.firewall_confirmed = True
             settings = load_settings()
             settings["firewall_checklist_confirmed"] = True
-            # Remember current WSL IP so a later change re-shows checklist.
-            wsl = detect.detect_wsl()
-            if wsl.wsl_ip:
-                settings["wsl2_ip_prev"] = settings.get("wsl2_ip") or wsl.wsl_ip
-                settings["wsl2_ip"] = wsl.wsl_ip
+            # Legacy WSL path only: remember WSL IP so a later change re-shows.
+            if detect.operator_runtime() == "wsl":
+                wsl = detect.detect_wsl()
+                if wsl.wsl_ip:
+                    settings["wsl2_ip_prev"] = settings.get("wsl2_ip") or wsl.wsl_ip
+                    settings["wsl2_ip"] = wsl.wsl_ip
             save_settings(settings)
             _json_response(handler, 200, {"ok": True, "confirmed": True})
             return

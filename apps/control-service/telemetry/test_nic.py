@@ -4,10 +4,13 @@ from __future__ import annotations
 
 import unittest
 
+from unittest import mock
+
 from telemetry.nic import (
     NicCandidate,
     filter_nic_candidates,
     is_wsl_nat_iface,
+    list_ipv4_candidates,
     name_excluded,
     pick_default_monitoring_ip,
 )
@@ -117,6 +120,22 @@ class NicFilterTests(unittest.TestCase):
         pick = pick_default_monitoring_ip(cands, gateway_ip="192.168.1.1")
         assert pick is not None
         self.assertEqual(pick.ip, "10.0.0.5")
+
+    def test_native_windows_uses_powershell_nics(self) -> None:
+        host = [_c("Ethernet", "192.168.40.20"), _c("vEthernet (WSL)", "172.28.0.1")]
+        with (
+            mock.patch("telemetry.nic.os.name", "nt"),
+            mock.patch("telemetry.nic.in_wsl", return_value=False),
+            mock.patch(
+                "telemetry.nic._collect_windows_host_candidates", return_value=host
+            ),
+            mock.patch(
+                "telemetry.nic._collect_linux_candidates",
+                side_effect=AssertionError("linux ip must not run on native Windows"),
+            ),
+        ):
+            got = list_ipv4_candidates()
+        self.assertEqual([c.name for c in got], ["Ethernet"])
 
     def test_pick_default_empty(self) -> None:
         self.assertIsNone(pick_default_monitoring_ip([]))
