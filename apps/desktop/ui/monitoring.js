@@ -448,49 +448,6 @@
     showWarnings(data.warnings);
   }
 
-  async function refreshSensors() {
-    const gid = $("gateway-id").value;
-    const range = $("range").value;
-    const showAll = $("show-all").checked;
-    const q = new URLSearchParams({ range, show_all: showAll ? "true" : "false" });
-    if (gid) q.set("gateway_id", gid);
-    const data = await control(`/api/v1/query/summaries/sensors?${q}`);
-    $("sensors-filter-note").textContent = data.filter_active
-      ? `Filtered to monitor_enabled devices: ${(data.monitored_device_ids || []).join(", ") || "(none enabled — empty view)"}`
-      : showAll
-        ? "Showing all Loki deviceIds (filter off)."
-        : "No devices in registry — showing all (first-run explore).";
-    metricCards(
-      $("sensors-stages"),
-      (data.stages || []).map((s) => [s.device_id, String(s.stage)])
-    );
-    if (!(data.stages || []).length) {
-      $("sensors-stages").innerHTML = `<div class="muted">No stage data</div>`;
-    }
-    fillTable(
-      $("sensors-temp"),
-      ["Device", "Series", "Latest", "Sparkline"],
-      (data.temperatures || []).map((r) => [
-        escapeHtml(r.device_id),
-        escapeHtml(r.series),
-        r.latest == null ? "—" : Number(r.latest).toFixed(2),
-        sparkSvg(r.sparkline || []),
-      ])
-    );
-    fillTable(
-      $("sensors-pressure"),
-      ["Device", "Series", "Latest", "Sparkline"],
-      (data.pressures || []).map((r) => [
-        escapeHtml(r.device_id),
-        escapeHtml(r.series),
-        r.latest == null ? "—" : Number(r.latest).toFixed(2),
-        sparkSvg(r.sparkline || []),
-      ])
-    );
-    $("sensors-msg").textContent = `range=${data.range}`;
-    showWarnings(data.warnings);
-  }
-
   async function refresh() {
     setStatusBadge("warn", "loading…");
     try {
@@ -498,7 +455,6 @@
         await refreshRaspi();
       } else {
         await refreshGateway();
-        await refreshSensors();
       }
       if (lastWarnings.length) {
         setStatusBadge("warn", "degraded");
@@ -546,9 +502,6 @@
     }
     $("btn-refresh").addEventListener("click", () => refresh().catch(console.error));
     $("auto-refresh").addEventListener("change", scheduleAuto);
-    $("show-all").addEventListener("change", () => {
-      if (tab === "activities") refresh().catch(console.error);
-    });
     $("range").addEventListener("change", () => refresh().catch(console.error));
     $("gateway-id").addEventListener("change", () => {
       if (tab === "activities") refresh().catch(console.error);

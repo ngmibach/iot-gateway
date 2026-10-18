@@ -2,13 +2,6 @@
 .hdr-actions { display: flex; gap: 0.75rem; align-items: center; }
 .hdr-actions .link { color: var(--accent); text-decoration: none; font-size: 0.85rem; }
 .mon-subtabs { margin-top: 0.25rem; }
-.metric-caption { margin: 0.15rem 0 0.85rem; }
-.activities-sensors-heading {
-  margin-top: 1.75rem;
-  padding-top: 1rem;
-  border-top: 1px solid var(--border);
-  font-size: 1rem;
-}
 .toolbar { margin-bottom: 0.75rem; }
 .toolbar .chk { min-width: auto; display: flex; gap: 0.35rem; align-items: center; color: var(--muted); font-size: 0.85rem; }
 .metrics {
