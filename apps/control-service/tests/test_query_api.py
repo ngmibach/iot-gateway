@@ -80,7 +80,9 @@ class QueryApiTests(unittest.TestCase):
         prepped = Q.prep_loki(Q.GATEWAY_TOTAL_SENSOR_MSGS, duration="15m")
         self.assertIn("[15m]", prepped)
         self.assertNotIn("{range}", prepped)
-        self.assertIn('instance="gateway"', Q.prep_prom(Q.RASPI_UP))
+        prepped_prom = Q.prep_prom(Q.RASPI_UP)
+        self.assertIn('instance="gateway"', prepped_prom)
+        self.assertIn('job="iot-gateway-agent"', prepped_prom)
 
     def test_filter_series_by_device(self) -> None:
         series = [

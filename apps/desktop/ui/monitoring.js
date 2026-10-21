@@ -373,7 +373,8 @@
   async function refreshRaspi() {
     const range = $("range").value;
     const data = await control(
-      `/api/v1/query/summaries/raspi?range=${encodeURIComponent(range)}`
+      `/api/v1/query/summaries/raspi?range=${encodeURIComponent(range)}` +
+        `&node=gateway&job=iot-gateway-agent`
     );
     const m = data.metrics || {};
     const charts = data.charts || {};
@@ -446,18 +447,23 @@
 
     $("raspi-msg").textContent = `node=${data.node} job=${data.job} range=${data.range || range}`;
     showWarnings(data.warnings);
+    return data;
   }
 
   async function refresh() {
     setStatusBadge("warn", "loading…");
     try {
+      let hostUp = true;
       if (tab === "metric") {
-        await refreshRaspi();
+        const data = await refreshRaspi();
+        hostUp = data ? !!data.up : false;
       } else {
         await refreshGateway();
       }
       if (lastWarnings.length) {
         setStatusBadge("warn", "degraded");
+      } else if (tab === "metric" && !hostUp) {
+        setStatusBadge("warn", "no scrape");
       } else {
         setStatusBadge("ok", "live");
       }

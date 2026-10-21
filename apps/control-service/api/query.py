@@ -310,7 +310,7 @@ def _container_label(metric: dict[str, Any]) -> str:
 @router.get("/query/summaries/raspi")
 def summary_raspi(
     node: str = Query(default="gateway"),
-    job: str = Query(default="node"),
+    job: str = Query(default="iot-gateway-agent"),
     range: str = Query(default="1h", alias="range"),
     state: AppState = Depends(get_state),
 ) -> dict[str, Any]:
