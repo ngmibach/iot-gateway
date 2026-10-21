@@ -34,23 +34,48 @@
       <div id="reg-install" class="hidden">
         <h3>Gateway</h3>
         <div class="row">
-          <label for="reg-host">Host</label>
+          <label for="reg-host">
+            Host
+            <span class="field-help" tabindex="0" aria-label="What is Host?">?
+              <span class="field-help-tip">IP address of the device you selected. Filled automatically from Find gateway.</span>
+            </span>
+          </label>
           <input id="reg-host" readonly />
         </div>
         <div class="row">
-          <label for="ssh-user">User</label>
-          <input id="ssh-user" placeholder="ubuntu" />
+          <label for="ssh-user">
+            User
+            <span class="field-help" tabindex="0" aria-label="What is User?">?
+              <span class="field-help-tip">Linux login name on the Pi (the name before @ in the shell, e.g. admin or ubuntu). Wrong user causes Authentication failed.</span>
+            </span>
+          </label>
+          <input id="ssh-user" placeholder="e.g. admin" />
         </div>
         <div class="row">
-          <label for="ssh-pass">Password</label>
+          <label for="ssh-pass">
+            Password
+            <span class="field-help" tabindex="0" aria-label="What is Password?">?
+              <span class="field-help-tip">Login password for that User. Used to open SSH and install the monitor’s key. Same password you use to sign in on the Pi.</span>
+            </span>
+          </label>
           <input id="ssh-pass" type="password" autocomplete="off" />
         </div>
         <div class="row">
-          <label for="ssh-gid">Gateway ID</label>
+          <label for="ssh-gid">
+            Gateway ID
+            <span class="field-help" tabindex="0" aria-label="What is Gateway ID?">?
+              <span class="field-help-tip">A short name for this gateway inside the app only (not a Pi account). Leave as gateway unless you register several devices.</span>
+            </span>
+          </label>
           <input id="ssh-gid" value="gateway" />
         </div>
         <div class="row">
-          <label for="sudo-pass">Sudo password</label>
+          <label for="sudo-pass">
+            Sudo password
+            <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
+              <span class="field-help-tip">Password for sudo on the Pi (apt/systemd install). Usually the same as Password above.</span>
+            </span>
+          </label>
           <input id="sudo-pass" type="password" autocomplete="new-password" />
         </div>
         <div class="row">

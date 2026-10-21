@@ -217,6 +217,54 @@ body.first-run main { max-width: 720px; }
 .gateway-only.hidden-path { display: none !important; }
 .row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin: 0.5rem 0; }
 label { font-size: 0.85rem; color: var(--muted); min-width: 7rem; }
+.field-help {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.05rem;
+  height: 1.05rem;
+  margin-left: 0.3rem;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: #1a2332;
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: help;
+  vertical-align: middle;
+}
+.field-help:hover,
+.field-help:focus {
+  color: var(--text);
+  border-color: var(--accent);
+  outline: none;
+}
+.field-help-tip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + 0.4rem);
+  z-index: 40;
+  width: min(18rem, 70vw);
+  padding: 0.55rem 0.65rem;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #0f1621;
+  color: var(--text);
+  font-size: 0.78rem;
+  font-weight: 400;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  white-space: normal;
+  text-align: left;
+}
+.field-help:hover .field-help-tip,
+.field-help:focus .field-help-tip,
+.field-help:focus-within .field-help-tip {
+  display: block;
+}
 input, select, textarea {
   background: var(--bg);
   border: 1px solid var(--border);
