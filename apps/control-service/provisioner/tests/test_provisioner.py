@@ -241,6 +241,14 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertTrue(any("iot-gateway-agent" in c for c in ssh.commands))
         self.assertTrue(any("/opt/iot-gateway-agent" in c for c in ssh.commands))
 
+    def test_mosquitto_present_accepts_usr_sbin(self) -> None:
+        from provisioner.agent_install import _mosquitto_present
+
+        ssh = FakeSSH()
+        # PATH miss, but package binary exists (common on Debian/Ubuntu).
+        ssh.when("/usr/sbin/mosquitto", CommandResult(0, "OK\n", ""))
+        self.assertTrue(_mosquitto_present(ssh))
+
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))

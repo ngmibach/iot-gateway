@@ -43,14 +43,28 @@ def sudo_run(
     return ssh.run(wrapped, timeout=timeout, stdin=sudo_password)
 
 
+def _mosquitto_present(ssh: SSHSession) -> bool:
+    """True when the mosquitto broker binary is installed.
+
+    Debian/Ubuntu put it in ``/usr/sbin/mosquitto``, which is often absent from a
+    normal login PATH, so ``command -v mosquitto`` alone is not enough.
+    """
+    check = ssh.run(
+        "command -v mosquitto >/dev/null 2>&1 && echo OK; "
+        "test -x /usr/sbin/mosquitto && echo OK; "
+        "test -x /usr/bin/mosquitto && echo OK",
+        timeout=15.0,
+    )
+    return check.ok and "OK" in check.stdout
+
+
 def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
     """Install mosquitto + python3-venv via apt using the UI-provided sudo password."""
-    check = ssh.run("command -v mosquitto >/dev/null && echo OK", timeout=15.0)
     venv_ok = ssh.run(
         "python3 -c 'import ensurepip, venv' >/dev/null 2>&1 && echo OK",
         timeout=15.0,
     )
-    if check.ok and "OK" in check.stdout and venv_ok.ok and "OK" in venv_ok.stdout:
+    if _mosquitto_present(ssh) and venv_ok.ok and "OK" in venv_ok.stdout:
         return "mosquitto and python3-venv already present"
 
     # Verify sudo password early with a cheap command.
@@ -85,9 +99,22 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
             f"apt-get install failed: {(install.stderr or install.stdout).strip()[:400]}"
         )
 
-    check2 = ssh.run("command -v mosquitto >/dev/null && echo OK", timeout=15.0)
-    if not check2.ok or "OK" not in check2.stdout:
-        raise AgentInstallError("mosquitto still missing after apt install")
+    # Broker package installs the binary under /usr/sbin; start the service too.
+    enable = sudo_run(
+        ssh,
+        "systemctl enable --now mosquitto 2>/dev/null || "
+        "service mosquitto start 2>/dev/null || true",
+        sudo_password=sudo_password,
+        timeout=60.0,
+    )
+    if not _mosquitto_present(ssh):
+        detail = (install.stderr or install.stdout or "").strip()[:300]
+        enable_detail = (enable.stderr or enable.stdout or "").strip()[:200]
+        raise AgentInstallError(
+            "mosquitto still missing after apt install"
+            + (f": {detail}" if detail else "")
+            + (f" ({enable_detail})" if enable_detail else "")
+        )
     return f"installed via apt: {pkgs}"
 
 
