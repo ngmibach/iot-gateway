@@ -48,14 +48,17 @@ def _mosquitto_present(ssh: SSHSession) -> bool:
 
     Debian/Ubuntu put it in ``/usr/sbin/mosquitto``, which is often absent from a
     normal login PATH, so ``command -v mosquitto`` alone is not enough.
+
+    Use a single ``if …; then echo OK; fi`` so a missing ``/usr/bin`` path does not
+    make the remote shell exit non-zero after a successful ``/usr/sbin`` hit.
     """
     check = ssh.run(
-        "command -v mosquitto >/dev/null 2>&1 && echo OK; "
-        "test -x /usr/sbin/mosquitto && echo OK; "
-        "test -x /usr/bin/mosquitto && echo OK",
+        "if command -v mosquitto >/dev/null 2>&1 || "
+        "test -x /usr/sbin/mosquitto || "
+        "test -x /usr/bin/mosquitto; then echo OK; fi",
         timeout=15.0,
     )
-    return check.ok and "OK" in check.stdout
+    return "OK" in (check.stdout or "")
 
 
 def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
