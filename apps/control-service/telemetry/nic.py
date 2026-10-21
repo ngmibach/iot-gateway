@@ -234,6 +234,8 @@ def _parse_windows_netipaddress(text: str) -> list[NicCandidate]:
 
 def _collect_windows_host_candidates() -> list[NicCandidate]:
     """Enumerate Windows host IPv4 via PowerShell (native .exe or from WSL)."""
+    from telemetry.winproc import hidden_kwargs  # type: ignore[import-not-found]
+
     # Semicolon CSV keeps aliases with spaces intact.
     ps = (
         "Get-NetIPAddress -AddressFamily IPv4 | "
@@ -243,11 +245,12 @@ def _collect_windows_host_candidates() -> list[NicCandidate]:
     for exe in ("powershell.exe", "pwsh.exe"):
         try:
             proc = subprocess.run(
-                [exe, "-NoProfile", "-Command", ps],
+                [exe, "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
                 check=False,
                 capture_output=True,
                 text=True,
                 timeout=15,
+                **hidden_kwargs(),
             )
         except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
             continue
