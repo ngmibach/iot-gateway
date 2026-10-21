@@ -317,6 +317,11 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertTrue(any("sudo -S" in c for c in ssh.commands))
         self.assertFalse(any("s3cret-sudo" in c for c in ssh.commands))
         self.assertTrue(any("s3cret-sudo" in s for s in getattr(ssh, "stdins", [])))
+        apt_cmds = [c for c in ssh.commands if "apt-get" in c]
+        self.assertTrue(apt_cmds, "expected apt-get under sudo")
+        for c in apt_cmds:
+            self.assertIn("env DEBIAN_FRONTEND=noninteractive", c)
+            self.assertNotIn("-- DEBIAN_FRONTEND=", c)
 
     def test_agent_backend_requires_sudo_password(self) -> None:
         ssh = _ok_ssh()

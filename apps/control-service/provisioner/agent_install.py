@@ -37,6 +37,8 @@ def sudo_run(
     if not sudo_password:
         raise AgentInstallError("sudo password is required for gateway package install")
     # -p '' suppresses the prompt so logs stay clean; -S reads password from stdin.
+    # Everything after -- is the command argv, so VAR=value prefixes must use env(1),
+    # e.g. ``env DEBIAN_FRONTEND=noninteractive apt-get …`` — not ``VAR=value cmd``.
     wrapped = f"sudo -S -p '' -- {command}"
     return ssh.run(wrapped, timeout=timeout, stdin=sudo_password)
 
@@ -60,9 +62,11 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
         )
 
     pkgs = " ".join(_APT_PACKAGES)
+    # Use env(1): sudo -- treats the next token as the command name, so a bare
+    # DEBIAN_FRONTEND=… prefix becomes "command not found".
     update = sudo_run(
         ssh,
-        "DEBIAN_FRONTEND=noninteractive apt-get update -qq",
+        "env DEBIAN_FRONTEND=noninteractive apt-get update -qq",
         sudo_password=sudo_password,
         timeout=300.0,
     )
@@ -72,7 +76,7 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
         )
     install = sudo_run(
         ssh,
-        f"DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {pkgs}",
+        f"env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq {pkgs}",
         sudo_password=sudo_password,
         timeout=600.0,
     )
