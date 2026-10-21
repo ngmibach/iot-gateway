@@ -18,17 +18,14 @@
       Welcome
     </div>
 
-    <nav class="steps" id="step-tabs"></nav>
-
-    <section class="panel step" data-step="0" id="step-engine">
+    <section class="panel" id="step-engine">
       <h2>Monitoring</h2>
       <p class="muted">
-        Install Loki and Prometheus on this PC. Gateway registration is separate
-        and available after setup in the Gateways section.
+        Install Loki and Prometheus on this PC. Configure the LAN and register
+        gateways later under Gateways.
       </p>
       <div class="row">
         <button class="primary" id="btn-prepare-telemetry">Install monitoring</button>
-        <button class="secondary" id="btn-stop-telemetry">Stop</button>
         <button class="secondary" id="btn-open-mon-early" disabled>
           Open app
         </button>
@@ -36,38 +33,6 @@
       </div>
       <div class="note-box" id="telemetry-hint"></div>
     </section>
-
-    <section class="panel step hidden" data-step="1" id="step-nic">
-      <h2>Network</h2>
-      <p class="muted">Pick the LAN address gateways will use to reach Loki on this PC.</p>
-      <div class="row">
-        <label for="nic-select">LAN address</label>
-        <select id="nic-select"></select>
-        <button class="secondary" id="btn-refresh-nics">Refresh</button>
-      </div>
-      <button class="primary" id="btn-save-nic">Save</button>
-      <div id="nic-msg"></div>
-    </section>
-
-    <section class="panel step hidden" data-step="2" id="step-launch">
-      <h2>Finish</h2>
-      <p class="muted">
-        Start the control service, then open the app. Add gateways from
-        <strong>Gateways → Registration</strong> when you are ready.
-      </p>
-      <div class="row">
-        <button class="primary" id="btn-start-svc">Start control service</button>
-        <button class="secondary" id="btn-open-mon">Open Monitoring</button>
-        <button class="secondary" id="btn-open-gateways" type="button">Open Gateways</button>
-        <button class="danger" id="btn-stop-svc">Stop</button>
-      </div>
-      <div id="svc-msg"></div>
-    </section>
-
-    <div class="nav">
-      <button class="secondary" id="btn-prev">Back</button>
-      <button class="primary" id="btn-next">Next</button>
-    </div>
   </main>
   <script src="app-shell.js"></script>
   <script src="wizard.js"></script>
