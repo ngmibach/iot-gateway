@@ -59,7 +59,7 @@ class LabWizardApiTests(unittest.TestCase):
         self._mgr_patch.start()
         self.addCleanup(self._mgr_patch.stop)
 
-        self.server = serve("127.0.0.1", 0, open_browser=False)
+        self.server = serve("127.0.0.1", 0, open_browser=False, autostart_telemetry=False)
         self.port = self.server.server_address[1]
         self.base = f"http://127.0.0.1:{self.port}"
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
