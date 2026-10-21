@@ -143,7 +143,6 @@
     selectedHost = host;
     selectedPort = port || DEFAULT_SSH_PORT;
     if ($("reg-host")) $("reg-host").value = host;
-    if (!$("ssh-user").value.trim()) $("ssh-user").value = "ubuntu";
     if (!$("ssh-gid").value.trim()) $("ssh-gid").value = "gateway";
     $("reg-install").classList.remove("hidden");
     if ($("provision-msg")) $("provision-msg").innerHTML = "";
@@ -243,7 +242,7 @@
   async function installGateway() {
     const msg = $("provision-msg");
     const host = selectedHost || ($("reg-host") && $("reg-host").value.trim()) || "";
-    const username = ($("ssh-user").value || "").trim() || "ubuntu";
+    const username = ($("ssh-user").value || "").trim();
     const password = $("ssh-pass").value || "";
     const gatewayId = ($("ssh-gid").value || "").trim() || "gateway";
     const sudoPass = ($("sudo-pass") && $("sudo-pass").value) || "";
@@ -252,6 +251,10 @@
     if (!host) {
       msg.innerHTML = `<div class="err">Select a device first.</div>`;
       throw new Error("select gateway");
+    }
+    if (!username) {
+      msg.innerHTML = `<div class="err">User required (Pi login name, e.g. admin).</div>`;
+      throw new Error("user required");
     }
     if (!password.trim()) {
       msg.innerHTML = `<div class="err">Password required.</div>`;
