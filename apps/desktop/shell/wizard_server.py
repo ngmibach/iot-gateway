@@ -1442,17 +1442,50 @@ class WizardHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
 
 
+def maybe_autostart_telemetry() -> dict[str, Any]:
+    """Start Loki/Prometheus in the background when first-run setup is done.
+
+    Monitoring Metrics/Activities proxy Loki+Prometheus. After reboot or app
+    restart those processes are gone unless we bring them back on launch.
+    """
+    settings = load_settings()
+    if not settings.get("setup_complete"):
+        return {"started": False, "reason": "setup_incomplete"}
+    try:
+        out = STATE.start_telemetry_job(force=False)
+        logger.info(
+            "Autostart monitoring: started=%s job=%s",
+            out.get("started"),
+            (out.get("job") or {}).get("state"),
+        )
+        return out
+    except Exception as e:  # noqa: BLE001
+        logger.warning("Telemetry autostart failed: %s", e)
+        return {"started": False, "reason": str(e)}
+
+
 def serve(
     host: str = CONTROL_HOST,
     port: int = WIZARD_PORT,
     *,
     open_browser: bool = True,
+    autostart_telemetry: bool | None = None,
 ) -> ThreadingHTTPServer:
     server = ThreadingHTTPServer((host, port), WizardHandler)
     url = f"http://{host}:{port}/splash.html"
     logger.info("IoT Gateway Monitor UI at %s", url)
     if open_browser:
         threading.Timer(0.5, lambda: open_in_browser(url)).start()
+    do_auto = autostart_telemetry
+    if do_auto is None:
+        do_auto = bool(load_settings().get("setup_complete"))
+    if do_auto:
+        # Background job — do not block the UI thread on Loki ready.
+        threading.Thread(
+            target=maybe_autostart_telemetry,
+            name="iotgw-telemetry-autostart",
+            daemon=True,
+        ).start()
     return server
 
 
