@@ -249,6 +249,24 @@ class ProvisionFlowTests(unittest.TestCase):
         ssh.when("/usr/sbin/mosquitto", CommandResult(0, "OK\n", ""))
         self.assertTrue(_mosquitto_present(ssh))
 
+    def test_mosquitto_present_ignores_exit_when_stdout_ok(self) -> None:
+        from provisioner.agent_install import _mosquitto_present
+
+        ssh = FakeSSH()
+        # Simulate older buggy multi-test shell: OK in stdout, non-zero exit.
+        ssh.when(
+            "test -x /usr/sbin/mosquitto",
+            CommandResult(1, "OK\n", ""),
+        )
+        self.assertTrue(_mosquitto_present(ssh))
+
+    def test_mosquitto_present_false_when_absent(self) -> None:
+        from provisioner.agent_install import _mosquitto_present
+
+        ssh = FakeSSH()
+        ssh.when("mosquitto", CommandResult(0, "", ""))
+        self.assertFalse(_mosquitto_present(ssh))
+
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))
