@@ -253,7 +253,7 @@
       throw new Error("select gateway");
     }
     if (!username) {
-      msg.innerHTML = `<div class="err">User required (Pi login name, e.g. admin).</div>`;
+      msg.innerHTML = `<div class="err">User required (login name for the gateway).</div>`;
       throw new Error("user required");
     }
     if (!password.trim()) {
