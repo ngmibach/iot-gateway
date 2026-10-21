@@ -33,13 +33,17 @@ def sudo_run(
     sudo_password: str,
     timeout: float = 120.0,
 ) -> CommandResult:
-    """Run ``command`` under ``sudo -S`` with the password on stdin (not argv)."""
+    """Run ``command`` under ``sudo -S`` with the password on stdin (not argv).
+
+    The remote shell must not see bare ``sudo cmd && other`` — only ``cmd`` would
+    run as root. Wrap with ``sh -c`` so ``&&`` / ``;`` chains stay privileged.
+    """
     if not sudo_password:
         raise AgentInstallError("sudo password is required for gateway package install")
     # -p '' suppresses the prompt so logs stay clean; -S reads password from stdin.
     # Everything after -- is the command argv, so VAR=value prefixes must use env(1),
     # e.g. ``env DEBIAN_FRONTEND=noninteractive apt-get …`` — not ``VAR=value cmd``.
-    wrapped = f"sudo -S -p '' -- {command}"
+    wrapped = f"sudo -S -p '' -- sh -c {shlex.quote(command)}"
     return ssh.run(wrapped, timeout=timeout, stdin=sudo_password)
 
 
