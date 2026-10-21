@@ -125,6 +125,18 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
     return f"installed via apt: {pkgs}"
 
 
+def _remote_login_owner(ssh: SSHSession) -> str:
+    """Return ``user:group`` for the SSH login (never expand id under sudo sh -c)."""
+    who = ssh.run("printf '%s:%s\\n' \"$(id -un)\" \"$(id -gn)\"", timeout=15.0)
+    owner = (who.stdout or "").strip()
+    if not who.ok or not owner or ":" not in owner:
+        raise AgentInstallError(
+            "could not resolve remote login user:group "
+            f"({(who.stderr or who.stdout or '').strip()[:200]})"
+        )
+    return owner
+
+
 def _upload_agent_tree(
     ssh: SSHSession,
     agent_src: Path,
@@ -135,30 +147,29 @@ def _upload_agent_tree(
     """Upload iot_gateway_agent package + requirements + unit file."""
     if not agent_src.is_dir():
         raise AgentInstallError(f"agent source missing: {agent_src}")
-    mkdir = sudo_run(
+    owner = _remote_login_owner(ssh)
+    pkg_remote = f"{remote_root}/iot_gateway_agent"
+    # Resolve owner outside sudo: under ``sudo sh -c``, ``$(id -un)`` is root and
+    # leaves /opt/iot-gateway-agent root-owned so the login user cannot extract.
+    # Wipe the package dir so retries are not blocked by leftover root files.
+    prepare = sudo_run(
         ssh,
-        f"mkdir -p {shlex.quote(remote_root)}",
+        f"mkdir -p {shlex.quote(remote_root)} && "
+        f"rm -rf {shlex.quote(pkg_remote)} && "
+        f"mkdir -p {shlex.quote(pkg_remote)} && "
+        f"chown -R {shlex.quote(owner)} {shlex.quote(remote_root)}",
         sudo_password=sudo_password,
-        timeout=30.0,
+        timeout=60.0,
     )
-    if not mkdir.ok:
+    if not prepare.ok:
         raise AgentInstallError(
-            f"mkdir {remote_root} failed: {(mkdir.stderr or mkdir.stdout).strip()[:200]}"
-        )
-    chown = sudo_run(
-        ssh,
-        f"chown -R $(id -un):$(id -gn) {shlex.quote(remote_root)}",
-        sudo_password=sudo_password,
-        timeout=30.0,
-    )
-    if not chown.ok:
-        raise AgentInstallError(
-            f"chown {remote_root} failed: {(chown.stderr or chown.stdout).strip()[:200]}"
+            f"prepare {remote_root} failed: "
+            f"{(prepare.stderr or prepare.stdout).strip()[:200]}"
         )
     pkg = agent_src / "iot_gateway_agent"
     if not pkg.is_dir():
         raise AgentInstallError(f"missing package dir: {pkg}")
-    ssh.upload_tree(pkg, f"{remote_root}/iot_gateway_agent")
+    ssh.upload_tree(pkg, pkg_remote)
     req = agent_src / "requirements.txt"
     if req.is_file():
         ssh.upload_file(req, f"{remote_root}/requirements.txt")

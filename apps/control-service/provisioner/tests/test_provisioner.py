@@ -83,6 +83,7 @@ def _ok_ssh(*, exists: bool = False, free_k: int = 5_000_000) -> FakeSSH:
     ssh.when("docker compose", CommandResult(0, "started\n", ""))
     ssh.when("curl -fsS", CommandResult(0, "ready\n__LOKI_OK__\n", ""))
     ssh.when("test -f", CommandResult(0, "OK\n", ""))
+    ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
     return ssh
 
 
@@ -262,6 +263,32 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertFalse(any("secret" in c for c in ssh.commands))
         self.assertTrue(any("secret" in s for s in getattr(ssh, "stdins", [])))
 
+    def test_upload_agent_tree_chowns_login_user_not_root(self) -> None:
+        from provisioner import agent_install
+
+        ssh = FakeSSH()
+        ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            pkg = root / "iot_gateway_agent"
+            pkg.mkdir()
+            (pkg / "__init__.py").write_text("#\n", encoding="utf-8")
+            (root / "requirements.txt").write_text("x==1\n", encoding="utf-8")
+            agent_install._upload_agent_tree(
+                ssh,
+                root,
+                "/opt/iot-gateway-agent",
+                sudo_password="secret",
+            )
+        sudo_cmds = [c for c in ssh.commands if "sudo -S" in c]
+        self.assertTrue(sudo_cmds)
+        prepare = sudo_cmds[0]
+        self.assertIn("chown -R admin:admin", prepare)
+        self.assertIn("rm -rf /opt/iot-gateway-agent/iot_gateway_agent", prepare)
+        self.assertNotIn("$(id -un)", prepare)
+        self.assertEqual(ssh.trees[0][1], "/opt/iot-gateway-agent/iot_gateway_agent")
+
     def test_mosquitto_present_accepts_usr_sbin(self) -> None:
         from provisioner.agent_install import _mosquitto_present
 
@@ -300,6 +327,7 @@ class ProvisionFlowTests(unittest.TestCase):
             "curl -fsS http://127.0.0.1:9139/v1/health",
             CommandResult(0, '{"status":"ok"}', ""),
         )
+        ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
         ssh.when("sudo -S", CommandResult(0, "", ""))
         result = provision(
             ssh,
@@ -343,6 +371,8 @@ class ProvisionFlowTests(unittest.TestCase):
                 return CommandResult(1, "", "")
             if "curl -fsS http://127.0.0.1:9139" in command:
                 return CommandResult(0, '{"status": "ok"}', "")
+            if "printf '%s:%s" in command:
+                return CommandResult(0, "admin:admin\n", "")
             if "sudo -S" in command:
                 return CommandResult(0, "", "")
             if "command -v python3" in command:
