@@ -23,6 +23,7 @@ from . import (
     discover,
     firewall_apply,
     keyring_store,
+    registry_gateways,
     ssh_setup,
     uninstall as uninstall_mod,
 )
@@ -965,7 +966,40 @@ def _handle_api(
                 settings["ssh_user"] = username
                 settings["ssh_port"] = port
                 settings["provision_backend"] = "agent"
+                settings["default_gateway_id"] = gateway_id
+                gws = settings.get("gateways")
+                if not isinstance(gws, dict):
+                    gws = {}
+                row = dict(gws.get(gateway_id) or {})
+                row.update(
+                    {
+                        "host": host,
+                        "username": username,
+                        "port": port,
+                        "install_root": result.install_root,
+                    }
+                )
+                gws[gateway_id] = row
+                settings["gateways"] = gws
                 save_settings(settings)
+                # Monitoring Metrics/Activities read registry.sqlite, not settings.json.
+                try:
+                    fp = registry_gateways.fingerprint_from_settings(
+                        settings, host, port
+                    )
+                    registry_gateways.upsert_local_gateway(
+                        gateway_id=gateway_id,
+                        host=gateway_ip or host,
+                        ssh_user=username,
+                        fingerprint=fp,
+                        install_root=result.install_root,
+                        monitoring_ip=monitoring_ip,
+                        agent_url=f"http://{gateway_ip or host}:9139",
+                        password_auth_enabled=False,
+                        status="provisioned",
+                    )
+                except Exception as reg_err:  # noqa: BLE001
+                    logger.warning("registry upsert after provision failed: %s", reg_err)
                 _json_response(
                     handler,
                     200,
