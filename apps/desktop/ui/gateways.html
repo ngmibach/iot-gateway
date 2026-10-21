@@ -17,79 +17,47 @@
   <main>
     <section class="panel gw-panel" data-tab="registration" id="tab-registration">
       <h2>Registration</h2>
-      <p class="muted">
-        Scan this PC’s LAN for devices with SSH open, then pin a key and install
-        the gateway agent. On Windows, run as Administrator to apply the Loki
-        firewall rule automatically; on Linux, allow inbound TCP 3100 if the
-        gateway is remote.
-      </p>
 
-      <h3>This PC LAN</h3>
-      <div class="row">
-        <label for="nic-select">LAN address</label>
-        <select id="nic-select"></select>
-        <button type="button" class="secondary" id="btn-refresh-nics">Refresh</button>
-        <button type="button" class="secondary" id="btn-save-nic">Save</button>
+      <div id="reg-find">
+        <div class="row">
+          <button type="button" class="primary" id="btn-scan-gw">Find gateway</button>
+          <span id="scan-badge"></span>
+        </div>
+        <div class="note-box" id="scan-msg"></div>
       </div>
-      <div id="nic-msg"></div>
 
-      <h3>Find gateway</h3>
-      <div class="row">
-        <button type="button" class="primary" id="btn-scan-gw">Scan LAN for SSH</button>
-        <span id="scan-badge"></span>
+      <div id="reg-results" class="hidden">
+        <h3>Found devices</h3>
+        <ul class="host-list" id="host-list"></ul>
       </div>
-      <div class="row">
-        <label for="gateway-select">Detected gateway</label>
-        <select id="gateway-select"></select>
-      </div>
-      <div class="note-box" id="scan-msg">Click Scan to find devices with SSH (port 22) on your LAN.</div>
 
-      <h3>SSH</h3>
-      <div class="row">
-        <label for="ssh-port">Port</label>
-        <input id="ssh-port" type="number" value="22" style="min-width:6rem" />
+      <div id="reg-install" class="hidden">
+        <h3>Gateway</h3>
+        <div class="row">
+          <label for="reg-host">Host</label>
+          <input id="reg-host" readonly />
+        </div>
+        <div class="row">
+          <label for="ssh-user">User</label>
+          <input id="ssh-user" placeholder="ubuntu" />
+        </div>
+        <div class="row">
+          <label for="ssh-pass">Password</label>
+          <input id="ssh-pass" type="password" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="ssh-gid">Gateway ID</label>
+          <input id="ssh-gid" value="gateway" />
+        </div>
+        <div class="row">
+          <label for="sudo-pass">Sudo password</label>
+          <input id="sudo-pass" type="password" autocomplete="new-password" />
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btn-provision-agent">Install gateway</button>
+        </div>
+        <div id="provision-msg"></div>
       </div>
-      <div class="row">
-        <label for="ssh-user">User</label>
-        <input id="ssh-user" placeholder="ubuntu" />
-      </div>
-      <div class="row">
-        <label for="ssh-pass">Password</label>
-        <input id="ssh-pass" type="password" autocomplete="off" />
-      </div>
-      <div class="row">
-        <label for="ssh-gid">Gateway ID</label>
-        <input id="ssh-gid" value="gateway" />
-      </div>
-      <div class="row">
-        <button type="button" class="secondary" id="btn-fetch-hk">Fetch key</button>
-        <button type="button" class="primary" id="btn-pin-hk" disabled>Pin</button>
-        <button type="button" class="primary" id="btn-install-key" disabled>Install key</button>
-      </div>
-      <div id="hk-info" class="mono"></div>
-      <div id="ssh-msg"></div>
-
-      <h3>Firewall</h3>
-      <p class="muted">
-        Opens inbound TCP 3100 for Loki on Windows when elevated. On Linux this
-        step is skipped — open the port on the host firewall if needed.
-      </p>
-      <div class="row">
-        <button type="button" class="primary" id="btn-apply-fw">Apply firewall</button>
-        <button type="button" class="secondary" id="btn-refresh-fw">Refresh status</button>
-        <span id="fw-badge"></span>
-      </div>
-      <div class="note-box" id="fw-msg"></div>
-
-      <h3>Install agent</h3>
-      <div class="row">
-        <label for="sudo-pass">Sudo password</label>
-        <input id="sudo-pass" type="password" autocomplete="new-password" />
-      </div>
-      <div class="row">
-        <button type="button" class="primary" id="btn-provision-agent">Install gateway</button>
-      </div>
-      <div id="provision-msg"></div>
     </section>
 
     <section class="panel gw-panel hidden" data-tab="settings" id="tab-settings">

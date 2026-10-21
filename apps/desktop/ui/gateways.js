@@ -6,10 +6,12 @@
     { id: "cleanup", label: "Clean up", title: "Clean up" },
   ];
 
+  const DEFAULT_SSH_PORT = 22;
+
   const $ = (id) => document.getElementById(id);
 
-  let hostKey = null;
-  let hostKeyPinned = false;
+  let selectedHost = "";
+  let selectedPort = DEFAULT_SSH_PORT;
   let targets = { gateways: [], provisioned: false, default_gateway_id: "gateway" };
   let tab = "registration";
 
@@ -110,59 +112,110 @@
     $(msgId).innerHTML = `<div class="okmsg">Saved ${escapeHtml(c.ip)}</div>`;
   }
 
-  function selectedGatewayIp() {
-    const sel = $("gateway-select");
-    return sel && sel.value ? sel.value.trim() : "";
+  async function seedDefaultLan() {
+    const data = await api("/api/wizard/nics");
+    const pick = data.default || (data.candidates || [])[0];
+    if (!pick || !pick.ip) {
+      throw new Error(
+        "No LAN address available. Configure This PC LAN under Gateways → Settings."
+      );
+    }
+    await api("/api/wizard/nics/select", {
+      method: "POST",
+      body: JSON.stringify({
+        monitoring_ip: pick.ip,
+        nic_name: pick.name,
+      }),
+    });
+    return pick.ip;
   }
 
-  function fillGatewaySelect(hosts, preferred) {
-    const sel = $("gateway-select");
-    sel.innerHTML = "";
+  function hideInstallPanel() {
+    selectedHost = "";
+    selectedPort = DEFAULT_SSH_PORT;
+    const panel = $("reg-install");
+    if (panel) panel.classList.add("hidden");
+    if ($("reg-host")) $("reg-host").value = "";
+    if ($("provision-msg")) $("provision-msg").innerHTML = "";
+  }
+
+  function showInstallPanel(host, port) {
+    selectedHost = host;
+    selectedPort = port || DEFAULT_SSH_PORT;
+    if ($("reg-host")) $("reg-host").value = host;
+    if (!$("ssh-user").value.trim()) $("ssh-user").value = "ubuntu";
+    if (!$("ssh-gid").value.trim()) $("ssh-gid").value = "gateway";
+    $("reg-install").classList.remove("hidden");
+    if ($("provision-msg")) $("provision-msg").innerHTML = "";
+  }
+
+  function renderHostList(hosts) {
+    const list = $("host-list");
+    const results = $("reg-results");
+    list.innerHTML = "";
+    results.classList.toggle("hidden", false);
+
     if (!hosts.length) {
-      const opt = document.createElement("option");
-      opt.value = "";
-      opt.textContent = "(no SSH hosts found — scan again)";
-      sel.appendChild(opt);
+      const li = document.createElement("li");
+      li.className = "host-list-empty";
+      li.textContent = "No devices found. Try Find gateway again.";
+      list.appendChild(li);
+      hideInstallPanel();
       return;
     }
+
     hosts.forEach((h) => {
       const ip = h.ip || h;
-      const opt = document.createElement("option");
-      opt.value = ip;
-      opt.textContent = ip + (h.port ? ` :${h.port}` : "");
-      if (preferred && ip === preferred) opt.selected = true;
-      sel.appendChild(opt);
+      const port = h.port || DEFAULT_SSH_PORT;
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "host-list-item";
+      btn.dataset.ip = ip;
+      btn.dataset.port = String(port);
+      btn.textContent = port && port !== DEFAULT_SSH_PORT ? `${ip} :${port}` : ip;
+      btn.addEventListener("click", () => {
+        list.querySelectorAll(".host-list-item").forEach((el) => {
+          el.classList.toggle("selected", el === btn);
+        });
+        showInstallPanel(ip, port);
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
     });
   }
 
   async function scanGateways() {
-    $("scan-msg").textContent = "Scanning LAN for SSH (port 22)…";
+    $("scan-msg").textContent = "Looking for gateways…";
     $("scan-badge").innerHTML = '<span class="badge warn">Scanning…</span>';
     $("btn-scan-gw").disabled = true;
+    hideInstallPanel();
+    $("reg-results").classList.add("hidden");
+    $("host-list").innerHTML = "";
     try {
-      // Persist selected LAN first so discover uses it.
-      const raw = $("nic-select").value;
-      if (raw) {
-        const c = JSON.parse(raw);
-        await api("/api/wizard/nics/select", {
+      let data;
+      try {
+        data = await api("/api/wizard/discover/gateways", {
           method: "POST",
-          body: JSON.stringify({ monitoring_ip: c.ip, nic_name: c.name }),
+          body: JSON.stringify({ port: DEFAULT_SSH_PORT }),
+        });
+      } catch (e) {
+        // Seed LAN only when settings have no monitoring_ip yet.
+        if (!/monitoring_ip/i.test(String(e.message || e))) throw e;
+        await seedDefaultLan();
+        data = await api("/api/wizard/discover/gateways", {
+          method: "POST",
+          body: JSON.stringify({ port: DEFAULT_SSH_PORT }),
         });
       }
-      const data = await api("/api/wizard/discover/gateways", {
-        method: "POST",
-        body: JSON.stringify({
-          port: Number($("ssh-port").value) || 22,
-        }),
-      });
       const hosts = data.hosts || [];
-      fillGatewaySelect(hosts);
+      renderHostList(hosts);
       $("scan-badge").innerHTML = hosts.length
         ? `<span class="badge ok">${hosts.length} found</span>`
         : '<span class="badge warn">0 found</span>';
       $("scan-msg").textContent = hosts.length
-        ? `Found ${hosts.length} device(s) with SSH open on ${data.scanned_hint || "LAN"}. Select one to continue.`
-        : "No SSH hosts found on this LAN. Check that the Pi is powered on and connected, then scan again.";
+        ? "Select a device to continue."
+        : "No devices found on this LAN.";
     } catch (e) {
       $("scan-badge").innerHTML = '<span class="badge bad">Failed</span>';
       $("scan-msg").innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
@@ -172,146 +225,102 @@
     }
   }
 
-  async function fetchHostKey() {
-    hostKeyPinned = false;
-    $("btn-install-key").disabled = true;
-    const host = selectedGatewayIp();
-    if (!host) throw new Error("Scan and select a gateway first");
-    hostKey = await api("/api/wizard/ssh/fetch-host-key", {
-      method: "POST",
-      body: JSON.stringify({
-        host,
-        port: Number($("ssh-port").value) || 22,
-      }),
-    });
-    $("hk-info").textContent = `${hostKey.key_type}  ${hostKey.fingerprint_sha256}`;
-    $("btn-pin-hk").disabled = false;
-    $("ssh-msg").innerHTML = `<div class="okmsg">Verify fingerprint, then Pin.</div>`;
-  }
-
-  async function pinHostKey() {
-    if (!hostKey) throw new Error("Fetch the host key first");
-    await api("/api/wizard/ssh/pin-host-key", {
-      method: "POST",
-      body: JSON.stringify(hostKey),
-    });
-    hostKeyPinned = true;
-    $("btn-install-key").disabled = false;
-    $("ssh-msg").innerHTML = `<div class="okmsg">Pinned.</div>`;
-  }
-
-  async function installKey() {
-    if (!hostKeyPinned || !hostKey) throw new Error("Pin the host key first");
-    const host = selectedGatewayIp();
-    if (!host) throw new Error("Select a detected gateway first");
-    await api("/api/wizard/ssh/install-key", {
-      method: "POST",
-      body: JSON.stringify({
-        host,
-        port: Number($("ssh-port").value) || 22,
-        username: $("ssh-user").value.trim(),
-        password: $("ssh-pass").value,
-        gateway_id: $("ssh-gid").value.trim() || "gateway",
-        host_key_base64: hostKey.base64,
-      }),
-    });
-    $("ssh-pass").value = "";
-    $("ssh-msg").innerHTML = `<div class="okmsg">SSH key installed.</div>`;
-  }
-
-  function paintFirewall(st) {
-    const badge = $("fw-badge");
-    const msg = $("fw-msg");
-    if (!st.applicable) {
-      badge.innerHTML = '<span class="badge ok">N/A</span>';
-      msg.textContent = st.hint || "Firewall auto-apply is for Windows.";
-      return;
-    }
-    if (st.elevated === false) {
-      badge.innerHTML = '<span class="badge bad">Not admin</span>';
-    } else if (st.rule_present || st.confirmed) {
-      badge.innerHTML = '<span class="badge ok">Ready</span>';
-    } else {
-      badge.innerHTML = '<span class="badge warn">Needed</span>';
-    }
-    msg.textContent = st.hint || "";
-  }
-
-  async function refreshFirewall() {
-    const st = await api("/api/wizard/firewall/status");
-    paintFirewall(st);
-    return st;
-  }
-
-  async function applyFirewall() {
-    $("fw-msg").textContent = "Checking firewall…";
-    $("btn-apply-fw").disabled = true;
+  async function ensureFirewallQuiet() {
     try {
-      const out = await api("/api/wizard/firewall/apply", {
+      const st = await api("/api/wizard/firewall/status");
+      if (!st.applicable) return;
+      if (st.rule_present || st.confirmed) return;
+      await api("/api/wizard/firewall/apply", {
         method: "POST",
         body: "{}",
       });
-      paintFirewall({
-        applicable: out.applicable !== false,
-        elevated: out.elevated,
-        rule_present: out.rule_present || out.ok,
-        confirmed: out.ok,
-        hint: (out.notes || []).join(" ") || "Firewall rule applied.",
-      });
-      if (out.skipped || out.applicable === false) {
-        $("fw-msg").innerHTML =
-          `<div class="okmsg">${escapeHtml(
-            (out.notes && out.notes[0]) ||
-              "Firewall auto-apply skipped on this OS. Allow TCP 3100 if needed."
-          )}</div>`;
-      } else if (out.ok) {
-        $("fw-msg").innerHTML = `<div class="okmsg">Firewall ready for Loki :3100.</div>`;
-      }
     } catch (e) {
-      $("fw-badge").innerHTML = '<span class="badge bad">Failed</span>';
-      $("fw-msg").innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
+      // Surface only if install path needs it; caller decides messaging.
       throw e;
-    } finally {
-      $("btn-apply-fw").disabled = false;
     }
   }
 
-  async function provisionAgent() {
+  async function installGateway() {
     const msg = $("provision-msg");
+    const host = selectedHost || ($("reg-host") && $("reg-host").value.trim()) || "";
+    const username = ($("ssh-user").value || "").trim() || "ubuntu";
+    const password = $("ssh-pass").value || "";
+    const gatewayId = ($("ssh-gid").value || "").trim() || "gateway";
     const sudoPass = ($("sudo-pass") && $("sudo-pass").value) || "";
+    const port = selectedPort || DEFAULT_SSH_PORT;
+
+    if (!host) {
+      msg.innerHTML = `<div class="err">Select a device first.</div>`;
+      throw new Error("select gateway");
+    }
+    if (!password.trim()) {
+      msg.innerHTML = `<div class="err">Password required.</div>`;
+      throw new Error("password required");
+    }
     if (!sudoPass.trim()) {
       msg.innerHTML = `<div class="err">Sudo password required.</div>`;
       throw new Error("sudo password required");
     }
-    const host = selectedGatewayIp();
-    if (!host) {
-      msg.innerHTML = `<div class="err">Scan and select a gateway first.</div>`;
-      throw new Error("select gateway");
-    }
-    msg.innerHTML = `<div class="okmsg">Installing…</div>`;
+
+    const btn = $("btn-provision-agent");
+    if (btn) btn.disabled = true;
     try {
+      msg.textContent = "Connecting…";
+      const hostKey = await api("/api/wizard/ssh/fetch-host-key", {
+        method: "POST",
+        body: JSON.stringify({ host, port }),
+      });
+      await api("/api/wizard/ssh/pin-host-key", {
+        method: "POST",
+        body: JSON.stringify(hostKey),
+      });
+
+      msg.textContent = "Installing SSH key…";
+      await api("/api/wizard/ssh/install-key", {
+        method: "POST",
+        body: JSON.stringify({
+          host,
+          port,
+          username,
+          password,
+          gateway_id: gatewayId,
+          host_key_base64: hostKey.base64,
+        }),
+      });
+      $("ssh-pass").value = "";
+
+      msg.textContent = "Preparing…";
+      try {
+        await ensureFirewallQuiet();
+      } catch (fwErr) {
+        msg.innerHTML = `<div class="err">${escapeHtml(fwErr.message || fwErr)}</div>`;
+        throw fwErr;
+      }
+
+      msg.textContent = "Installing…";
       const data = await api("/api/wizard/provision", {
         method: "POST",
         body: JSON.stringify({
           host,
-          username: $("ssh-user").value.trim() || undefined,
-          port: Number($("ssh-port").value) || undefined,
-          gateway_id: $("ssh-gid").value.trim() || undefined,
+          username,
+          port,
+          gateway_id: gatewayId,
           gateway_ip: host,
           sudo_password: sudoPass,
         }),
       });
       if ($("sudo-pass")) $("sudo-pass").value = "";
-      const notes = (data.notes || [])
-        .slice(0, 4)
-        .map((n) => `<li>${escapeHtml(n)}</li>`)
-        .join("");
-      msg.innerHTML = `<div class="okmsg">Gateway installed.</div><ul>${notes}</ul>`;
+      msg.innerHTML = `<div class="okmsg">Gateway installed.</div>`;
       await refreshTargets();
+      return data;
     } catch (e) {
       if ($("sudo-pass")) $("sudo-pass").value = "";
-      msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
+      if (!msg.querySelector(".err")) {
+        msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
+      }
       throw e;
+    } finally {
+      if (btn) btn.disabled = false;
     }
   }
 
@@ -457,38 +466,11 @@
       showTab(tabFromHash(), { syncHash: false });
     });
 
-    $("btn-refresh-nics").addEventListener("click", () =>
-      fillNicSelect("nic-select").catch(showErr)
-    );
-    $("btn-save-nic").addEventListener("click", () =>
-      saveNicFrom("nic-select", "nic-msg").catch(showErr)
-    );
     $("btn-scan-gw").addEventListener("click", () =>
       scanGateways().catch(showErr)
     );
-    $("btn-fetch-hk").addEventListener("click", () =>
-      fetchHostKey().catch((e) => {
-        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-      })
-    );
-    $("btn-pin-hk").addEventListener("click", () =>
-      pinHostKey().catch((e) => {
-        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-      })
-    );
-    $("btn-install-key").addEventListener("click", () =>
-      installKey().catch((e) => {
-        $("ssh-msg").innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
-      })
-    );
-    $("btn-apply-fw").addEventListener("click", () =>
-      applyFirewall().catch(showErr)
-    );
-    $("btn-refresh-fw").addEventListener("click", () =>
-      refreshFirewall().catch(showErr)
-    );
     $("btn-provision-agent").addEventListener("click", () =>
-      provisionAgent().catch(showErr)
+      installGateway().catch(() => {})
     );
 
     $("btn-refresh-cfg").addEventListener("click", () =>
@@ -511,10 +493,7 @@
       confirmCleanup().catch(showErr)
     );
 
-    fillNicSelect("nic-select").catch(() => {});
     fillNicSelect("cfg-nic-select").catch(() => {});
-    fillGatewaySelect([]);
-    refreshFirewall().catch(() => {});
     refreshTargets().catch(() => {});
   }
 
