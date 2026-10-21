@@ -96,7 +96,7 @@ def discover_gateways(
     if not mon:
         raise ValueError(
             "monitoring_ip required — save this PC LAN address first "
-            "(Gateways → Registration or first-run Network step)."
+            "(Gateways → Settings)."
         )
 
     pref = prefix
