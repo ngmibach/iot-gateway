@@ -1,8 +1,5 @@
-/* First-run installer — Monitoring + Network only. Gateways register after install. */
+/* First-run installer — Install monitoring only. Network and gateways come later in-app. */
 (function () {
-  const STEPS = ["Monitoring", "Network", "Finish"];
-  let step = 0;
-
   const $ = (id) => document.getElementById(id);
 
   async function api(path, opts) {
@@ -21,29 +18,6 @@
     const data = await res.json().catch(() => ({}));
     if (!res.ok) throw new Error(data.error || res.statusText || "request failed");
     return data;
-  }
-
-  function showStep(n) {
-    step = Math.max(0, Math.min(STEPS.length - 1, n));
-    document.querySelectorAll(".step").forEach((el) => {
-      el.classList.toggle("hidden", Number(el.dataset.step) !== step);
-    });
-    document.querySelectorAll("#step-tabs button").forEach((btn, i) => {
-      btn.classList.toggle("active", i === step);
-    });
-    $("btn-prev").disabled = step === 0;
-    $("btn-next").textContent = step === STEPS.length - 1 ? "Done" : "Next";
-  }
-
-  function buildTabs() {
-    const nav = $("step-tabs");
-    nav.innerHTML = "";
-    STEPS.forEach((label, i) => {
-      const b = document.createElement("button");
-      b.textContent = `${i + 1}. ${label}`;
-      b.addEventListener("click", () => showStep(i));
-      nav.appendChild(b);
-    });
   }
 
   function badge(el, ok, text) {
@@ -150,20 +124,10 @@
   }
 
   async function startServices() {
-    $("svc-msg").textContent = "Starting…";
-    const data = await api("/api/wizard/services/start", {
+    await api("/api/wizard/services/start", {
       method: "POST",
       body: JSON.stringify({ streamlit: false }),
     });
-    const ok = data.control && data.control.healthy;
-    $("svc-msg").innerHTML = ok
-      ? `<div class="okmsg">Control service running.</div>`
-      : `<div class="err">Control service failed to start.</div>`;
-  }
-
-  async function stopServices() {
-    await api("/api/wizard/services/stop", { method: "POST", body: "{}" });
-    $("svc-msg").innerHTML = `<div class="okmsg">Stopped.</div>`;
   }
 
   async function openMonitoring() {
@@ -177,103 +141,20 @@
     await enterApp("monitoring.html#metric");
   }
 
-  async function stopTelemetry() {
-    await api("/api/wizard/telemetry/stop", { method: "POST", body: "{}" });
-    await refreshEnv();
-  }
-
-  async function refreshNics() {
-    const data = await api("/api/wizard/nics");
-    const sel = $("nic-select");
-    sel.innerHTML = "";
-    (data.candidates || []).forEach((c) => {
-      const opt = document.createElement("option");
-      opt.value = JSON.stringify(c);
-      opt.textContent = `${c.name} — ${c.ip}${c.prefix != null ? "/" + c.prefix : ""}`;
-      sel.appendChild(opt);
-    });
-    if (data.default) {
-      const want = JSON.stringify(data.default);
-      [...sel.options].forEach((o) => {
-        if (o.value === want) o.selected = true;
-      });
-    }
-    if (!sel.options.length) {
-      const opt = document.createElement("option");
-      opt.textContent = "(none found)";
-      opt.value = "";
-      sel.appendChild(opt);
-    }
-  }
-
-  async function saveNic() {
-    const raw = $("nic-select").value;
-    if (!raw) throw new Error("Select a LAN address");
-    const c = JSON.parse(raw);
-    await api("/api/wizard/nics/select", {
-      method: "POST",
-      body: JSON.stringify({
-        monitoring_ip: c.ip,
-        nic_name: c.name,
-      }),
-    });
-    $("nic-msg").innerHTML = `<div class="okmsg">Saved ${c.ip}</div>`;
-  }
-
   function showErr(e) {
     console.error(e);
     alert(e.message || String(e));
   }
 
   function wire() {
-    buildTabs();
-    showStep(0);
-    $("btn-prev").addEventListener("click", () => showStep(step - 1));
-    $("btn-next").addEventListener("click", () => {
-      if (step === STEPS.length - 1) {
-        openMonitoring().catch((e) => {
-          showErr(e);
-          enterApp("monitoring.html#metric").catch(() => {
-            window.location.href = "monitoring.html#metric";
-          });
-        });
-        return;
-      }
-      showStep(step + 1);
-    });
     $("btn-prepare-telemetry").addEventListener("click", () =>
       prepareTelemetry().catch(showErr)
-    );
-    $("btn-stop-telemetry").addEventListener("click", () =>
-      stopTelemetry().catch(showErr)
     );
     const early = $("btn-open-mon-early");
     if (early) {
       early.addEventListener("click", () => openMonitoring().catch(showErr));
     }
-    $("btn-refresh-nics").addEventListener("click", () =>
-      refreshNics().catch(showErr)
-    );
-    $("btn-save-nic").addEventListener("click", () => saveNic().catch(showErr));
-    $("btn-start-svc").addEventListener("click", () =>
-      startServices().catch(showErr)
-    );
-    $("btn-stop-svc").addEventListener("click", () =>
-      stopServices().catch(showErr)
-    );
-    $("btn-open-mon").addEventListener("click", () =>
-      openMonitoring().catch(showErr)
-    );
-    const openGw = $("btn-open-gateways");
-    if (openGw) {
-      openGw.addEventListener("click", () => {
-        enterApp("gateways.html#registration").catch(() => {
-          window.location.href = "gateways.html#registration";
-        });
-      });
-    }
     refreshEnv().catch(showErr);
-    refreshNics().catch(() => {});
   }
 
   wire();
