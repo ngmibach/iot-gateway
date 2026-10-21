@@ -64,6 +64,9 @@ def detect_docker() -> DockerStatus:
             ),
         )
 
+    from .winproc import hidden_kwargs
+
+    quiet = hidden_kwargs()
     try:
         ver = subprocess.run(
             [exe, "version", "--format", "{{.Server.Version}}"],
@@ -71,6 +74,7 @@ def detect_docker() -> DockerStatus:
             capture_output=True,
             text=True,
             timeout=10,
+            **quiet,
         )
         info = subprocess.run(
             [exe, "info"],
@@ -78,6 +82,7 @@ def detect_docker() -> DockerStatus:
             capture_output=True,
             text=True,
             timeout=15,
+            **quiet,
         )
     except (OSError, subprocess.TimeoutExpired) as e:
         return DockerStatus(

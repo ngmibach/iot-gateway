@@ -49,6 +49,8 @@ def generate_ed25519(gateway_id: str, *, force: bool = False) -> KeyPairPaths:
         paths.private.unlink()
     if paths.public.is_file():
         paths.public.unlink()
+    from .winproc import hidden_kwargs
+
     subprocess.run(
         [
             "ssh-keygen",
@@ -65,6 +67,7 @@ def generate_ed25519(gateway_id: str, *, force: bool = False) -> KeyPairPaths:
         capture_output=True,
         text=True,
         timeout=30,
+        **hidden_kwargs(),
     )
     os.chmod(paths.private, 0o600)
     return paths

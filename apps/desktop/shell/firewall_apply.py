@@ -33,12 +33,15 @@ def is_elevated() -> bool | None:
 
 
 def _run_netsh(args: list[str]) -> subprocess.CompletedProcess[str]:
+    from .winproc import hidden_kwargs
+
     return subprocess.run(
         ["netsh", *args],
         check=False,
         capture_output=True,
         text=True,
         timeout=30,
+        **hidden_kwargs(),
     )
 
 
