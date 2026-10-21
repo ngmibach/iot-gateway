@@ -241,6 +241,27 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertTrue(any("iot-gateway-agent" in c for c in ssh.commands))
         self.assertTrue(any("/opt/iot-gateway-agent" in c for c in ssh.commands))
 
+    def test_sudo_run_wraps_compound_command_in_sh_c(self) -> None:
+        from provisioner.agent_install import sudo_run
+
+        ssh = FakeSSH()
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        result = sudo_run(
+            ssh,
+            "mkdir -p /var/lib/iot-gateway-agent && "
+            "mv /tmp/iotgw-agent.env /etc/iot-gateway-agent.env",
+            sudo_password="secret",
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual(len(ssh.commands), 1)
+        cmd = ssh.commands[0]
+        self.assertIn("sudo -S -p '' -- sh -c ", cmd)
+        self.assertIn("/etc/iot-gateway-agent.env", cmd)
+        # Whole chain is one argv to sh -c (quoted), not a shell-level && after sudo.
+        self.assertNotRegex(cmd, r"-- mkdir -p .* && mv ")
+        self.assertFalse(any("secret" in c for c in ssh.commands))
+        self.assertTrue(any("secret" in s for s in getattr(ssh, "stdins", [])))
+
     def test_mosquitto_present_accepts_usr_sbin(self) -> None:
         from provisioner.agent_install import _mosquitto_present
 
@@ -347,6 +368,7 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertTrue(apt_cmds, "expected apt-get under sudo")
         for c in apt_cmds:
             self.assertIn("env DEBIAN_FRONTEND=noninteractive", c)
+            self.assertIn("sh -c ", c)
             self.assertNotIn("-- DEBIAN_FRONTEND=", c)
 
     def test_agent_backend_requires_sudo_password(self) -> None:
