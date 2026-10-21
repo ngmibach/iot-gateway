@@ -139,7 +139,13 @@ def prep_loki(expr: str, *, duration: str = "1h") -> str:
     return expr.replace("\r\n", "\n").replace("[{range}]", f"[{duration}]")
 
 
-def prep_prom(expr: str, *, node: str = "gateway", job: str = "node") -> str:
+# Monolithic agent scrape job (see telemetry/scrape.py). Legacy node_exporter used "node".
+DEFAULT_PROM_JOB = "iot-gateway-agent"
+
+
+def prep_prom(
+    expr: str, *, node: str = "gateway", job: str = DEFAULT_PROM_JOB
+) -> str:
     return expr.replace("\r\n", "\n").replace("$node", node).replace("$job", job)
 
 
