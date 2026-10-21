@@ -138,7 +138,7 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn('id="reg-install"', gw_html2)
         self.assertIn("field-help", gw_html2)
         self.assertIn("Sudo password", gw_html2)
-        self.assertIn("Authentication failed", gw_html2)
+        self.assertIn("Login name for the gateway.", gw_html2)
         self.assertNotIn("Scan LAN for SSH", gw_html2)
         self.assertNotIn("Apply firewall", gw_html2)
         self.assertNotIn('id="nic-select"', gw_html2)

@@ -37,7 +37,7 @@
           <label for="reg-host">
             Host
             <span class="field-help" tabindex="0" aria-label="What is Host?">?
-              <span class="field-help-tip">IP address of the device you selected. Filled automatically from Find gateway.</span>
+              <span class="field-help-tip">Gateway address from Find gateway.</span>
             </span>
           </label>
           <input id="reg-host" readonly />
@@ -46,7 +46,7 @@
           <label for="ssh-user">
             User
             <span class="field-help" tabindex="0" aria-label="What is User?">?
-              <span class="field-help-tip">Linux login name on the Pi (the name before @ in the shell, e.g. admin or ubuntu). Wrong user causes Authentication failed.</span>
+              <span class="field-help-tip">Login name for the gateway.</span>
             </span>
           </label>
           <input id="ssh-user" placeholder="e.g. admin" />
@@ -55,7 +55,7 @@
           <label for="ssh-pass">
             Password
             <span class="field-help" tabindex="0" aria-label="What is Password?">?
-              <span class="field-help-tip">Login password for that User. Used to open SSH and install the monitor’s key. Same password you use to sign in on the Pi.</span>
+              <span class="field-help-tip">Password to install on the gateway.</span>
             </span>
           </label>
           <input id="ssh-pass" type="password" autocomplete="off" />
@@ -64,7 +64,7 @@
           <label for="ssh-gid">
             Gateway ID
             <span class="field-help" tabindex="0" aria-label="What is Gateway ID?">?
-              <span class="field-help-tip">A short name for this gateway inside the app only (not a Pi account). Leave as gateway unless you register several devices.</span>
+              <span class="field-help-tip">Name for this gateway in the app.</span>
             </span>
           </label>
           <input id="ssh-gid" value="gateway" />
@@ -73,7 +73,7 @@
           <label for="sudo-pass">
             Sudo password
             <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
-              <span class="field-help-tip">Password for sudo on the Pi (apt/systemd install). Usually the same as Password above.</span>
+              <span class="field-help-tip">Admin password for gateway install.</span>
             </span>
           </label>
           <input id="sudo-pass" type="password" autocomplete="new-password" />
