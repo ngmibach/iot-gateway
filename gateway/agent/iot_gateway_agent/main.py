@@ -124,15 +124,41 @@ def main(argv: list[str] | None = None) -> int:
     broker = MosquittoSupervisor(conf)
     worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
-    metrics = AgentMetrics(broker=broker)
+    metrics = AgentMetrics(
+        broker=broker,
+        mqtt_port=args.mqtt_port,
+        mqtt_host="127.0.0.1",
+    )
 
-    if not args.no_broker:
+    if args.no_broker:
+        # Prefer the distro mosquitto systemd unit (provisioner enables it).
+        metrics.refresh_mqtt_up()
+        if metrics.mqtt_up:
+            logger.info(
+                "using existing MQTT broker on %s:%s (--no-broker)",
+                metrics.mqtt_host,
+                metrics.mqtt_port,
+            )
+        else:
+            logger.warning(
+                "no MQTT broker on %s:%s — start system mosquitto or drop --no-broker",
+                metrics.mqtt_host,
+                metrics.mqtt_port,
+            )
+    else:
         try:
             broker.start()
             metrics.mqtt_up = broker.running()
         except Exception as e:  # noqa: BLE001
             logger.error("mosquitto start failed: %s", e)
-            metrics.mqtt_up = False
+            # Fall back to a system broker already bound to the port.
+            metrics.refresh_mqtt_up()
+            if metrics.mqtt_up:
+                logger.info(
+                    "agent child mosquitto failed; using broker already on %s:%s",
+                    metrics.mqtt_host,
+                    metrics.mqtt_port,
+                )
 
     sensor_log = data / "logs" / "sensor_data.log"
     if not args.no_decrypt:
@@ -160,10 +186,11 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("mDNS disabled via --no-mdns")
 
     def health_fn():
-        metrics.mqtt_up = broker.running() if not args.no_broker else metrics.mqtt_up
+        metrics.refresh_mqtt_up()
         h = build_health(mdns_enabled=mdns_enabled, port=args.port)
         h["mqtt_up"] = metrics.mqtt_up
         h["mode"] = "monolithic"
+        h["mqtt_mode"] = "external" if args.no_broker else "child"
         return h
 
     def info_fn():
@@ -177,14 +204,15 @@ def main(argv: list[str] | None = None) -> int:
         info["read_only"] = False
         info["mode"] = "monolithic"
         info["data_dir"] = str(data)
+        info["mqtt_mode"] = "external" if args.no_broker else "child"
         return info
 
     def reload_fn():
-        # Re-read ACL/passwords by restarting mosquitto child.
+        # Child mode: restart supervised mosquitto. External mode: re-probe port.
         if not args.no_broker:
             broker.stop()
             broker.start()
-            metrics.mqtt_up = broker.running()
+        metrics.refresh_mqtt_up()
         return {"ok": True, "mqtt_up": metrics.mqtt_up}
 
     server = create_server(

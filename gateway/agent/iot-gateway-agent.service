@@ -1,20 +1,19 @@
 [Unit]
 Description=IoT Gateway monolithic agent (MQTT + decrypt + metrics + Loki shipper)
 Documentation=file:///opt/iot-gateway-agent
-After=network-online.target
-Wants=network-online.target
+After=network-online.target mosquitto.service
+Wants=network-online.target mosquitto.service
 
 [Service]
 Type=simple
 Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
 Environment=MONITORING_IP=127.0.0.1
 EnvironmentFile=-/etc/iot-gateway-agent.env
-ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent
+# Use the distro mosquitto systemd unit (provisioner apt-installs + enables it).
+ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent --no-broker
 Restart=on-failure
 RestartSec=3
 WorkingDirectory=/opt/iot-gateway-agent
-
-# Mosquitto is supervised as a child of the agent (native package, not Docker).
 
 [Install]
 WantedBy=multi-user.target

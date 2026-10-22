@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import socket
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,13 @@ if TYPE_CHECKING:
     from .broker import MosquittoSupervisor
     from .decrypt_worker import DecryptWorker
     from .shipper import LokiShipper
+
+_MOSQUITTO_PID_FILES = (
+    Path("/run/mosquitto/mosquitto.pid"),
+    Path("/var/run/mosquitto/mosquitto.pid"),
+    Path("/run/mosquitto.pid"),
+    Path("/var/run/mosquitto.pid"),
+)
 
 
 def _read_meminfo() -> dict[str, int]:
@@ -191,6 +199,40 @@ def _read_proc_cpu_seconds(pid: int) -> Optional[float]:
         return None
 
 
+def tcp_open(host: str, port: int, *, timeout: float = 0.4) -> bool:
+    """True when a TCP connect to host:port succeeds."""
+    try:
+        with socket.create_connection((host, int(port)), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def find_mosquitto_pid() -> Optional[int]:
+    """Best-effort PID for a system or child mosquitto process."""
+    for path in _MOSQUITTO_PID_FILES:
+        try:
+            pid = int(path.read_text(encoding="utf-8").strip().split()[0])
+        except (OSError, ValueError, IndexError):
+            continue
+        if pid > 1 and Path(f"/proc/{pid}").exists():
+            return pid
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+            if "mosquitto" in cmd and "iot-gateway-agent" not in cmd:
+                return int(entry.name)
+    except OSError:
+        pass
+    return None
+
+
 def _host_metric_lines() -> list[str]:
     lines: list[str] = []
     load1 = 0.0
@@ -294,17 +336,25 @@ def _host_metric_lines() -> list[str]:
 class AgentMetrics:
     started_at: float = field(default_factory=time.time)
     mqtt_up: bool = False
+    mqtt_port: int = 1883
+    mqtt_host: str = "127.0.0.1"
     broker: MosquittoSupervisor | None = None
     decrypt_worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
 
+    def refresh_mqtt_up(self) -> bool:
+        """Child broker running, or system/external broker accepting TCP."""
+        child_up = bool(self.broker is not None and self.broker.running())
+        if child_up:
+            self.mqtt_up = True
+            return True
+        self.mqtt_up = tcp_open(self.mqtt_host, self.mqtt_port)
+        return self.mqtt_up
+
     def _app_up(self) -> dict[str, bool]:
         decrypt_up = bool(self.decrypt_worker and self.decrypt_worker.alive)
         shipper_up = bool(self.shipper and self.shipper.alive)
-        mqtt_up = bool(self.mqtt_up)
-        if self.broker is not None:
-            mqtt_up = bool(self.broker.running())
-            self.mqtt_up = mqtt_up
+        mqtt_up = self.refresh_mqtt_up()
         return {
             "agent": True,
             "mqtt": mqtt_up,
@@ -314,10 +364,13 @@ class AgentMetrics:
 
     def _app_pids(self) -> dict[str, int]:
         pids: dict[str, int] = {"agent": os.getpid()}
+        mqtt_pid: Optional[int] = None
         if self.broker is not None:
             mqtt_pid = self.broker.pid
-            if mqtt_pid is not None:
-                pids["mqtt"] = mqtt_pid
+        if mqtt_pid is None:
+            mqtt_pid = find_mosquitto_pid()
+        if mqtt_pid is not None:
+            pids["mqtt"] = mqtt_pid
         return pids
 
     def render(self) -> str:
@@ -333,7 +386,7 @@ class AgentMetrics:
             "# HELP iotgw_agent_uptime_seconds Uptime",
             "# TYPE iotgw_agent_uptime_seconds gauge",
             f"iotgw_agent_uptime_seconds {uptime:.3f}",
-            "# HELP iotgw_mqtt_up Mosquitto child running",
+            "# HELP iotgw_mqtt_up MQTT broker reachable (child or system)",
             "# TYPE iotgw_mqtt_up gauge",
             f"iotgw_mqtt_up {1 if apps['mqtt'] else 0}",
             "# HELP iotgw_app_up Gateway application / worker up (1=up)",
