@@ -1,9 +1,11 @@
-/* Control Plane — Registration + View (same-origin /api/v1 wizard proxy). */
+/* Control Plane — progressive Registration + View (same-origin /api/v1 wizard proxy). */
 (function () {
   const $ = (id) => document.getElementById(id);
 
   let devices = [];
   let baseline = null;
+  let selectedSensorIp = "";
+  let caWaiters = null;
 
   function escapeHtml(s) {
     return String(s)
@@ -63,6 +65,37 @@
     return data;
   }
 
+  async function wizardApi(method, path, { body, query } = {}) {
+    let url = path;
+    if (query) {
+      const qs = new URLSearchParams(query);
+      url += "?" + qs.toString();
+    }
+    const res = await fetch(url, {
+      method,
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+      },
+      body: body != null ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let data = {};
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch {
+      data = { error: text };
+    }
+    if (!res.ok) {
+      const msg = data.error || data.detail || res.statusText || "request failed";
+      const err = new Error(typeof msg === "string" ? msg : JSON.stringify(msg));
+      err.status = res.status;
+      err.data = data;
+      throw err;
+    }
+    return data;
+  }
+
   function selectedGateway() {
     return ($("gw-select") && $("gw-select").value) || "";
   }
@@ -97,10 +130,79 @@
     return String(value);
   }
 
+  function isCaFailure(err) {
+    const msg = String((err && err.message) || err || "").toLowerCase();
+    return (
+      msg.includes("ca_passphrase") ||
+      msg.includes("ca passphrase") ||
+      msg.includes("passphrase") ||
+      msg.includes("bad decrypt") ||
+      msg.includes("mac verify") ||
+      msg.includes("unable to load") ||
+      msg.includes("wrong password") ||
+      msg.includes("password required")
+    );
+  }
+
+  function openCaModal() {
+    return new Promise((resolve, reject) => {
+      caWaiters = { resolve, reject };
+      $("ca-modal-pass").value = "";
+      $("ca-modal-msg").innerHTML = "";
+      $("ca-modal").classList.remove("hidden");
+      setTimeout(() => $("ca-modal-pass").focus(), 50);
+    });
+  }
+
+  function closeCaModal(ok, value) {
+    $("ca-modal").classList.add("hidden");
+    const waiters = caWaiters;
+    caWaiters = null;
+    if (!waiters) return;
+    if (ok) waiters.resolve(value);
+    else waiters.reject(new Error("CA passphrase entry cancelled."));
+  }
+
+  async function ensureCaPassphrase(gid) {
+    const status = await wizardApi("GET", "/api/wizard/secrets/ca-status", {
+      query: { gateway_id: gid },
+    });
+    if (status.present) return;
+    const passphrase = await openCaModal();
+    await wizardApi("PUT", "/api/wizard/secrets/ca", {
+      body: { gateway_id: gid, ca_passphrase: passphrase },
+    });
+  }
+
+  async function clearStoredCa(gid) {
+    try {
+      await wizardApi("DELETE", "/api/wizard/secrets/ca", {
+        query: { gateway_id: gid },
+      });
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function withCaRetry(gid, fn) {
+    await ensureCaPassphrase(gid);
+    try {
+      return await fn();
+    } catch (err) {
+      if (!isCaFailure(err)) throw err;
+      await clearStoredCa(gid);
+      const passphrase = await openCaModal();
+      await wizardApi("PUT", "/api/wizard/secrets/ca", {
+        body: { gateway_id: gid, ca_passphrase: passphrase },
+      });
+      return await fn();
+    }
+  }
+
   function renderDownloadCards(container, gatewayId, items) {
     container.classList.remove("hidden");
     const ttlNote =
-      '<div class="note-box">One-time download (≤5 min). Download now to keep a copy.</div>';
+      '<div class="note-box">One-time download (≤5 min). Download now to keep a copy for the sensor.</div>';
     const cards = (items || [])
       .map((it) => {
         const url =
@@ -140,6 +242,102 @@
     $("hdr-status").innerHTML = '<span class="badge ok">Ready</span>';
   }
 
+  function hideRegForm() {
+    selectedSensorIp = "";
+    $("reg-form").classList.add("hidden");
+    $("reg-download").classList.add("hidden");
+    if ($("reg-msg")) $("reg-msg").innerHTML = "";
+  }
+
+  function showRegForm(ip, { editable } = {}) {
+    selectedSensorIp = ip || "";
+    $("reg-ip").value = selectedSensorIp;
+    $("reg-ip").readOnly = !editable;
+    if (!$("reg-user").value.trim() && selectedSensorIp) {
+      /* leave Device ID for the operator */
+    }
+    const uid = $("reg-user").value.trim();
+    if (uid && !$("reg-topic-rw").value.trim()) {
+      $("reg-topic-rw").value = `sensors/${uid}/#`;
+    }
+    $("reg-form").classList.remove("hidden");
+    $("reg-download").classList.add("hidden");
+    if ($("reg-msg")) $("reg-msg").innerHTML = "";
+  }
+
+  function renderHostList(hosts) {
+    const list = $("host-list");
+    const results = $("reg-results");
+    list.innerHTML = "";
+    results.classList.remove("hidden");
+
+    if (!hosts.length) {
+      const li = document.createElement("li");
+      li.className = "host-list-empty";
+      li.textContent =
+        "No neighbors found. Sensors appear after they talk to the gateway; or enter an IP manually.";
+      list.appendChild(li);
+      hideRegForm();
+      return;
+    }
+
+    hosts.forEach((h) => {
+      const ip = h.ip || h;
+      const mac = h.mac ? ` · ${h.mac}` : "";
+      const state = h.state ? ` (${h.state})` : "";
+      const li = document.createElement("li");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "host-list-item";
+      btn.dataset.ip = ip;
+      btn.textContent = `${ip}${mac}${state}`;
+      btn.addEventListener("click", () => {
+        list.querySelectorAll(".host-list-item").forEach((el) => {
+          el.classList.toggle("selected", el === btn);
+        });
+        showRegForm(ip);
+      });
+      li.appendChild(btn);
+      list.appendChild(li);
+    });
+  }
+
+  async function findSensors() {
+    const gid = requireGateway();
+    $("scan-msg").textContent = "Looking for sensors on the gateway…";
+    $("scan-badge").innerHTML = '<span class="badge warn">Scanning…</span>';
+    $("btn-find-sensor").disabled = true;
+    hideRegForm();
+    $("reg-results").classList.add("hidden");
+    $("host-list").innerHTML = "";
+    try {
+      const data = await control(
+        "POST",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/discover`
+      );
+      const hosts = data.hosts || [];
+      renderHostList(hosts);
+      $("scan-badge").innerHTML = hosts.length
+        ? `<span class="badge ok">${hosts.length} found</span>`
+        : '<span class="badge warn">0 found</span>';
+      $("scan-msg").textContent = hosts.length
+        ? "Select a device to continue."
+        : "No neighbors found. Enter an IP manually if you know it.";
+    } catch (e) {
+      $("scan-badge").innerHTML = '<span class="badge bad">Failed</span>';
+      $("scan-msg").innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
+      throw e;
+    } finally {
+      $("btn-find-sensor").disabled = false;
+    }
+  }
+
+  function enterManualIp() {
+    $("reg-results").classList.remove("hidden");
+    showRegForm("", { editable: true });
+    $("reg-ip").focus();
+  }
+
   async function registerDevice() {
     const gid = requireGateway();
     const user_id = $("reg-user").value.trim();
@@ -154,31 +352,35 @@
     const body = { user_id, password, ip };
     const tr = $("reg-topic-r").value.trim();
     const tw = $("reg-topic-rw").value.trim();
-    const ca = $("reg-ca").value;
     if (tr) body.topic_read = tr;
     if (tw) body.topic_readwrite = tw;
-    if (ca) body.ca_passphrase = ca;
+
     $("reg-msg").textContent = "Registering…";
     $("reg-download").classList.add("hidden");
-    const data = await control(
-      "POST",
-      `/api/v1/gateways/${encodeURIComponent(gid)}/devices`,
-      { body }
-    );
-    $("reg-msg").innerHTML = `<div class="okmsg">Registered <strong>${escapeHtml(
-      user_id
-    )}</strong>.</div>`;
-    if (data.cert_bundle_token) {
-      renderDownloadCards($("reg-download"), gid, [
-        {
-          device_id: user_id,
-          cert_bundle_token: data.cert_bundle_token,
-          fingerprint_sha256:
-            (data.device && data.device.cert_fingerprint) || null,
-        },
-      ]);
+    $("btn-register").disabled = true;
+    try {
+      const data = await withCaRetry(gid, () =>
+        control("POST", `/api/v1/gateways/${encodeURIComponent(gid)}/devices`, {
+          body,
+        })
+      );
+      $("reg-msg").innerHTML = `<div class="okmsg">Registered <strong>${escapeHtml(
+        user_id
+      )}</strong>.</div>`;
+      if (data.cert_bundle_token) {
+        renderDownloadCards($("reg-download"), gid, [
+          {
+            device_id: user_id,
+            cert_bundle_token: data.cert_bundle_token,
+            fingerprint_sha256:
+              (data.device && data.device.cert_fingerprint) || null,
+          },
+        ]);
+      }
+      $("reg-pass").value = "";
+    } finally {
+      $("btn-register").disabled = false;
     }
-    $("reg-pass").value = "";
   }
 
   function currentViewSnapshot() {
@@ -237,7 +439,6 @@
     $("view-topic-rw").value = topicOne(device.topics_rw);
     $("view-topic-r").value = topicOne(device.topics_r);
     $("view-pass").value = "";
-    $("view-ca").value = "";
     $("view-monitor").checked = !!device.monitor_enabled;
     $("view-fp").textContent = device.cert_fingerprint || "—";
     $("view-expires").textContent =
@@ -312,18 +513,24 @@
       if (cur.topic_r) body.topic_read = cur.topic_r;
       else body.topic_read = "";
       body.monitor_enabled = cur.monitor;
-      const ca = ($("view-ca").value || "").trim();
-      if (ca) body.ca_passphrase = ca;
     }
 
     $("view-msg").textContent = "Updating…";
     $("btn-view-update").disabled = true;
     try {
-      const data = await control(
-        "PATCH",
-        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(cur.id)}`,
-        { body }
-      );
+      const data = monitorOnly
+        ? await control(
+            "PATCH",
+            `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(cur.id)}`,
+            { body }
+          )
+        : await withCaRetry(gid, () =>
+            control(
+              "PATCH",
+              `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(cur.id)}`,
+              { body }
+            )
+          );
       $("view-msg").innerHTML = `<div class="okmsg">${escapeHtml(
         data.message || "Updated."
       )}</div>`;
@@ -345,6 +552,58 @@
       }
     } finally {
       syncUpdateButton();
+    }
+  }
+
+  async function reissueCert() {
+    const gid = requireGateway();
+    const device_id = ($("view-id").value || "").trim();
+    if (!device_id) throw new Error("Select a device first.");
+    $("view-msg").textContent = "Re-issuing certificate…";
+    $("view-download").classList.add("hidden");
+    $("btn-view-reissue").disabled = true;
+    try {
+      const data = await withCaRetry(gid, () =>
+        control(
+          "POST",
+          `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/reissue-cert`,
+          { body: {} }
+        )
+      );
+      $("view-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || "Certificate reissued."
+      )}</div>`;
+      if (data.cert_bundle_token) {
+        renderDownloadCards($("view-download"), gid, [
+          {
+            device_id: device_id,
+            cert_bundle_token: data.cert_bundle_token,
+            fingerprint_sha256:
+              (data.device && data.device.cert_fingerprint) || null,
+          },
+        ]);
+      }
+      await refreshDevices();
+      const still = (devices || []).find((d) => d.id === device_id);
+      if (still) {
+        $("view-device").value = still.id;
+        fillViewForm(still);
+        if (data.cert_bundle_token) {
+          renderDownloadCards($("view-download"), gid, [
+            {
+              device_id: device_id,
+              cert_bundle_token: data.cert_bundle_token,
+              fingerprint_sha256:
+                (data.device && data.device.cert_fingerprint) || null,
+            },
+          ]);
+          $("view-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+            data.message || "Certificate reissued."
+          )}</div>`;
+        }
+      }
+    } finally {
+      $("btn-view-reissue").disabled = false;
     }
   }
 
@@ -402,11 +661,37 @@
         .catch(showErr)
     );
     $("gw-select").addEventListener("change", () => {
+      hideRegForm();
+      $("reg-results").classList.add("hidden");
+      $("host-list").innerHTML = "";
+      $("scan-badge").innerHTML = "";
+      $("scan-msg").textContent =
+        "Neighbor lists only show devices the gateway has recently talked to.";
       if (document.querySelector('#action-tabs button.active[data-action="view"]')) {
         refreshDevices().catch(showErr);
       }
     });
 
+    $("btn-find-sensor").addEventListener("click", () =>
+      findSensors().catch(showErr)
+    );
+    $("btn-manual-ip").addEventListener("click", () => {
+      try {
+        requireGateway();
+        enterManualIp();
+      } catch (e) {
+        showErr(e);
+      }
+    });
+    $("reg-user").addEventListener("input", () => {
+      const uid = $("reg-user").value.trim();
+      if (uid && !$("reg-topic-rw").dataset.touched) {
+        $("reg-topic-rw").value = `sensors/${uid}/#`;
+      }
+    });
+    $("reg-topic-rw").addEventListener("input", () => {
+      $("reg-topic-rw").dataset.touched = "1";
+    });
     $("btn-register").addEventListener("click", () =>
       registerDevice().catch(showErr)
     );
@@ -428,9 +713,34 @@
     $("btn-view-update").addEventListener("click", () =>
       updateDevice().catch(showErr)
     );
+    $("btn-view-reissue").addEventListener("click", () =>
+      reissueCert().catch(showErr)
+    );
     $("btn-view-delete").addEventListener("click", () =>
       deleteDevice().catch(showErr)
     );
+
+    $("btn-ca-save").addEventListener("click", () => {
+      const pass = ($("ca-modal-pass").value || "").trim();
+      if (!pass) {
+        $("ca-modal-msg").innerHTML =
+          '<div class="err">Enter the gateway CA passphrase.</div>';
+        return;
+      }
+      if (pass === "admin") {
+        $("ca-modal-msg").innerHTML =
+          '<div class="err">Passphrase &quot;admin&quot; is not allowed.</div>';
+        return;
+      }
+      closeCaModal(true, pass);
+    });
+    $("btn-ca-cancel").addEventListener("click", () => closeCaModal(false));
+    $("ca-modal-pass").addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") {
+        ev.preventDefault();
+        $("btn-ca-save").click();
+      }
+    });
 
     refreshGateways().catch(() => {});
   }

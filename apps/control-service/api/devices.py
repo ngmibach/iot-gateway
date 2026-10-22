@@ -8,7 +8,8 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
-from actions.playbooks import register_device, unregister_device
+from actions.discover_sensors import discover_sensor_hosts
+from actions.playbooks import register_device, reissue_device_cert, unregister_device
 from actions.validate import validate_ip_or_cidr, validate_topic, validate_user_id
 from registry.registry import Registry
 
@@ -25,9 +26,12 @@ from .deps import (
 )
 from .schemas import (
     DeviceOut,
+    DiscoverSensorsResponse,
     GatewayOut,
     RegisterDeviceRequest,
     RegisterDeviceResponse,
+    ReissueCertRequest,
+    ReissueCertResponse,
     UpdateDeviceRequest,
     UpdateDeviceResponse,
 )
@@ -103,6 +107,31 @@ def list_devices(
     require_gateway(registry, gid)
     flag = None if monitor_enabled is None else (1 if monitor_enabled else 0)
     return [_device_out(r) for r in registry.list_devices(gid, monitor_enabled=flag)]
+
+
+@router.post(
+    "/gateways/{gid}/devices/discover",
+    response_model=DiscoverSensorsResponse,
+)
+def post_discover_sensors(
+    gid: str,
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DiscoverSensorsResponse:
+    """List LAN neighbor IPs on the gateway (excludes the gateway itself)."""
+    gw = require_gateway(registry, gid)
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            out = discover_sensor_hosts(ssh)
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"sensor discover failed: {exc}",
+        ) from exc
+    return DiscoverSensorsResponse(
+        hosts=list(out.get("hosts") or []),
+        gateway_ips=list(out.get("gateway_ips") or []),
+    )
 
 
 @router.post(
@@ -388,6 +417,85 @@ def patch_device(
         status="ok",
         message="Monitor setting saved.",
         playbook=False,
+    )
+
+
+@router.post(
+    "/gateways/{gid}/devices/{device_id}/reissue-cert",
+    response_model=ReissueCertResponse,
+)
+def post_reissue_cert(
+    gid: str,
+    device_id: str,
+    body: ReissueCertRequest,
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+    cert_cache: CertBundleCache = Depends(get_cert_cache),
+) -> ReissueCertResponse:
+    """Re-sign a client cert for an existing device; returns a one-time download token."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+
+    row = registry.get_device(gid, device_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"device {device_id!r} not found on gateway {gid!r}",
+        )
+
+    ca_pass = body.ca_passphrase or state.settings.ca_passphrase
+    if not ca_pass:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ca_passphrase required (body or IOTGW_CA_PASSPHRASE)",
+        )
+
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = reissue_device_cert(
+                ssh,
+                user_id=device_id,
+                ca_passphrase=ca_pass,
+                install_root=gw["install_root"],
+                cert_days=int(body.days),
+            )
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/reissue failed: {exc}",
+        ) from exc
+
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.message or "reissue failed",
+        )
+
+    device = registry.upsert_device(
+        gid,
+        device_id,
+        cert_expires_at=_expires_unix(result.cert_expires_at),
+        cert_fingerprint=result.cert_fingerprint,
+    )
+    registry.audit(
+        "reissue_device_cert",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={"status": result.status, "cert_fingerprint": result.cert_fingerprint},
+    )
+    token = None
+    if result.cert_bundle:
+        token = cert_cache.put(gid, device_id, result.cert_bundle)
+    return ReissueCertResponse(
+        device=_device_out(device),
+        cert_bundle_token=token,
+        status=result.status,
+        message=result.message or "Certificate reissued.",
     )
 
 

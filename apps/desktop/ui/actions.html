@@ -31,41 +31,79 @@
 
     <section class="panel action-panel" data-action="register" id="panel-register">
       <h2>Sensor registration</h2>
-      <p class="muted">Register a sensor or edge device on the selected gateway.</p>
-      <div class="row">
-        <label for="reg-user">Device ID</label>
-        <input id="reg-user" autocomplete="off" placeholder="sensor5" />
+      <p class="muted">Search the selected gateway for nearby devices, then register one.</p>
+
+      <div id="reg-find">
+        <div class="row">
+          <button type="button" class="primary" id="btn-find-sensor">Find sensor</button>
+          <span id="scan-badge"></span>
+        </div>
+        <div class="note-box" id="scan-msg">
+          Neighbor lists only show devices the gateway has recently talked to.
+        </div>
       </div>
-      <div class="row">
-        <label for="reg-pass">Password</label>
-        <input id="reg-pass" type="password" autocomplete="off" />
+
+      <div id="reg-results" class="hidden">
+        <h3>Found devices</h3>
+        <ul class="host-list" id="host-list"></ul>
+        <div class="row">
+          <button type="button" class="secondary" id="btn-manual-ip">Enter IP manually</button>
+        </div>
       </div>
-      <div class="row">
-        <label for="reg-ip">Device IP</label>
-        <input id="reg-ip" placeholder="192.168.1.60" />
+
+      <div id="reg-form" class="hidden">
+        <h3>Sensor</h3>
+        <div class="row">
+          <label for="reg-ip">
+            Device IP
+            <span class="field-help" tabindex="0" aria-label="What is Device IP?">?
+              <span class="field-help-tip">Address from Find sensor on this gateway.</span>
+            </span>
+          </label>
+          <input id="reg-ip" readonly />
+        </div>
+        <div class="row">
+          <label for="reg-user">
+            Device ID
+            <span class="field-help" tabindex="0" aria-label="What is Device ID?">?
+              <span class="field-help-tip">Name for this sensor in MQTT and the app.</span>
+            </span>
+          </label>
+          <input id="reg-user" autocomplete="off" placeholder="sensor5" />
+        </div>
+        <div class="row">
+          <label for="reg-pass">
+            Password
+            <span class="field-help" tabindex="0" aria-label="What is Password?">?
+              <span class="field-help-tip">MQTT password for this sensor (min 8 characters).</span>
+            </span>
+          </label>
+          <input id="reg-pass" type="password" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="reg-topic-rw">
+            Topic RW
+            <span class="field-help" tabindex="0" aria-label="What is Topic RW?">?
+              <span class="field-help-tip">Topic the sensor may publish and subscribe.</span>
+            </span>
+          </label>
+          <input id="reg-topic-rw" placeholder="sensors/sensor5/#" />
+        </div>
+        <div class="row">
+          <label for="reg-topic-r">
+            Topic R
+            <span class="field-help" tabindex="0" aria-label="What is Topic R?">?
+              <span class="field-help-tip">Optional read-only topic for this sensor.</span>
+            </span>
+          </label>
+          <input id="reg-topic-r" placeholder="alerts/+" />
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btn-register">Register</button>
+        </div>
+        <div id="reg-msg"></div>
+        <div id="reg-download" class="hidden"></div>
       </div>
-      <div class="row">
-        <label for="reg-topic-rw">Topic RW</label>
-        <input id="reg-topic-rw" placeholder="sensors/sensor5/#" />
-      </div>
-      <div class="row">
-        <label for="reg-topic-r">Topic R</label>
-        <input id="reg-topic-r" placeholder="alerts/+" />
-      </div>
-      <div class="row">
-        <label for="reg-ca">CA passphrase</label>
-        <input
-          id="reg-ca"
-          type="password"
-          autocomplete="off"
-          placeholder="optional if already configured"
-        />
-      </div>
-      <div class="row">
-        <button type="button" class="primary" id="btn-register">Register</button>
-      </div>
-      <div id="reg-msg"></div>
-      <div id="reg-download" class="hidden"></div>
     </section>
 
     <section class="panel action-panel hidden" data-action="view" id="panel-view">
@@ -107,15 +145,6 @@
           />
         </div>
         <div class="row">
-          <label for="view-ca">CA passphrase</label>
-          <input
-            id="view-ca"
-            type="password"
-            autocomplete="off"
-            placeholder="optional if already configured"
-          />
-        </div>
-        <div class="row">
           <input type="checkbox" id="view-monitor" />
           <label for="view-monitor" style="min-width:auto">Monitor this device</label>
         </div>
@@ -145,11 +174,31 @@
         </div>
         <div class="row view-actions">
           <button type="button" class="primary hidden" id="btn-view-update">Update</button>
+          <button type="button" class="secondary" id="btn-view-reissue">Re-issue cert</button>
           <button type="button" class="danger" id="btn-view-delete" disabled>Delete</button>
         </div>
       </div>
     </section>
   </main>
+
+  <div id="ca-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="ca-modal-title">
+    <div class="modal-card">
+      <h2 id="ca-modal-title">Gateway CA passphrase</h2>
+      <p class="muted">
+        Used to sign sensor TLS certificates on this gateway. Saved securely; you will only be asked again if it changes.
+      </p>
+      <div class="row">
+        <label for="ca-modal-pass">CA passphrase</label>
+        <input id="ca-modal-pass" type="password" autocomplete="off" />
+      </div>
+      <div id="ca-modal-msg"></div>
+      <div class="row">
+        <button type="button" class="primary" id="btn-ca-save">Save and continue</button>
+        <button type="button" class="secondary" id="btn-ca-cancel">Cancel</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app-shell.js"></script>
   <script src="actions.js"></script>
 </body>

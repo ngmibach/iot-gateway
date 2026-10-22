@@ -255,6 +255,41 @@ def register_device(
         )
 
 
+def reissue_device_cert(
+    ssh: "SSHClient",
+    *,
+    user_id: str,
+    ca_passphrase: str,
+    install_root: str = DEFAULT_INSTALL_ROOT,
+    cert_days: int = 730,
+    reject_default_admin_passphrase: bool = True,
+    key_material: ClientKeyMaterial | None = None,
+) -> RegisterResult:
+    """Sign a fresh client cert for an existing device (no ACL/password/IP changes)."""
+    paths = _paths(install_root)
+    try:
+        user_id = validate_user_id(user_id)
+        material = key_material or generate_client_key_and_csr(cn=user_id)
+        signed = sign_csr_on_gateway(
+            ssh,
+            paths,
+            material.csr_pem,
+            ca_passphrase,
+            days=cert_days,
+            reject_default_admin_passphrase=reject_default_admin_passphrase,
+        )
+        cert_kw = _cert_fields(material, signed)
+        return RegisterResult(
+            ok=True,
+            status="ok",
+            message="client certificate reissued",
+            details={"user_id": user_id},
+            **cert_kw,
+        )
+    except Exception as exc:  # noqa: BLE001
+        return RegisterResult(ok=False, status="failed", message=str(exc))
+
+
 def update_acl(
     ssh: "SSHClient",
     *,
