@@ -572,6 +572,45 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True, "settings": settings})
             return
 
+        if method == "GET" and path == "/api/wizard/secrets/ca-status":
+            gid = (qs.get("gateway_id") or [""])[0].strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            present = bool(keyring_store.get_secret(gid, kind="ca"))
+            _json_response(handler, 200, {"present": present, "gateway_id": gid})
+            return
+
+        if method == "PUT" and path == "/api/wizard/secrets/ca":
+            body = _read_json(handler)
+            gid = str(body.get("gateway_id") or "").strip()
+            passphrase = body.get("ca_passphrase")
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            if not isinstance(passphrase, str) or not passphrase.strip():
+                _json_response(handler, 400, {"error": "ca_passphrase required"})
+                return
+            if passphrase.strip() == "admin":
+                _json_response(
+                    handler,
+                    400,
+                    {"error": "production profile refuses CA passphrase 'admin'"},
+                )
+                return
+            keyring_store.set_secret(gid, passphrase.strip(), kind="ca")
+            _json_response(handler, 200, {"ok": True, "gateway_id": gid, "present": True})
+            return
+
+        if method == "DELETE" and path == "/api/wizard/secrets/ca":
+            gid = (qs.get("gateway_id") or [""])[0].strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            keyring_store.delete_secret(gid, kind="ca")
+            _json_response(handler, 200, {"ok": True, "gateway_id": gid, "present": False})
+            return
+
         if method == "POST" and path == "/api/wizard/discover/gateways":
             body = _read_json(handler)
             try:
@@ -1138,6 +1177,51 @@ def _handle_api(
         _json_response(handler, 500, {"error": str(e)})
 
 
+def _gateway_id_from_v1_path(path: str) -> str | None:
+    """Extract gateway id from ``/api/v1/gateways/{gid}/...``."""
+    parts = [p for p in (path or "").split("/") if p]
+    # api, v1, gateways, {gid}, ...
+    if len(parts) >= 4 and parts[0] == "api" and parts[1] == "v1" and parts[2] == "gateways":
+        gid = parts[3].strip()
+        return gid or None
+    return None
+
+
+def _should_inject_ca(method: str, path: str) -> bool:
+    """Device register / update / reissue-cert — not discover or cert-bundle GET."""
+    if method == "POST" and path.endswith("/reissue-cert"):
+        return True
+    if method == "PATCH" and "/devices/" in path:
+        return True
+    if method == "POST" and path.endswith("/devices"):
+        return True
+    return False
+
+
+def _inject_ca_passphrase(body: bytes, gateway_id: str) -> tuple[bytes, str | None]:
+    """Merge keyring CA into JSON body when ``ca_passphrase`` is absent.
+
+    Returns (body_bytes, content_type_override). Never logs the secret.
+    """
+    if not gateway_id:
+        return body, None
+    try:
+        data = json.loads(body.decode("utf-8") if body else "{}")
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return body, None
+    if not isinstance(data, dict):
+        return body, None
+    existing = data.get("ca_passphrase")
+    if isinstance(existing, str) and existing.strip():
+        return body, None
+    secret = keyring_store.get_secret(gateway_id, kind="ca")
+    if not secret:
+        return body, None
+    data["ca_passphrase"] = secret
+    out = json.dumps(data).encode("utf-8")
+    return out, "application/json"
+
+
 def _proxy_control(
     handler: BaseHTTPRequestHandler,
     method: str,
@@ -1161,6 +1245,12 @@ def _proxy_control(
         length = int(handler.headers.get("Content-Length") or "0")
         if length > 0:
             body = handler.rfile.read(length)
+    if _should_inject_ca(method, path):
+        gid = _gateway_id_from_v1_path(path)
+        if gid:
+            body, ct_override = _inject_ca_passphrase(body, gid)
+            if ct_override:
+                headers["Content-Type"] = ct_override
     req = urllib.request.Request(target, data=body or None, headers=headers, method=method)
     # Device register/update/delete SSH playbooks can exceed 30s.
     timeout = 120 if method in ("POST", "PUT", "PATCH", "DELETE") else 30
@@ -1419,6 +1509,16 @@ class WizardHandler(BaseHTTPRequestHandler):
             return
         self.send_error(405)
 
+    def do_PUT(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            _proxy_control(self, "PUT", parsed.path, query=parsed.query)
+            return
+        if parsed.path.startswith("/api/"):
+            _handle_api(self, "PUT", parsed.path, query=parsed.query)
+            return
+        self.send_error(405)
+
     def do_PATCH(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/v1/"):
@@ -1430,6 +1530,9 @@ class WizardHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         if parsed.path.startswith("/api/v1/"):
             _proxy_control(self, "DELETE", parsed.path, query=parsed.query)
+            return
+        if parsed.path.startswith("/api/"):
+            _handle_api(self, "DELETE", parsed.path, query=parsed.query)
             return
         self.send_error(405)
 

@@ -126,6 +126,23 @@ class UpdateDeviceResponse(BaseModel):
     playbook: bool = False
 
 
+class DiscoverSensorsResponse(BaseModel):
+    hosts: list[dict[str, Any]] = Field(default_factory=list)
+    gateway_ips: list[str] = Field(default_factory=list)
+
+
+class ReissueCertRequest(BaseModel):
+    ca_passphrase: Optional[str] = None
+    days: int = Field(default=730, ge=1, le=3650)
+
+
+class ReissueCertResponse(BaseModel):
+    device: DeviceOut
+    cert_bundle_token: Optional[str] = None
+    status: str = "ok"
+    message: str = ""
+
+
 class RegisterDeviceResponse(BaseModel):
     device: DeviceOut
     cert_bundle_token: Optional[str] = None

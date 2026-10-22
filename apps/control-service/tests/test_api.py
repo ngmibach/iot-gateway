@@ -475,6 +475,76 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertFalse(body["redistribute"])
         self.assertEqual(len(body["devices"]), 1)
 
+    def test_discover_sensors(self) -> None:
+        def _discover(_ssh: Any = None) -> dict[str, Any]:
+            return {
+                "hosts": [
+                    {"ip": "192.168.1.60", "mac": "aa:bb:cc:dd:ee:ff", "state": "REACHABLE"},
+                    {"ip": "192.168.1.61", "state": "STALE"},
+                ],
+                "gateway_ips": ["192.168.1.50"],
+            }
+
+        with patch("api.devices.discover_sensor_hosts", side_effect=_discover) as mocked:
+            r = self.client.post("/api/v1/gateways/gw1/devices/discover")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(len(body["hosts"]), 2)
+        self.assertEqual(body["hosts"][0]["ip"], "192.168.1.60")
+        self.assertEqual(body["gateway_ips"], ["192.168.1.50"])
+        mocked.assert_called_once()
+
+    def test_discover_sensors_unknown_gateway(self) -> None:
+        with patch("api.devices.discover_sensor_hosts") as mocked:
+            r = self.client.post("/api/v1/gateways/missing/devices/discover")
+        self.assertEqual(r.status_code, 404)
+        mocked.assert_not_called()
+
+    def test_reissue_cert(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+
+        def _reissue(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+            return RegisterResult(
+                ok=True,
+                status="ok",
+                message="client certificate reissued",
+                details={"user_id": kwargs.get("user_id")},
+                cert_bundle=b"PK\x03\x04reissue-zip",
+                cert_fingerprint="ff" * 32,
+                cert_expires_at="2031-01-01T00:00:00+00:00",
+            )
+
+        with patch("api.devices.reissue_device_cert", side_effect=_reissue) as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices/sensor1/reissue-cert",
+                json={},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["device"]["id"], "sensor1")
+        self.assertEqual(body["device"]["cert_fingerprint"], "ff" * 32)
+        self.assertIsNotNone(body["cert_bundle_token"])
+        mocked.assert_called_once()
+        self.assertEqual(mocked.call_args.kwargs["user_id"], "sensor1")
+        self.assertEqual(mocked.call_args.kwargs["ca_passphrase"], "test-ca-secret")
+
+        token = body["cert_bundle_token"]
+        dl = self.client.get(
+            "/api/v1/gateways/gw1/devices/sensor1/cert-bundle",
+            params={"token": token},
+        )
+        self.assertEqual(dl.status_code, 200)
+        self.assertEqual(dl.content, b"PK\x03\x04reissue-zip")
+
+    def test_reissue_cert_unknown_device(self) -> None:
+        with patch("api.devices.reissue_device_cert") as mocked:
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices/missing/reissue-cert",
+                json={},
+            )
+        self.assertEqual(r.status_code, 404)
+        mocked.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

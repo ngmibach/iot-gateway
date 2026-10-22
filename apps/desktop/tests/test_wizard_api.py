@@ -91,13 +91,33 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Control Plane", actions_html)
         self.assertIn("Registration", actions_html)
         self.assertIn("Registered sensors", actions_html)
+        self.assertIn("Find sensor", actions_html)
+        self.assertIn('id="host-list"', actions_html)
+        self.assertIn('id="btn-find-sensor"', actions_html)
+        self.assertIn('id="btn-manual-ip"', actions_html)
+        self.assertIn('id="reg-form"', actions_html)
+        self.assertIn('id="ca-modal"', actions_html)
+        self.assertIn("Gateway CA passphrase", actions_html)
         self.assertIn("I am confirming that I want to delete this", actions_html)
         self.assertIn('id="btn-view-update"', actions_html)
+        self.assertIn('id="btn-view-reissue"', actions_html)
+        self.assertIn("Re-issue cert", actions_html)
+        self.assertNotIn('id="reg-ca"', actions_html)
+        self.assertNotIn('id="view-ca"', actions_html)
         self.assertNotIn("Rotate CA", actions_html)
         self.assertNotIn('id="ctrl-url"', actions_html)
         self.assertNotIn('id="ctrl-token"', actions_html)
         self.assertIn("app-shell.js", actions_html)
         self.assertIn("actions.js", actions_html)
+        with urllib.request.urlopen(self.base + "/actions.js", timeout=5) as resp:
+            ajs = resp.read().decode("utf-8")
+        self.assertIn("/devices/discover", ajs)
+        self.assertIn("/reissue-cert", ajs)
+        self.assertIn("/api/wizard/secrets/ca-status", ajs)
+        self.assertIn("/api/wizard/secrets/ca", ajs)
+        self.assertIn("btn-find-sensor", ajs)
+        self.assertIn("findSensors", ajs)
+        self.assertIn("withCaRetry", ajs)
         with urllib.request.urlopen(self.base + "/monitoring.html", timeout=5) as resp:
             mon = resp.read().decode("utf-8")
         self.assertIn("Monitoring", mon)
@@ -203,6 +223,55 @@ class WizardApiTests(unittest.TestCase):
         self.assertEqual(s.get("ssh_host"), "192.168.1.60")
         self.assertEqual(s.get("ssh_user"), "pi")
         self.assertEqual(s.get("ssh_port"), 2222)
+
+    def test_ca_secret_status_put_delete(self) -> None:
+        from shell import keyring_store
+
+        with mock.patch.object(keyring_store, "_keyring_usable", return_value=False):
+            missing = self._get("/api/wizard/secrets/ca-status?gateway_id=gw1")
+            self.assertFalse(missing.get("present"))
+
+            put_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca",
+                data=json.dumps(
+                    {"gateway_id": "gw1", "ca_passphrase": "correct-horse"}
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="PUT",
+            )
+            with urllib.request.urlopen(put_req, timeout=10) as resp:
+                put_body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(put_body.get("ok"))
+            self.assertTrue(put_body.get("present"))
+
+            present = self._get("/api/wizard/secrets/ca-status?gateway_id=gw1")
+            self.assertTrue(present.get("present"))
+            # Status must never echo the secret.
+            self.assertNotIn("ca_passphrase", present)
+            self.assertNotIn("correct-horse", json.dumps(present))
+
+            bad = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca",
+                data=json.dumps(
+                    {"gateway_id": "gw1", "ca_passphrase": "admin"}
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="PUT",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(bad, timeout=10)
+            self.assertEqual(ctx.exception.code, 400)
+
+            del_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca?gateway_id=gw1",
+                method="DELETE",
+            )
+            with urllib.request.urlopen(del_req, timeout=10) as resp:
+                del_body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(del_body.get("ok"))
+            self.assertFalse(del_body.get("present"))
+            after = self._get("/api/wizard/secrets/ca-status?gateway_id=gw1")
+            self.assertFalse(after.get("present"))
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")
