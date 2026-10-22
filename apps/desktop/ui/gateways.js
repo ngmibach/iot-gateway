@@ -71,54 +71,11 @@
     }
   }
 
-  async function fillNicSelect(selId) {
-    const sel = $(selId);
-    if (!sel) return;
-    const data = await api("/api/wizard/nics");
-    sel.innerHTML = "";
-    (data.candidates || []).forEach((c) => {
-      const opt = document.createElement("option");
-      opt.value = JSON.stringify(c);
-      opt.textContent = `${c.name} — ${c.ip}${c.prefix != null ? "/" + c.prefix : ""}`;
-      sel.appendChild(opt);
-    });
-    if (data.default) {
-      const want = JSON.stringify(data.default);
-      [...sel.options].forEach((o) => {
-        if (o.value === want) o.selected = true;
-      });
-    }
-    if (!sel.options.length) {
-      const opt = document.createElement("option");
-      opt.textContent = "(none found)";
-      opt.value = "";
-      sel.appendChild(opt);
-    }
-  }
-
-  async function saveNicFrom(selId, msgId, extra) {
-    const raw = $(selId).value;
-    if (!raw) throw new Error("Select a LAN address");
-    const c = JSON.parse(raw);
-    const body = {
-      monitoring_ip: c.ip,
-      nic_name: c.name,
-      ...(extra || {}),
-    };
-    await api("/api/wizard/nics/select", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
-    $(msgId).innerHTML = `<div class="okmsg">Saved ${escapeHtml(c.ip)}</div>`;
-  }
-
   async function seedDefaultLan() {
     const data = await api("/api/wizard/nics");
     const pick = data.default || (data.candidates || [])[0];
     if (!pick || !pick.ip) {
-      throw new Error(
-        "No LAN address available. Configure This PC LAN under Gateways → Settings."
-      );
+      throw new Error("No LAN address available on this PC.");
     }
     await api("/api/wizard/nics/select", {
       method: "POST",
@@ -350,87 +307,114 @@
     const rows = targets.gateways || [];
     fillSelect($("cfg-gateway-id"), rows, targets.default_gateway_id);
     fillSelect($("cu-gateway-id"), rows, targets.default_gateway_id);
-    const listHtml = rows.length
-      ? "<strong>Registered</strong><br/>" +
-        rows
-          .map(
-            (g) =>
-              escapeHtml(g.id) + (g.host ? " — " + escapeHtml(g.host) : "")
-          )
-          .join("<br/>")
-      : targets.provisioned
-        ? `Provisioned SSH host: ${escapeHtml(targets.ssh_host || "—")}`
-        : "No gateways registered yet.";
-    if ($("cu-list")) $("cu-list").innerHTML = listHtml;
     loadCfgForm();
-    updateCleanupSummary();
+    updateCleanupForm();
     $("hdr-status").innerHTML = '<span class="badge ok">Ready</span>';
   }
 
   function loadCfgForm() {
     const gid = $("cfg-gateway-id").value;
     const row = (targets.gateways || []).find((g) => g.id === gid);
-    if ($("cfg-detail")) {
-      $("cfg-detail").textContent = row
-        ? `Editing ${row.id}` + (row.host ? ` @ ${row.host}` : "")
-        : targets.provisioned
-          ? `Provisioned host ${targets.ssh_host || "—"} (not in registry yet).`
-          : "Select a gateway or register one first.";
-    }
+    if ($("cfg-msg")) $("cfg-msg").innerHTML = "";
+    if ($("cfg-pass")) $("cfg-pass").value = "";
     if (row) {
       $("cfg-host").value = row.host || "";
-      $("cfg-user").value = row.ssh_user || targets.ssh_user || "ubuntu";
-      $("cfg-port").value = String(targets.ssh_port || 22);
+      $("cfg-user").value = row.ssh_user || targets.ssh_user || "";
     } else if (targets.provisioned) {
       $("cfg-host").value = targets.ssh_host || "";
-      $("cfg-user").value = targets.ssh_user || "ubuntu";
-      $("cfg-port").value = String(targets.ssh_port || 22);
+      $("cfg-user").value = targets.ssh_user || "";
+    } else {
+      $("cfg-host").value = "";
+      $("cfg-user").value = "";
     }
   }
 
   async function saveCfg() {
+    const msg = $("cfg-msg");
     const gid = $("cfg-gateway-id").value || targets.default_gateway_id || "gateway";
-    const host = $("cfg-host").value.trim();
-    if (!host) throw new Error("Host / IP required");
-    await api("/api/wizard/settings/gateway", {
-      method: "POST",
-      body: JSON.stringify({
-        gateway_id: gid,
-        gateway_ip: host,
-        ssh_host: host,
-        ssh_user: $("cfg-user").value.trim() || "ubuntu",
-        ssh_port: Number($("cfg-port").value) || 22,
-      }),
-    });
-    $("cfg-msg").innerHTML = `<div class="okmsg">Saved settings for ${escapeHtml(gid)}.</div>`;
-    await refreshTargets();
+    const host = ($("cfg-host").value || "").trim();
+    const username = ($("cfg-user").value || "").trim();
+    const password = ($("cfg-pass") && $("cfg-pass").value) || "";
+    const port = Number(targets.ssh_port) || DEFAULT_SSH_PORT;
+
+    if (!host) {
+      msg.innerHTML = `<div class="err">Select a gateway first.</div>`;
+      throw new Error("host required");
+    }
+    if (!username) {
+      msg.innerHTML = `<div class="err">Username required.</div>`;
+      throw new Error("user required");
+    }
+
+    const btn = $("btn-save-cfg");
+    if (btn) btn.disabled = true;
+    try {
+      msg.textContent = "Saving…";
+      await api("/api/wizard/settings/gateway", {
+        method: "POST",
+        body: JSON.stringify({
+          gateway_id: gid,
+          gateway_ip: host,
+          ssh_host: host,
+          ssh_user: username,
+          ssh_port: port,
+        }),
+      });
+
+      if (password.trim()) {
+        msg.textContent = "Updating credentials…";
+        const hostKey = await api("/api/wizard/ssh/fetch-host-key", {
+          method: "POST",
+          body: JSON.stringify({ host, port }),
+        });
+        await api("/api/wizard/ssh/pin-host-key", {
+          method: "POST",
+          body: JSON.stringify(hostKey),
+        });
+        await api("/api/wizard/ssh/install-key", {
+          method: "POST",
+          body: JSON.stringify({
+            host,
+            port,
+            username,
+            password,
+            gateway_id: gid,
+            host_key_base64: hostKey.base64,
+          }),
+        });
+        if ($("cfg-pass")) $("cfg-pass").value = "";
+      }
+
+      msg.innerHTML = `<div class="okmsg">Saved.</div>`;
+      await refreshTargets();
+    } catch (e) {
+      if ($("cfg-pass")) $("cfg-pass").value = "";
+      msg.innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
+      throw e;
+    } finally {
+      if (btn) btn.disabled = false;
+    }
   }
 
-  function updateCleanupSummary() {
+  function updateCleanupForm() {
     const gid = $("cu-gateway-id").value;
-    const row = (targets.gateways || []).find((g) => g.id === gid);
-    const lines = [];
-    if (!gid && !targets.provisioned) {
-      lines.push("No gateway is registered or provisioned.");
-      $("btn-cu-confirm").disabled = true;
-    } else {
-      const id = gid || targets.default_gateway_id;
-      const host = (row && row.host) || targets.ssh_host || "";
-      lines.push(
-        `• Remove gateway agent for ${id}` +
-          (host ? ` @ ${host}` : "") +
-          " and its registry row."
-      );
-      lines.push("• Monitoring (Loki/Prometheus) on this PC is kept.");
-      $("btn-cu-confirm").disabled = false;
+    const canRemove = Boolean(gid || targets.provisioned);
+    if ($("btn-cu-confirm")) $("btn-cu-confirm").disabled = !canRemove;
+    if ($("cu-msg") && !$("cu-msg").querySelector(".err") && !$("cu-msg").querySelector(".okmsg")) {
+      $("cu-msg").innerHTML = "";
     }
-    $("cu-summary").textContent = lines.join("\n");
   }
 
   async function confirmCleanup() {
     const gid = $("cu-gateway-id").value || undefined;
+    const sudoPass = ($("cu-sudo").value || "").trim();
     if (!gid && !targets.provisioned) {
+      $("cu-msg").innerHTML = `<div class="err">Select a gateway to remove.</div>`;
       throw new Error("Select a gateway to remove");
+    }
+    if (!sudoPass) {
+      $("cu-msg").innerHTML = `<div class="err">Password required.</div>`;
+      throw new Error("password required");
     }
     $("cu-msg").textContent = "Removing…";
     $("btn-cu-confirm").disabled = true;
@@ -441,14 +425,11 @@
           gateway: true,
           monitoring: false,
           gateway_id: gid,
-          sudo_password: $("cu-sudo").value || undefined,
+          sudo_password: sudoPass,
         }),
       });
-      const notes = (data.notes || []).join(" · ");
       $("cu-msg").innerHTML = `<div class="okmsg">${escapeHtml(
-        data.ok === false
-          ? "Finished with some errors. " + notes
-          : "Gateway removed. " + notes
+        data.ok === false ? "Finished with some errors." : "Gateway removed."
       )}</div>`;
       $("cu-sudo").value = "";
       await refreshTargets();
@@ -476,27 +457,17 @@
       installGateway().catch(() => {})
     );
 
-    $("btn-refresh-cfg").addEventListener("click", () =>
-      refreshTargets().catch(showErr)
-    );
     $("cfg-gateway-id").addEventListener("change", loadCfgForm);
-    $("btn-save-cfg").addEventListener("click", () => saveCfg().catch(showErr));
-    $("btn-cfg-refresh-nics").addEventListener("click", () =>
-      fillNicSelect("cfg-nic-select").catch(showErr)
-    );
-    $("btn-cfg-save-nic").addEventListener("click", () =>
-      saveNicFrom("cfg-nic-select", "cfg-nic-msg").catch(showErr)
-    );
+    $("btn-save-cfg").addEventListener("click", () => saveCfg().catch(() => {}));
 
-    $("btn-refresh-cu").addEventListener("click", () =>
-      refreshTargets().catch(showErr)
-    );
-    $("cu-gateway-id").addEventListener("change", updateCleanupSummary);
+    $("cu-gateway-id").addEventListener("change", () => {
+      if ($("cu-msg")) $("cu-msg").innerHTML = "";
+      updateCleanupForm();
+    });
     $("btn-cu-confirm").addEventListener("click", () =>
-      confirmCleanup().catch(showErr)
+      confirmCleanup().catch(() => {})
     );
 
-    fillNicSelect("cfg-nic-select").catch(() => {});
     refreshTargets().catch(() => {});
   }
 

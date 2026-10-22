@@ -87,67 +87,47 @@
 
     <section class="panel gw-panel hidden" data-tab="settings" id="tab-settings">
       <h2>Settings</h2>
-      <p class="muted">Configure a registered gateway and this PC’s monitoring LAN address.</p>
+      <p class="muted">Configure a registered gateway.</p>
 
       <div class="row">
         <label for="cfg-gateway-id">Gateway</label>
         <select id="cfg-gateway-id"></select>
-        <button type="button" class="secondary" id="btn-refresh-cfg">Refresh</button>
       </div>
-      <div class="note-box" id="cfg-detail"></div>
 
       <h3>Connection</h3>
       <div class="row">
         <label for="cfg-host">Host / IP</label>
-        <input id="cfg-host" placeholder="192.168.1.50" />
+        <input id="cfg-host" readonly />
       </div>
       <div class="row">
-        <label for="cfg-user">SSH user</label>
-        <input id="cfg-user" placeholder="ubuntu" />
+        <label for="cfg-user">Username</label>
+        <input id="cfg-user" autocomplete="username" />
       </div>
       <div class="row">
-        <label for="cfg-port">SSH port</label>
-        <input id="cfg-port" type="number" value="22" style="min-width:6rem" />
+        <label for="cfg-pass">Password</label>
+        <input id="cfg-pass" type="password" autocomplete="off" />
       </div>
       <div class="row">
-        <button type="button" class="primary" id="btn-save-cfg">Save gateway settings</button>
+        <button type="button" class="primary" id="btn-save-cfg">Save</button>
       </div>
       <div id="cfg-msg"></div>
-
-      <h3>This PC LAN</h3>
-      <div class="row">
-        <label for="cfg-nic-select">LAN address</label>
-        <select id="cfg-nic-select"></select>
-        <button type="button" class="secondary" id="btn-cfg-refresh-nics">Refresh</button>
-        <button type="button" class="secondary" id="btn-cfg-save-nic">Save</button>
-      </div>
-      <div id="cfg-nic-msg"></div>
     </section>
 
     <section class="panel gw-panel hidden" data-tab="cleanup" id="tab-cleanup">
       <h2>Clean up</h2>
-      <p class="muted">
-        Remove a registered gateway agent from the Pi and drop its registry row.
-        Loki and Prometheus on this PC stay installed. To remove the monitoring
-        panel itself, use <strong>Settings → Remove</strong>.
-      </p>
 
       <div class="row">
         <label for="cu-gateway-id">Gateway</label>
         <select id="cu-gateway-id"></select>
-        <button type="button" class="secondary" id="btn-refresh-cu">Refresh</button>
       </div>
-      <div class="note-box" id="cu-list"></div>
       <div class="row">
-        <label for="cu-sudo">Gateway sudo password</label>
+        <label for="cu-sudo">Password</label>
         <input
           id="cu-sudo"
           type="password"
           autocomplete="off"
-          placeholder="required to remove the agent over SSH"
         />
       </div>
-      <div class="note-box danger" id="cu-summary"></div>
       <div class="row">
         <button type="button" class="danger" id="btn-cu-confirm" disabled>Remove gateway</button>
       </div>
