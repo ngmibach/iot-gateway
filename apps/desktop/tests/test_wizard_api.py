@@ -89,8 +89,15 @@ class WizardApiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/actions.html", timeout=5) as resp:
             actions_html = resp.read().decode("utf-8")
         self.assertIn("Control Plane", actions_html)
-        self.assertIn("Rotate CA", actions_html)
+        self.assertIn("Registration", actions_html)
+        self.assertIn("Registered sensors", actions_html)
+        self.assertIn("I am confirming that I want to delete this", actions_html)
+        self.assertIn('id="btn-view-update"', actions_html)
+        self.assertNotIn("Rotate CA", actions_html)
+        self.assertNotIn('id="ctrl-url"', actions_html)
+        self.assertNotIn('id="ctrl-token"', actions_html)
         self.assertIn("app-shell.js", actions_html)
+        self.assertIn("actions.js", actions_html)
         with urllib.request.urlopen(self.base + "/monitoring.html", timeout=5) as resp:
             mon = resp.read().decode("utf-8")
         self.assertIn("Monitoring", mon)

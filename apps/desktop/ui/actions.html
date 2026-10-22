@@ -3,58 +3,45 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>IoT Gateway — Actions</title>
+  <title>IoT Gateway — Control Plane</title>
   <link rel="stylesheet" href="wizard.css" />
 </head>
 <body data-page="actions">
   <header>
     <div>
       <h1>Control Plane</h1>
-      <div class="sub">Register · Devices · Unregister · Rotate</div>
+      <div class="sub">Registration · View</div>
     </div>
     <div id="hdr-status"></div>
   </header>
   <main>
     <section class="panel">
-      <h2>Control service</h2>
       <div class="row">
-        <label for="ctrl-url">API base</label>
-        <input id="ctrl-url" placeholder="http://127.0.0.1:9137" />
-      </div>
-      <div class="row">
-        <label for="ctrl-token">API token</label>
-        <input id="ctrl-token" type="password" autocomplete="off" placeholder="optional X-API-Token" />
-      </div>
-      <div class="row">
-        <button class="secondary" id="btn-ping">Ping /health</button>
-        <button class="secondary" id="btn-load-gw">Refresh gateways</button>
         <label for="gw-select">Gateway</label>
         <select id="gw-select"></select>
+        <button type="button" class="secondary" id="btn-load-gw">Refresh</button>
       </div>
       <div id="ctrl-msg"></div>
     </section>
 
     <nav class="tabs" id="action-tabs">
-      <button type="button" data-action="register" class="active">Register</button>
-      <button type="button" data-action="devices">Devices</button>
-      <button type="button" data-action="unregister">Unregister</button>
-      <button type="button" data-action="rotate-server">Rotate server</button>
-      <button type="button" data-action="rotate-ca">Rotate CA</button>
+      <button type="button" data-action="register" class="active">Registration</button>
+      <button type="button" data-action="view">View</button>
     </nav>
 
     <section class="panel action-panel" data-action="register" id="panel-register">
-      <h2>Register device</h2>
-      <p>Whitelist + ACL + mTLS client cert via FastAPI. Bundle is one-time download (≤5 min).</p>
+      <h2>Sensor registration</h2>
+      <p class="muted">Register a sensor or edge device on the selected gateway.</p>
       <div class="row">
-        <label for="reg-user">USER_ID *</label>
-        <input id="reg-user" placeholder="sensor5" />
+        <label for="reg-user">Device ID</label>
+        <input id="reg-user" autocomplete="off" placeholder="sensor5" />
       </div>
       <div class="row">
-        <label for="reg-pass">Password *</label>
-        <input id="reg-pass" type="password" autocomplete="off" placeholder="min 8 chars" />
+        <label for="reg-pass">Password</label>
+        <input id="reg-pass" type="password" autocomplete="off" />
       </div>
       <div class="row">
-        <label for="reg-ip">USER_IP *</label>
+        <label for="reg-ip">Device IP</label>
         <input id="reg-ip" placeholder="192.168.1.60" />
       </div>
       <div class="row">
@@ -67,71 +54,100 @@
       </div>
       <div class="row">
         <label for="reg-ca">CA passphrase</label>
-        <input id="reg-ca" type="password" autocomplete="off" placeholder="blank → IOTGW_CA_PASSPHRASE" />
+        <input
+          id="reg-ca"
+          type="password"
+          autocomplete="off"
+          placeholder="optional if already configured"
+        />
       </div>
-      <button class="primary" id="btn-register">Register device</button>
+      <div class="row">
+        <button type="button" class="primary" id="btn-register">Register</button>
+      </div>
       <div id="reg-msg"></div>
       <div id="reg-download" class="hidden"></div>
     </section>
 
-    <section class="panel action-panel hidden" data-action="devices" id="panel-devices">
-      <h2>Registered devices</h2>
-      <div class="row">
-        <button class="secondary" id="btn-refresh-devices">Refresh</button>
-      </div>
-      <div id="devices-table"></div>
-      <div id="devices-msg"></div>
-    </section>
+    <section class="panel action-panel hidden" data-action="view" id="panel-view">
+      <h2>Registered sensors</h2>
+      <p class="muted">Select a device to review or change its settings.</p>
 
-    <section class="panel action-panel hidden" data-action="unregister" id="panel-unregister">
-      <h2>Unregister device</h2>
-      <p>Removes ACL + password line; optional allow-list IP removal when no other device shares it.</p>
       <div class="row">
-        <label for="unreg-device">Device ID *</label>
-        <input id="unreg-device" placeholder="sensor5" list="device-datalist" />
-        <datalist id="device-datalist"></datalist>
+        <label for="view-device">Device</label>
+        <select id="view-device"></select>
+        <button type="button" class="secondary" id="btn-refresh-view">Refresh</button>
       </div>
-      <div class="row">
-        <input type="checkbox" id="unreg-remove-ip" />
-        <label for="unreg-remove-ip" style="min-width:auto">Also remove IP from HAProxy allow-list</label>
-      </div>
-      <button class="danger" id="btn-unregister">Unregister</button>
-      <div id="unreg-msg"></div>
-    </section>
 
-    <section class="panel action-panel hidden" data-action="rotate-server" id="panel-rotate-server">
-      <h2>Rotate server cert (same CA)</h2>
-      <p>Re-issues gateway <code>server.*</code> with <code>subjectAltName=IP:…</code>. Does <strong>not</strong> rotate the CA or client certs.</p>
-      <div class="row">
-        <label for="rs-ip">Gateway IP (SAN)</label>
-        <input id="rs-ip" placeholder="blank → registry host if IP" />
-      </div>
-      <div class="row">
-        <label for="rs-ca">CA passphrase</label>
-        <input id="rs-ca" type="password" autocomplete="off" placeholder="blank → IOTGW_CA_PASSPHRASE" />
-      </div>
-      <button class="primary" id="btn-rotate-server">Rotate server cert</button>
-      <div id="rs-msg"></div>
-    </section>
+      <div id="view-empty" class="muted">No devices registered on this gateway.</div>
 
-    <section class="panel action-panel hidden" data-action="rotate-ca" id="panel-rotate-ca">
-      <h2>Rotate CA (break-glass)</h2>
-      <div class="note-box danger">New CA + server + reissue <strong>all</strong> registry device client certs. You must redistribute every bundle. Only redistribute when status is <code>ok</code> (not <code>reload_failed</code>).</div>
-      <div class="row">
-        <label for="rca-ip">Gateway IP (SAN)</label>
-        <input id="rca-ip" placeholder="blank → registry host if IP" />
+      <div id="view-form" class="hidden">
+        <div class="row">
+          <label for="view-id">Device ID</label>
+          <input id="view-id" readonly />
+        </div>
+        <div class="row">
+          <label for="view-ip">Device IP</label>
+          <input id="view-ip" />
+        </div>
+        <div class="row">
+          <label for="view-topic-rw">Topic RW</label>
+          <input id="view-topic-rw" />
+        </div>
+        <div class="row">
+          <label for="view-topic-r">Topic R</label>
+          <input id="view-topic-r" />
+        </div>
+        <div class="row">
+          <label for="view-pass">Password</label>
+          <input
+            id="view-pass"
+            type="password"
+            autocomplete="off"
+            placeholder="required only when changing IP, topics, or credentials"
+          />
+        </div>
+        <div class="row">
+          <label for="view-ca">CA passphrase</label>
+          <input
+            id="view-ca"
+            type="password"
+            autocomplete="off"
+            placeholder="optional if already configured"
+          />
+        </div>
+        <div class="row">
+          <input type="checkbox" id="view-monitor" />
+          <label for="view-monitor" style="min-width:auto">Monitor this device</label>
+        </div>
+        <div class="row">
+          <label>Fingerprint</label>
+          <span class="mono" id="view-fp">—</span>
+        </div>
+        <div class="row">
+          <label>Expires</label>
+          <span id="view-expires">—</span>
+        </div>
+
+        <div id="view-msg"></div>
+        <div id="view-download" class="hidden"></div>
+
+        <div class="row">
+          <input type="checkbox" id="view-delete-confirm" />
+          <label for="view-delete-confirm" style="min-width:auto">
+            I am confirming that I want to delete this
+          </label>
+        </div>
+        <div class="row">
+          <input type="checkbox" id="view-remove-ip" />
+          <label for="view-remove-ip" style="min-width:auto">
+            Also remove IP from the gateway allow-list
+          </label>
+        </div>
+        <div class="row view-actions">
+          <button type="button" class="primary hidden" id="btn-view-update">Update</button>
+          <button type="button" class="danger" id="btn-view-delete" disabled>Delete</button>
+        </div>
       </div>
-      <div class="row">
-        <label for="rca-ca">CA passphrase</label>
-        <input id="rca-ca" type="password" autocomplete="off" placeholder="blank → IOTGW_CA_PASSPHRASE" />
-      </div>
-      <div class="row">
-        <input type="checkbox" id="rca-confirm" />
-        <label for="rca-confirm" style="min-width:auto">I confirm break-glass CA rotation</label>
-      </div>
-      <button class="danger" id="btn-rotate-ca">Rotate CA + reissue devices</button>
-      <div id="rca-msg"></div>
-      <div id="rca-download" class="hidden"></div>
     </section>
   </main>
   <script src="app-shell.js"></script>

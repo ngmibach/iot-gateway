@@ -28,6 +28,8 @@ from .schemas import (
     GatewayOut,
     RegisterDeviceRequest,
     RegisterDeviceResponse,
+    UpdateDeviceRequest,
+    UpdateDeviceResponse,
 )
 
 # Authenticated control routes.
@@ -198,6 +200,194 @@ def post_register_device(
         status=result.status,
         message=result.message,
         idempotent=idempotent,
+    )
+
+
+def _topic_list_equal(a: Any, b: list[str]) -> bool:
+    """Compare stored JSON topic field to a desired list."""
+    if a is None:
+        return not b
+    if isinstance(a, str):
+        try:
+            a = json.loads(a)
+        except json.JSONDecodeError:
+            a = [a] if a.strip() else []
+    if isinstance(a, list):
+        left = [str(x).strip() for x in a if str(x).strip()]
+    else:
+        left = [str(a).strip()] if str(a).strip() else []
+    return left == b
+
+
+@router.patch(
+    "/gateways/{gid}/devices/{device_id}",
+    response_model=UpdateDeviceResponse,
+    status_code=status.HTTP_200_OK,
+)
+def patch_device(
+    gid: str,
+    device_id: str,
+    body: UpdateDeviceRequest,
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+    cert_cache: CertBundleCache = Depends(get_cert_cache),
+) -> UpdateDeviceResponse:
+    """Update a registered device.
+
+    Monitor-only → local registry. IP / topics / password → register playbook
+    (password required).
+    """
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+
+    row = registry.get_device(gid, device_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"device {device_id!r} not found on gateway {gid!r}",
+        )
+
+    desired_ip = body.ip if body.ip is not None else (row.get("ip") or "")
+    desired_topics_rw = (
+        body.topics_rw()
+        if body.topic_readwrite is not None
+        else (_parse_json_field(row.get("topics_rw")) or [])
+    )
+    if not isinstance(desired_topics_rw, list):
+        desired_topics_rw = [str(desired_topics_rw)] if desired_topics_rw else []
+    desired_topics_r = (
+        body.topics_r()
+        if body.topic_read is not None
+        else (_parse_json_field(row.get("topics_r")) or [])
+    )
+    if not isinstance(desired_topics_r, list):
+        desired_topics_r = [str(desired_topics_r)] if desired_topics_r else []
+
+    ip_changed = body.ip is not None and str(body.ip).strip() != str(row.get("ip") or "")
+    topics_changed = (
+        (
+            body.topic_readwrite is not None
+            and not _topic_list_equal(row.get("topics_rw"), body.topics_rw())
+        )
+        or (
+            body.topic_read is not None
+            and not _topic_list_equal(row.get("topics_r"), body.topics_r())
+        )
+    )
+    password_set = bool((body.password or "").strip())
+    playbook_needed = ip_changed or topics_changed or password_set
+
+    if not playbook_needed and body.monitor_enabled is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="no changes provided",
+        )
+
+    if playbook_needed:
+        if not password_set:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="password required to update IP, topics, or credentials on the gateway",
+            )
+        ca_pass = body.ca_passphrase or state.settings.ca_passphrase
+        if not ca_pass:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ca_passphrase required (body or IOTGW_CA_PASSPHRASE)",
+            )
+        try:
+            ip = validate_ip_or_cidr(str(desired_ip).strip())
+            topic_rw = body.topic_rw_arg() if body.topic_readwrite is not None else None
+            topic_r = body.topic_r_arg() if body.topic_read is not None else None
+            if topic_rw is None and desired_topics_rw:
+                topic_rw = validate_topic(str(desired_topics_rw[0]))
+            if topic_r is None and desired_topics_r:
+                topic_r = validate_topic(str(desired_topics_r[0]))
+            if topic_rw is not None:
+                topic_rw = validate_topic(topic_rw)
+            if topic_r is not None:
+                topic_r = validate_topic(topic_r)
+        except ValueError as exc:
+            raise http_400(exc) from exc
+
+        try:
+            with open_ssh_for(state, gw) as ssh:
+                result = register_device(
+                    ssh,
+                    user_id=device_id,
+                    password=str(body.password),
+                    ip=ip,
+                    topic_rw=topic_rw,
+                    topic_r=topic_r,
+                    install_root=gw["install_root"],
+                    ca_passphrase=ca_pass,
+                )
+        except ValueError as exc:
+            raise http_400(exc) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"SSH/update failed: {exc}",
+            ) from exc
+
+        if not result.ok:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=result.message or "device update failed",
+            )
+
+        monitor = (
+            (1 if body.monitor_enabled else 0)
+            if body.monitor_enabled is not None
+            else row.get("monitor_enabled", 1)
+        )
+        device = registry.upsert_device(
+            gid,
+            device_id,
+            ip=ip,
+            topics_rw=desired_topics_rw or None,
+            topics_r=desired_topics_r or None,
+            monitor_enabled=monitor,
+            cert_expires_at=_expires_unix(result.cert_expires_at),
+            cert_fingerprint=result.cert_fingerprint,
+        )
+        registry.audit(
+            "update_device",
+            gateway_id=gid,
+            device_id=device_id,
+            detail={"ip": ip, "status": result.status, "playbook": True},
+        )
+        token = None
+        if result.cert_bundle:
+            token = cert_cache.put(gid, device_id, result.cert_bundle)
+        return UpdateDeviceResponse(
+            device=_device_out(device),
+            cert_bundle_token=token,
+            status=result.status,
+            message=result.message or "Device updated.",
+            playbook=True,
+        )
+
+    # Monitor-only (or other registry-only) update.
+    device = registry.upsert_device(
+        gid,
+        device_id,
+        monitor_enabled=1 if body.monitor_enabled else 0,
+    )
+    registry.audit(
+        "update_device",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={"monitor_enabled": bool(body.monitor_enabled), "playbook": False},
+    )
+    return UpdateDeviceResponse(
+        device=_device_out(device),
+        status="ok",
+        message="Monitor setting saved.",
+        playbook=False,
     )
 
 
