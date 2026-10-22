@@ -64,6 +64,12 @@ class MosquittoSupervisor:
     def running(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
 
+    @property
+    def pid(self) -> int | None:
+        if not self.running() or self._proc is None:
+            return None
+        return int(self._proc.pid)
+
     def start(self) -> None:
         if self.running():
             return

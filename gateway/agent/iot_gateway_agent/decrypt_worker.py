@@ -37,6 +37,10 @@ class DecryptWorker:
         self.messages_ok = 0
         self.messages_fail = 0
 
+    @property
+    def alive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return

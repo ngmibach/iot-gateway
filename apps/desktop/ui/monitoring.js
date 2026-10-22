@@ -198,8 +198,10 @@
 
   function paintEmptyMetricCharts() {
     METRIC_LINE_CHARTS.forEach((key) => paintLineChart("chart-" + key, []));
-    paintBarChart("chart-container_cpu", []);
-    paintBarChart("chart-container_mem", []);
+    paintBarChart("chart-app_activity", []);
+    paintBarChart("chart-app_status", []);
+    paintBarChart("chart-app_cpu", []);
+    paintBarChart("chart-app_mem", []);
   }
 
   function fmtBytes(n) {
@@ -378,7 +380,19 @@
     );
     const m = data.metrics || {};
     const charts = data.charts || {};
+    const applications = data.applications || {};
     const containers = data.containers || {};
+    const appsUp =
+      m.apps_up != null
+        ? m.apps_up
+        : m.active_containers != null
+          ? m.active_containers
+          : "—";
+    const appsTotal = m.apps_total != null ? m.apps_total : null;
+    const appsLabel =
+      appsTotal != null && appsUp !== "—"
+        ? `${appsUp}/${appsTotal}`
+        : String(appsUp);
 
     metricCards($("raspi-metrics"), [
       ["Status", data.up ? "up" : "down"],
@@ -387,7 +401,7 @@
       ["CPU busy (cores)", String(m.cpu_cores_busy ?? "—")],
       ["Cores", String(m.cpu_cores ?? "—")],
       ["Load1", String(m.load1 ?? "—")],
-      ["Containers", String(m.active_containers ?? "—")],
+      ["Apps", appsLabel],
     ]);
     metricCards($("raspi-metrics-extra"), [
       ["Mem used", `${m.mem_used_pct ?? "—"}%`],
@@ -439,11 +453,34 @@
       paintLineChart("chart-" + key, series);
     });
 
-    metricCards($("raspi-container-metrics"), [
-      ["Active containers", String(m.active_containers ?? "—")],
-    ]);
-    paintBarChart("chart-container_cpu", containers.cpu || []);
-    paintBarChart("chart-container_mem", containers.mem_mib || []);
+    const statusRows = applications.status || [];
+    const statusCards =
+      statusRows.length > 0
+        ? statusRows.map((s) => [
+            String(s.name || s.id || "app"),
+            s.up ? "up" : "down",
+          ])
+        : [["Applications", appsLabel]];
+    const appMetricsEl = $("raspi-app-metrics") || $("raspi-container-metrics");
+    if (appMetricsEl) metricCards(appMetricsEl, statusCards);
+
+    const activity =
+      applications.activity ||
+      [];
+    const appCpu = applications.cpu || containers.cpu || [];
+    const appMem = applications.mem_mib || containers.mem_mib || [];
+    const statusBars = statusRows.map((s) => ({
+      name: s.name || s.id || "?",
+      value: s.up ? 1 : 0,
+    }));
+
+    paintBarChart("chart-app_activity", activity);
+    paintBarChart("chart-app_status", statusBars);
+    paintBarChart("chart-app_cpu", appCpu);
+    paintBarChart("chart-app_mem", appMem);
+    // Older bundled HTML still uses container chart ids.
+    paintBarChart("chart-container_cpu", appCpu);
+    paintBarChart("chart-container_mem", appMem);
 
     $("raspi-msg").textContent = `node=${data.node} job=${data.job} range=${data.range || range}`;
     showWarnings(data.warnings);

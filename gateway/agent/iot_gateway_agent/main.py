@@ -124,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     broker = MosquittoSupervisor(conf)
     worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
-    metrics = AgentMetrics()
+    metrics = AgentMetrics(broker=broker)
 
     if not args.no_broker:
         try:

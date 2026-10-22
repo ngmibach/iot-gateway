@@ -59,6 +59,20 @@ RASPI_FS_SIZE = (
 RASPI_ACTIVE_CONTAINERS = (
     'count(container_last_seen{instance="$node",job="$job",name=~".+"} > (time() - 120))'
 )
+# Monolithic agent apps (replaces Docker container scrapes).
+RASPI_APPS_UP = (
+    'count(iotgw_app_up{instance="$node",job="$job"} == 1) '
+    'or count(iotgw_agent_up{instance="$node",job="$job"} == 1)'
+)
+RASPI_APP_UP = 'iotgw_app_up{instance="$node",job="$job"}'
+RASPI_AGENT_UP = 'iotgw_agent_up{instance="$node",job="$job"}'
+RASPI_MQTT_UP = 'iotgw_mqtt_up{instance="$node",job="$job"}'
+RASPI_DECRYPT_MSGS_PER_MIN = (
+    'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job"}[1m])) * 60'
+)
+RASPI_SHIPPER_LINES_PER_MIN = (
+    'rate(iotgw_loki_lines_sent_total{instance="$node",job="$job"}[1m]) * 60'
+)
 RASPI_UP = 'up{instance="$node",job="$job"}'
 RASPI_TEMP_C = 'node_hwmon_temp_celsius{instance="$node",job="$job"}'
 RASPI_UPTIME_S = (
@@ -103,6 +117,14 @@ RASPI_CONTAINER_CPU = (
 RASPI_CONTAINER_MEM_MIB = (
     'sort_desc(sum by (name) (container_memory_working_set_bytes'
     '{instance="$node",job="$job",name=~".+"}) / 1024 / 1024)'
+)
+RASPI_APP_CPU = (
+    'sort_desc(sum by (app) (rate(iotgw_app_cpu_seconds_total'
+    '{instance="$node",job="$job"}[1m])))'
+)
+RASPI_APP_MEM_MIB = (
+    'sort_desc(sum by (app) (iotgw_app_memory_bytes'
+    '{instance="$node",job="$job"}) / 1024 / 1024)'
 )
 
 # ── Sensors (sensors.py) ─────────────────────────────────────────────────────

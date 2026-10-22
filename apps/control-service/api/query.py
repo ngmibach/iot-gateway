@@ -296,7 +296,8 @@ def _range_window_s(range_s: str) -> tuple[int, int, str]:
 
 def _container_label(metric: dict[str, Any]) -> str:
     raw = (
-        metric.get("name")
+        metric.get("app")
+        or metric.get("name")
         or metric.get("container_name")
         or metric.get("id")
         or "?"
@@ -305,6 +306,14 @@ def _container_label(metric: dict[str, Any]) -> str:
     if name.startswith("iot-"):
         name = name[4:]
     return name[:28] or "?"
+
+
+_APP_STATUS_LABELS = {
+    "agent": "Agent",
+    "mqtt": "MQTT",
+    "decrypt": "Decrypt",
+    "shipper": "Shipper",
+}
 
 
 @router.get("/query/summaries/raspi")
@@ -394,7 +403,6 @@ def summary_raspi(
     load1 = prom_scalar(Q.RASPI_LOAD1)
     fs_avail = prom_scalar(Q.RASPI_FS_AVAIL)
     fs_size = prom_scalar(Q.RASPI_FS_SIZE)
-    containers = int(prom_scalar(Q.RASPI_ACTIVE_CONTAINERS))
     up = prom_scalar(Q.RASPI_UP)
     temp_c = prom_max_scalar(Q.RASPI_TEMP_C)
     uptime_s = prom_scalar(Q.RASPI_UPTIME_S)
@@ -412,8 +420,45 @@ def summary_raspi(
     net_tx_spark = prom_spark(Q.RASPI_NET_TX_MBPS, label="net_tx_sparkline")
     temp_spark = prom_spark(Q.RASPI_TEMP_C, label="temp_sparkline")
 
-    container_cpu = prom_named_bars(Q.RASPI_CONTAINER_CPU, label="container_cpu")
-    container_mem = prom_named_bars(Q.RASPI_CONTAINER_MEM_MIB, label="container_mem")
+    # Applications (monolithic agent) — prefer iotgw_app_*; fall back to legacy gauges.
+    app_status_rows = prom_named_bars(Q.RASPI_APP_UP, limit=8, label="app_status")
+    if not app_status_rows:
+        agent_up = prom_scalar(Q.RASPI_AGENT_UP)
+        mqtt_up = prom_scalar(Q.RASPI_MQTT_UP)
+        if agent_up or mqtt_up or up:
+            app_status_rows = [
+                {"name": "agent", "value": 1.0 if agent_up or up else 0.0},
+                {"name": "mqtt", "value": 1.0 if mqtt_up else 0.0},
+            ]
+    app_status: list[dict[str, Any]] = []
+    for r in app_status_rows:
+        raw_id = str(r.get("name") or "?").lower()
+        val = float(r.get("value") or 0)
+        app_status.append(
+            {
+                "name": _APP_STATUS_LABELS.get(raw_id, raw_id),
+                "id": raw_id,
+                "up": val >= 0.5,
+                "value": round(val, 3),
+            }
+        )
+    apps_up = sum(1 for a in app_status if a["up"])
+    apps_total = len(app_status) if app_status else int(prom_scalar(Q.RASPI_APPS_UP) or 0)
+
+    decrypt_rate = prom_scalar(Q.RASPI_DECRYPT_MSGS_PER_MIN)
+    shipper_rate = prom_scalar(Q.RASPI_SHIPPER_LINES_PER_MIN)
+    activity = [
+        {"name": "Decrypt msgs/min", "value": round(decrypt_rate, 2)},
+        {"name": "Loki lines/min", "value": round(shipper_rate, 2)},
+    ]
+
+    app_cpu = prom_named_bars(Q.RASPI_APP_CPU, label="app_cpu")
+    app_mem = prom_named_bars(Q.RASPI_APP_MEM_MIB, label="app_mem")
+    # Legacy Docker scrapes only when agent app process metrics are absent.
+    if not app_cpu:
+        app_cpu = prom_named_bars(Q.RASPI_CONTAINER_CPU, label="container_cpu")
+    if not app_mem:
+        app_mem = prom_named_bars(Q.RASPI_CONTAINER_MEM_MIB, label="container_mem")
 
     return {
         "node": node,
@@ -432,7 +477,9 @@ def summary_raspi(
             "fs_used_pct": (
                 round((1 - fs_avail / fs_size) * 100, 1) if fs_size else 0.0
             ),
-            "active_containers": containers,
+            "apps_up": apps_up,
+            "apps_total": apps_total,
+            "active_containers": apps_up,
             "temp_c": round(temp_c, 1) if temp_c else None,
             "uptime_s": int(uptime_s) if uptime_s else 0,
             "swap_pct": round(swap_pct, 1) if swap_pct else 0.0,
@@ -450,9 +497,16 @@ def summary_raspi(
             "net_tx_mbps": net_tx_spark,
             "temp_c": temp_spark,
         },
+        "applications": {
+            "status": app_status,
+            "activity": activity,
+            "cpu": app_cpu,
+            "mem_mib": app_mem,
+        },
+        # Kept for older UI builds; prefer ``applications``.
         "containers": {
-            "cpu": container_cpu,
-            "mem_mib": container_mem,
+            "cpu": app_cpu,
+            "mem_mib": app_mem,
         },
         "warnings": warnings,
     }
