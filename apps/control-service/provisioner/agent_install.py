@@ -249,7 +249,9 @@ def _install_systemd(
         ssh,
         f"cp {shlex.quote(unit_src)} /etc/systemd/system/iot-gateway-agent.service && "
         "systemctl daemon-reload && "
-        "systemctl enable --now iot-gateway-agent",
+        "systemctl enable iot-gateway-agent && "
+        # enable --now does not restart an already-active unit with a new ExecStart.
+        "systemctl restart iot-gateway-agent",
         sudo_password=sudo_password,
         timeout=60.0,
     )
