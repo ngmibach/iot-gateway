@@ -33,6 +33,10 @@ class LokiShipper:
         self._thread: Optional[threading.Thread] = None
         self.lines_sent = 0
 
+    @property
+    def alive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
     def start(self) -> None:
         if self._thread and self._thread.is_alive():
             return

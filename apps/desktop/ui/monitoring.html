@@ -81,16 +81,24 @@
         </article>
       </div>
 
-      <h3>Containers</h3>
-      <div class="metrics" id="raspi-container-metrics"></div>
+      <h3>Applications</h3>
+      <div class="metrics" id="raspi-app-metrics"></div>
       <div class="chart-grid chart-grid-2">
-        <article class="chart-panel" data-chart="container_cpu">
-          <header class="chart-head"><span class="chart-title">CPU per container</span><span class="chart-unit">cores</span></header>
-          <div class="chart-body" id="chart-container_cpu"></div>
+        <article class="chart-panel" data-chart="app_activity">
+          <header class="chart-head"><span class="chart-title">Activity</span><span class="chart-unit">per min</span></header>
+          <div class="chart-body" id="chart-app_activity"></div>
         </article>
-        <article class="chart-panel" data-chart="container_mem">
-          <header class="chart-head"><span class="chart-title">Memory per container</span><span class="chart-unit">MiB</span></header>
-          <div class="chart-body" id="chart-container_mem"></div>
+        <article class="chart-panel" data-chart="app_status">
+          <header class="chart-head"><span class="chart-title">Status</span><span class="chart-unit">up=1</span></header>
+          <div class="chart-body" id="chart-app_status"></div>
+        </article>
+        <article class="chart-panel" data-chart="app_cpu">
+          <header class="chart-head"><span class="chart-title">CPU per app</span><span class="chart-unit">cores</span></header>
+          <div class="chart-body" id="chart-app_cpu"></div>
+        </article>
+        <article class="chart-panel" data-chart="app_mem">
+          <header class="chart-head"><span class="chart-title">Memory per app</span><span class="chart-unit">MiB</span></header>
+          <div class="chart-body" id="chart-app_mem"></div>
         </article>
       </div>
 

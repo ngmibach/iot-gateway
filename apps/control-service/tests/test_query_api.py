@@ -437,29 +437,59 @@ class QueryApiTests(unittest.TestCase):
                         ]
                     },
                 }
-            if "container_cpu_usage_seconds_total" in q:
+            if "iotgw_app_cpu_seconds_total" in q:
                 return {
                     "status": "success",
                     "data": {
                         "result": [
                             {
-                                "metric": {"name": "iot-nodered"},
-                                "value": [1, "0.25"],
-                            }
+                                "metric": {"app": "agent"},
+                                "value": [1, "0.12"],
+                            },
+                            {
+                                "metric": {"app": "mqtt"},
+                                "value": [1, "0.04"],
+                            },
                         ]
                     },
                 }
-            if "container_memory_working_set_bytes" in q:
+            if "iotgw_app_memory_bytes" in q:
                 return {
                     "status": "success",
                     "data": {
                         "result": [
                             {
-                                "metric": {"name": "iot-mosquitto"},
-                                "value": [1, "42.5"],
-                            }
+                                "metric": {"app": "agent"},
+                                "value": [1, "64.0"],
+                            },
+                            {
+                                "metric": {"app": "mqtt"},
+                                "value": [1, "18.5"],
+                            },
                         ]
                     },
+                }
+            if "iotgw_app_up" in q and "count(" not in q:
+                return {
+                    "status": "success",
+                    "data": {
+                        "result": [
+                            {"metric": {"app": "agent"}, "value": [1, "1"]},
+                            {"metric": {"app": "mqtt"}, "value": [1, "1"]},
+                            {"metric": {"app": "decrypt"}, "value": [1, "1"]},
+                            {"metric": {"app": "shipper"}, "value": [1, "0"]},
+                        ]
+                    },
+                }
+            if "iotgw_decrypt_messages_total" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "12.5"]}]},
+                }
+            if "iotgw_loki_lines_sent_total" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "8.0"]}]},
                 }
             val = "1"
             if "MemAvailable" in q and "MemTotal" in q and "100 *" in q:
@@ -478,8 +508,8 @@ class QueryApiTests(unittest.TestCase):
                 val = "20000000000"
             elif "filesystem_size" in q:
                 val = "64000000000"
-            elif "container_last_seen" in q:
-                val = "7"
+            elif "iotgw_app_up" in q and "count(" in q:
+                val = "3"
             elif "node_hwmon_temp" in q:
                 val = "48.2"
             elif "node_boot_time" in q or "node_time_seconds" in q:
@@ -508,14 +538,20 @@ class QueryApiTests(unittest.TestCase):
         self.assertTrue(body["up"])
         self.assertEqual(body["range"], "15m")
         self.assertEqual(body["metrics"]["cpu_cores"], 4)
-        self.assertEqual(body["metrics"]["active_containers"], 7)
+        self.assertEqual(body["metrics"]["apps_up"], 3)
+        self.assertEqual(body["metrics"]["apps_total"], 4)
+        self.assertEqual(body["metrics"]["active_containers"], 3)
         self.assertEqual(body["metrics"]["mem_used_pct"], 50.0)
         self.assertEqual(body["metrics"]["temp_c"], 48.2)
         self.assertIn("cpu_pct", body["charts"])
         self.assertEqual(body["charts"]["cpu_pct"], [10.0, 20.0])
         self.assertEqual(body["cpu_sparkline_pct"], [10.0, 20.0])
-        self.assertEqual(body["containers"]["cpu"][0]["name"], "nodered")
-        self.assertEqual(body["containers"]["mem_mib"][0]["name"], "mosquitto")
+        self.assertEqual(body["applications"]["status"][0]["name"], "Agent")
+        self.assertTrue(body["applications"]["status"][0]["up"])
+        self.assertEqual(body["applications"]["activity"][0]["name"], "Decrypt msgs/min")
+        self.assertEqual(body["applications"]["cpu"][0]["name"], "agent")
+        self.assertEqual(body["applications"]["mem_mib"][0]["name"], "agent")
+        self.assertEqual(body["containers"]["cpu"][0]["name"], "agent")
 
     def test_query_requires_token_when_configured(self) -> None:
         settings = Settings(

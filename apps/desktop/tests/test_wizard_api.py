@@ -95,6 +95,9 @@ class WizardApiTests(unittest.TestCase):
             mon = resp.read().decode("utf-8")
         self.assertIn("Monitoring", mon)
         self.assertIn("Gateway Metric", mon)
+        self.assertIn("Applications", mon)
+        self.assertIn('id="raspi-app-metrics"', mon)
+        self.assertNotIn(">Containers<", mon)
         self.assertIn("monitoring.js", mon)
         self.assertIn("app-shell.js", mon)
         with urllib.request.urlopen(self.base + "/app-shell.js", timeout=5) as resp:
