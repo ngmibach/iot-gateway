@@ -270,6 +270,57 @@ class ApiDeviceTests(unittest.TestCase):
         mocked.assert_called_once()
         self.assertIsNone(self.registry.get_device("gw1", "sensor1"))
 
+    def test_patch_device_monitor_only(self) -> None:
+        self.registry.upsert_device(
+            "gw1",
+            "sensor1",
+            ip="10.0.0.2",
+            topics_rw=["sensors/sensor1/#"],
+            monitor_enabled=1,
+        )
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.patch(
+                "/api/v1/gateways/gw1/devices/sensor1",
+                json={"monitor_enabled": False},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertFalse(body["playbook"])
+        self.assertFalse(body["device"]["monitor_enabled"])
+        mocked.assert_not_called()
+        row = self.registry.get_device("gw1", "sensor1")
+        self.assertEqual(row["monitor_enabled"], 0)
+        self.assertEqual(row["ip"], "10.0.0.2")
+
+    def test_patch_device_ip_requires_password(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.patch(
+                "/api/v1/gateways/gw1/devices/sensor1",
+                json={"ip": "10.0.0.9"},
+            )
+        self.assertEqual(r.status_code, 400, r.text)
+        self.assertIn("password", r.json()["detail"].lower())
+        mocked.assert_not_called()
+
+    def test_patch_device_playbook_update(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2", monitor_enabled=1)
+        with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
+            r = self.client.patch(
+                "/api/v1/gateways/gw1/devices/sensor1",
+                json={
+                    "ip": "10.0.0.9",
+                    "password": "password123",
+                    "topic_readwrite": "sensors/sensor1/#",
+                    "monitor_enabled": True,
+                },
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["playbook"])
+        self.assertEqual(body["device"]["ip"], "10.0.0.9")
+        mocked.assert_called_once()
+
     def test_api_token_x_header_and_bearer(self) -> None:
         client = self._client_with_token("secret-token")
         self.assertEqual(client.get("/api/v1/gateways").status_code, 401)

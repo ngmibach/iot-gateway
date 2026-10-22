@@ -78,6 +78,54 @@ class DeviceOut(BaseModel):
     created_at: Optional[int] = None
 
 
+class UpdateDeviceRequest(BaseModel):
+    """Partial device update from Control Plane View.
+
+    Monitor-only changes stay in the local registry. IP / topic / password
+    changes re-run the register playbook and require ``password``.
+    """
+
+    password: Optional[str] = Field(default=None, min_length=8)
+    ip: Optional[str] = None
+    topic_read: Optional[Union[str, list[str]]] = None
+    topic_readwrite: Optional[Union[str, list[str]]] = None
+    monitor_enabled: Optional[bool] = None
+    ca_passphrase: Optional[str] = None
+
+    @field_validator("ip")
+    @classmethod
+    def _strip_ip(cls, v: Optional[str]) -> Optional[str]:
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("topic_read", "topic_readwrite")
+    @classmethod
+    def _single_topic(
+        cls, v: Union[str, list[str], None], info
+    ) -> Union[str, list[str], None]:
+        _one_topic(v, info.field_name)
+        return v
+
+    def topics_r(self) -> list[str]:
+        return _as_topic_list(self.topic_read)
+
+    def topics_rw(self) -> list[str]:
+        return _as_topic_list(self.topic_readwrite)
+
+    def topic_r_arg(self) -> str | None:
+        return _one_topic(self.topic_read, "topic_read")
+
+    def topic_rw_arg(self) -> str | None:
+        return _one_topic(self.topic_readwrite, "topic_readwrite")
+
+
+class UpdateDeviceResponse(BaseModel):
+    device: DeviceOut
+    cert_bundle_token: Optional[str] = None
+    status: str = "ok"
+    message: str = ""
+    playbook: bool = False
+
+
 class RegisterDeviceResponse(BaseModel):
     device: DeviceOut
     cert_bundle_token: Optional[str] = None

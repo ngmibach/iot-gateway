@@ -1162,8 +1162,10 @@ def _proxy_control(
         if length > 0:
             body = handler.rfile.read(length)
     req = urllib.request.Request(target, data=body or None, headers=headers, method=method)
+    # Device register/update/delete SSH playbooks can exceed 30s.
+    timeout = 120 if method in ("POST", "PUT", "PATCH", "DELETE") else 30
     try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
             handler.send_response(resp.status)
             ct = resp.headers.get("Content-Type", "application/json")
@@ -1414,6 +1416,20 @@ class WizardHandler(BaseHTTPRequestHandler):
             return
         if parsed.path.startswith("/api/"):
             _handle_api(self, "POST", parsed.path, query=parsed.query)
+            return
+        self.send_error(405)
+
+    def do_PATCH(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            _proxy_control(self, "PATCH", parsed.path, query=parsed.query)
+            return
+        self.send_error(405)
+
+    def do_DELETE(self) -> None:  # noqa: N802
+        parsed = urlparse(self.path)
+        if parsed.path.startswith("/api/v1/"):
+            _proxy_control(self, "DELETE", parsed.path, query=parsed.query)
             return
         self.send_error(405)
 
