@@ -309,7 +309,10 @@ def provision_monolithic_agent(
     _install_systemd(ssh, remote_root, sudo_password=sudo_password)
     notes.append("systemd iot-gateway-agent enabled")
     _probe_agent(ssh)
-    notes.append(f"agent healthy; MQTT on gateway {gateway_ip}:1883, metrics :9139")
+    notes.append(
+        f"agent healthy; system mosquitto MQTT on gateway {gateway_ip}:1883, "
+        "agent metrics :9139 (--no-broker)"
+    )
     return notes
 
 

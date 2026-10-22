@@ -65,6 +65,35 @@ class AgentMetricsTests(unittest.TestCase):
         self.assertIn('iotgw_app_cpu_seconds_total{app="agent"}', text)
         self.assertIn('iotgw_app_memory_bytes{app="mqtt"}', text)
 
+    def test_mqtt_up_via_port_probe_when_child_down(self) -> None:
+        metrics = AgentMetrics(
+            broker=_FakeBroker(running=False),  # type: ignore[arg-type]
+            mqtt_port=1883,
+        )
+        with mock.patch(
+            "iot_gateway_agent.metrics.tcp_open", return_value=True
+        ) as probe, mock.patch(
+            "iot_gateway_agent.metrics.find_mosquitto_pid", return_value=99
+        ), mock.patch(
+            "iot_gateway_agent.metrics._read_proc_cpu_seconds", return_value=0.5
+        ), mock.patch(
+            "iot_gateway_agent.metrics._read_proc_rss_bytes", return_value=2048
+        ):
+            text = metrics.render()
+
+        probe.assert_called()
+        self.assertIn('iotgw_app_up{app="mqtt"} 1', text)
+        self.assertIn("iotgw_mqtt_up 1", text)
+        self.assertIn('iotgw_app_memory_bytes{app="mqtt"}', text)
+
+    def test_mqtt_down_when_child_and_port_fail(self) -> None:
+        metrics = AgentMetrics(broker=_FakeBroker(running=False))  # type: ignore[arg-type]
+        with mock.patch("iot_gateway_agent.metrics.tcp_open", return_value=False):
+            self.assertFalse(metrics.refresh_mqtt_up())
+            text = metrics.render()
+        self.assertIn('iotgw_app_up{app="mqtt"} 0', text)
+        self.assertIn("iotgw_mqtt_up 0", text)
+
 
 if __name__ == "__main__":
     unittest.main()
