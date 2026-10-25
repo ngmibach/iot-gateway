@@ -66,6 +66,18 @@ class RegisterDeviceRequest(BaseModel):
         return _one_topic(self.topic_readwrite, "topic_readwrite")
 
 
+class FakeDeviceOut(BaseModel):
+    """Runtime summary for gateway-side fake sensors (from ``meta_json.fake``)."""
+
+    ip: Optional[str] = None
+    status: Optional[str] = None
+    send_interval_ms: Optional[int] = None
+    topic: Optional[str] = None
+    cert_fed_at: Optional[int] = None
+    cert_feed_fingerprint: Optional[str] = None
+    last_error: Optional[str] = None
+
+
 class DeviceOut(BaseModel):
     id: str
     gateway_id: str
@@ -78,6 +90,9 @@ class DeviceOut(BaseModel):
     created_at: Optional[int] = None
     kafka_topic: Optional[str] = None
     kafka_retention_bytes: Optional[int] = None
+    # False when absent in meta_json (real sensors).
+    is_fake: bool = False
+    fake: Optional[FakeDeviceOut] = None
 
 
 class KafkaCapacityOut(BaseModel):

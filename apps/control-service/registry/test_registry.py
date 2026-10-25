@@ -162,7 +162,29 @@ class RegistryTests(unittest.TestCase):
         # Explicit None clears a nullable column
         d3 = self.reg.upsert_device("gw1", "sensor1", ip=None)
         self.assertIsNone(d3["ip"])
-        self.assertEqual(d3["cert_fingerprint"], "fp-keep")
+
+    def test_upsert_device_preserves_is_fake_meta(self) -> None:
+        """Cert-only upsert must keep is_fake / fake block in meta_json."""
+        self._seed_gateway()
+        fake_meta = {
+            "kafka_topic": "sensor.fake1",
+            "is_fake": True,
+            "fake": {"ip": "10.255.0.2", "status": "running"},
+        }
+        self.reg.upsert_device(
+            "gw1",
+            "fake1",
+            ip="10.255.0.2",
+            meta_json=fake_meta,
+        )
+        d2 = self.reg.upsert_device(
+            "gw1",
+            "fake1",
+            cert_fingerprint="fp-new",
+            cert_expires_at=12345,
+        )
+        self.assertEqual(d2["cert_fingerprint"], "fp-new")
+        self.assertEqual(json.loads(d2["meta_json"]), fake_meta)
 
     def test_delete_gateway_cascades_devices(self) -> None:
         self._seed_gateway("gw1")

@@ -30,9 +30,11 @@ from .deps import (
     require_gateway,
     require_token,
 )
+from .device_meta import is_fake_meta, merge_device_meta, parse_meta
 from .schemas import (
     DeviceOut,
     DiscoverSensorsResponse,
+    FakeDeviceOut,
     GatewayOut,
     KafkaCapacityOut,
     RegisterDeviceRequest,
@@ -63,14 +65,39 @@ def _parse_json_field(value: Any) -> Any:
 
 
 def _meta_dict(row: dict[str, Any]) -> dict[str, Any]:
-    meta = _parse_json_field(row.get("meta_json"))
-    return meta if isinstance(meta, dict) else {}
+    return parse_meta(row.get("meta_json"))
+
+
+def _fake_out(meta: dict[str, Any]) -> FakeDeviceOut | None:
+    if not is_fake_meta(meta):
+        return None
+    block = meta.get("fake")
+    if not isinstance(block, dict):
+        return FakeDeviceOut()
+    interval = block.get("send_interval_ms")
+    fed_at = block.get("cert_fed_at")
+    return FakeDeviceOut(
+        ip=str(block["ip"]) if block.get("ip") is not None else None,
+        status=str(block["status"]) if block.get("status") is not None else None,
+        send_interval_ms=int(interval) if interval is not None else None,
+        topic=str(block["topic"]) if block.get("topic") is not None else None,
+        cert_fed_at=int(fed_at) if fed_at is not None else None,
+        cert_feed_fingerprint=(
+            str(block["cert_feed_fingerprint"])
+            if block.get("cert_feed_fingerprint") is not None
+            else None
+        ),
+        last_error=(
+            str(block["last_error"]) if block.get("last_error") is not None else None
+        ),
+    )
 
 
 def _device_out(row: dict[str, Any]) -> DeviceOut:
     meta = _meta_dict(row)
     kafka_topic = meta.get("kafka_topic")
     retention = meta.get("kafka_retention_bytes")
+    fake = is_fake_meta(meta)
     return DeviceOut(
         id=row["id"],
         gateway_id=row["gateway_id"],
@@ -83,6 +110,8 @@ def _device_out(row: dict[str, Any]) -> DeviceOut:
         created_at=row.get("created_at"),
         kafka_topic=str(kafka_topic) if kafka_topic else None,
         kafka_retention_bytes=int(retention) if retention is not None else None,
+        is_fake=fake,
+        fake=_fake_out(meta) if fake else None,
     )
 
 
@@ -132,11 +161,16 @@ def list_gateways(registry: Registry = Depends(get_registry)) -> list[GatewayOut
 def list_devices(
     gid: str,
     monitor_enabled: Optional[bool] = Query(default=None),
+    is_fake: Optional[bool] = Query(default=None),
     registry: Registry = Depends(get_registry),
 ) -> list[DeviceOut]:
+    """List devices; optional ``is_fake`` filters fake vs real sensors."""
     require_gateway(registry, gid)
     flag = None if monitor_enabled is None else (1 if monitor_enabled else 0)
-    return [_device_out(r) for r in registry.list_devices(gid, monitor_enabled=flag)]
+    out = [_device_out(r) for r in registry.list_devices(gid, monitor_enabled=flag)]
+    if is_fake is not None:
+        out = [d for d in out if d.is_fake is bool(is_fake)]
+    return out
 
 
 @router.post(
@@ -260,10 +294,14 @@ def post_register_device(
     kafka_topic = (result.details or {}).get("kafka_topic") or kafka_topic_name(user_id)
     kafka_retention = (result.details or {}).get("kafka_retention_bytes")
     kafka_capacity_raw = (result.details or {}).get("kafka_capacity")
-    meta = {
-        "kafka_topic": kafka_topic,
-        "kafka_retention_bytes": kafka_retention,
-    }
+    # Real-sensor register path: refresh kafka meta and clear any fake marker.
+    prev_meta = _meta_dict(existing) if existing else {}
+    meta = merge_device_meta(
+        prev_meta,
+        kafka_topic=kafka_topic,
+        kafka_retention_bytes=kafka_retention,
+        clear_fake=True,
+    )
 
     topics_rw = body.topics_rw() or None
     topics_r = body.topics_r() or None
