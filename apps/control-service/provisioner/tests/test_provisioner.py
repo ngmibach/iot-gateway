@@ -335,14 +335,17 @@ class ProvisionFlowTests(unittest.TestCase):
             advertise_host="192.168.1.50",
         )
         self.assertIn(
-            "listeners=PLAINTEXT://0.0.0.0:9092,CONTROLLER://127.0.0.1:9093",
+            "listeners=INTERNAL://127.0.0.1:9092,EXTERNAL://192.168.1.50:9092,"
+            "CONTROLLER://127.0.0.1:9093",
             props,
         )
         self.assertIn(
-            "advertised.listeners=PLAINTEXT://192.168.1.50:9092",
+            "advertised.listeners=INTERNAL://127.0.0.1:9092,"
+            "EXTERNAL://192.168.1.50:9092",
             props,
         )
-        self.assertNotIn("PLAINTEXT://127.0.0.1:9092,CONTROLLER", props)
+        self.assertIn("inter.broker.listener.name=INTERNAL", props)
+        self.assertIn("EXTERNAL:PLAINTEXT", props)
 
     def test_kafka_server_properties_fallback_loopback(self) -> None:
         from provisioner.kafka_install import _server_properties
@@ -351,8 +354,22 @@ class ProvisionFlowTests(unittest.TestCase):
             data_dir="/var/lib/iot-gateway-agent",
             advertise_host="",
         )
-        self.assertIn("advertised.listeners=PLAINTEXT://127.0.0.1:9092", props)
-        self.assertIn("listeners=PLAINTEXT://0.0.0.0:9092,", props)
+        self.assertIn(
+            "advertised.listeners=INTERNAL://127.0.0.1:9092",
+            props,
+        )
+        self.assertIn(
+            "listeners=INTERNAL://127.0.0.1:9092,CONTROLLER://127.0.0.1:9093",
+            props,
+        )
+        self.assertNotIn("EXTERNAL://", props)
+
+    def test_kafka_advertise_host_rejects_non_ip(self) -> None:
+        from provisioner.agent_install import AgentInstallError
+        from provisioner.kafka_install import _validate_advertise_host
+
+        with self.assertRaises(AgentInstallError):
+            _validate_advertise_host("evil.example; rm -rf /")
 
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()

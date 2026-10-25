@@ -89,13 +89,38 @@ def _download(url: str, dest: Path, *, progress: ProgressCb | None = None) -> No
         raise BinaryFetchError(f"download failed: {url}: {e}") from e
 
 
+def _assert_member_within(dest_dir: Path, member_name: str) -> None:
+    """Reject absolute paths and ``..`` traversal in archive members."""
+    name = member_name.replace("\\", "/")
+    if (
+        not name
+        or name.startswith("/")
+        or name.startswith("//")
+        or ".." in Path(name).parts
+        or (len(name) >= 2 and name[1] == ":")
+    ):
+        raise BinaryFetchError(f"unsafe archive member path: {member_name!r}")
+    dest_root = dest_dir.resolve()
+    target = (dest_dir / name).resolve()
+    if target != dest_root and dest_root not in target.parents:
+        raise BinaryFetchError(f"archive member escapes destination: {member_name!r}")
+
+
 def _extract_archive(archive: Path, dest_dir: Path, *, kind: str) -> None:
     dest_dir.mkdir(parents=True, exist_ok=True)
     if kind == "tar.gz":
         with tarfile.open(archive, "r:gz") as tf:
-            tf.extractall(dest_dir)  # noqa: S202 — trusted pinned release
+            for member in tf.getmembers():
+                _assert_member_within(dest_dir, member.name)
+            # filter="data" blocks links / absolute paths on Python 3.12+.
+            if hasattr(tarfile, "data_filter"):
+                tf.extractall(dest_dir, filter="data")  # noqa: S202 — pinned + filtered
+            else:
+                tf.extractall(dest_dir)  # noqa: S202 — members pre-checked above
     elif kind == "zip":
         with zipfile.ZipFile(archive, "r") as zf:
+            for info in zf.infolist():
+                _assert_member_within(dest_dir, info.filename)
             zf.extractall(dest_dir)
     else:
         raise BinaryFetchError(f"unknown archive type: {kind}")
@@ -349,26 +374,34 @@ def ensure_grafana_tree(
 
 
 def _find_plugin_root(extract_dir: Path, plugin_id: str) -> Path:
-    """Locate extracted plugin directory containing plugin.json."""
+    """Pinned catalog zips extract as ``<plugin_id>/plugin.json`` at archive root."""
     direct = extract_dir / plugin_id
     if (direct / "plugin.json").is_file():
         return direct
-    if (extract_dir / "plugin.json").is_file():
-        return extract_dir
-    matches = [
-        p.parent
-        for p in extract_dir.rglob("plugin.json")
-        if p.is_file() and p.parent.name == plugin_id
-    ]
-    if len(matches) == 1:
-        return matches[0]
-    if len(matches) > 1:
-        raise BinaryFetchError(
-            f"multiple {plugin_id!r} plugin roots in archive"
-        )
     raise BinaryFetchError(
-        f"plugin.json for {plugin_id!r} not found in archive"
+        f"expected {plugin_id}/plugin.json at archive root"
     )
+
+
+def _plugin_json_id(plugin_dir: Path) -> str:
+    raw = (plugin_dir / "plugin.json").read_text(encoding="utf-8")
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise BinaryFetchError("plugin.json is not valid JSON") from exc
+    if not isinstance(data, dict):
+        raise BinaryFetchError("plugin.json root must be an object")
+    return str(data.get("id") or "").strip()
+
+
+def _clear_stale_plugin_markers(plugins_dir: Path, plugin_id: str, keep: Path) -> None:
+    for path in plugins_dir.glob(f".{plugin_id}-*.ok"):
+        if path == keep:
+            continue
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 def ensure_grafana_kafka_plugin(
@@ -432,13 +465,15 @@ def ensure_grafana_kafka_plugin(
             extract_dir = tmp_path / "extract"
             _extract_archive(archive_path, extract_dir, kind=str(asset["archive"]))
             root = _find_plugin_root(extract_dir, plugin_id)
-            if not (root / "plugin.json").is_file():
+            found_id = _plugin_json_id(root)
+            if found_id != plugin_id:
                 raise BinaryFetchError(
-                    "grafana kafka plugin archive layout invalid: need plugin.json"
+                    f"plugin.json id {found_id!r} does not match pin {plugin_id!r}"
                 )
             shutil.move(str(root), staging)
         _atomic_replace_dir(staging, dest, old)
         marker.write_text(f"{version}\n{digest}\n", encoding="utf-8")
+        _clear_stale_plugin_markers(plugins_dir, plugin_id, marker)
     except Exception:
         _rmtree_if_exists(staging)
         if marker.is_file() and not (dest / "plugin.json").is_file():

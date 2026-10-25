@@ -191,6 +191,8 @@ class RenderGrafanaConfigTests(unittest.TestCase):
         self.assertIn("isDefault: true", yaml)
 
     def test_render_datasources_with_gateways(self) -> None:
+        import hashlib
+
         yaml = render_datasources_yaml(
             gateways=[
                 {"id": "gw-1", "host": "192.168.1.50"},
@@ -203,11 +205,42 @@ class RenderGrafanaConfigTests(unittest.TestCase):
         self.assertIn("uid: iotgw-kafka-gw-1", yaml)
         self.assertIn('bootstrapServers: "192.168.1.50:9092"', yaml)
         self.assertIn("type: hamedkarbasi93-kafka-datasource", yaml)
-        self.assertIn("name: Kafka (gw-1)", yaml)
-        self.assertIn("uid: iotgw-kafka-bad-chars", yaml)
+        self.assertIn('name: "Kafka (gw-1)"', yaml)
+        suffix = hashlib.sha256(b"bad_chars!").hexdigest()[:8]
+        self.assertIn(f"uid: iotgw-kafka-bad-chars-{suffix}", yaml)
         self.assertIn('bootstrapServers: "10.0.0.2:9092"', yaml)
         self.assertNotIn("iotgw-kafka-no-host", yaml)
         self.assertIn('securityProtocol: "PLAINTEXT"', yaml)
+
+    def test_render_datasources_rejects_yaml_injection(self) -> None:
+        import hashlib
+
+        yaml = render_datasources_yaml(
+            gateways=[
+                {
+                    "id": 'gw"\n    injected: true\n  - name: Evil',
+                    "host": '1.2.3.4"\n    url: http://evil',
+                },
+                {"id": "ok", "host": "not a host!!"},
+                {"id": "gw_1", "host": "10.0.0.1"},
+                {"id": "gw!1", "host": "10.0.0.2"},
+            ]
+        )
+        self.assertNotIn("injected:", yaml)
+        self.assertNotIn("http://evil", yaml)
+        self.assertNotIn("not a host", yaml)
+        # Distinct ids that sanitize alike must not share a uid.
+        u1 = "iotgw-kafka-gw-1-" + hashlib.sha256(b"gw_1").hexdigest()[:8]
+        u2 = "iotgw-kafka-gw-1-" + hashlib.sha256(b"gw!1").hexdigest()[:8]
+        self.assertNotEqual(u1, u2)
+        self.assertIn(f"uid: {u1}", yaml)
+        self.assertIn(f"uid: {u2}", yaml)
+        self.assertNotIn("uid: iotgw-kafka-gw-1\n", yaml)
+        self.assertIn('bootstrapServers: "10.0.0.1:9092"', yaml)
+        self.assertIn('bootstrapServers: "10.0.0.2:9092"', yaml)
+        # Injected sibling keys / breakout hosts must not appear.
+        self.assertNotIn("url: http://evil", yaml)
+        self.assertNotIn("name: Evil", yaml)
 
     def test_write_grafana_base_config(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -300,6 +333,20 @@ class SyncGrafanaDatasourcesTests(unittest.TestCase):
             self.assertEqual(result["gateways"], 0)
             self.assertFalse(result["reloaded"])
             self.assertTrue(Path(result["path"]).is_file())
+
+    def test_sync_rejects_non_allowlisted_grafana_url(self) -> None:
+        from telemetry.grafana_config import (
+            _grafana_https_healthy,
+            _reload_grafana_datasources,
+        )
+
+        self.assertFalse(_grafana_https_healthy("https://evil.example:9140"))
+        self.assertFalse(_reload_grafana_datasources("http://127.0.0.1:9140"))
+        with mock.patch("telemetry.grafana_config._grafana_opener") as opener:
+            self.assertFalse(
+                _grafana_https_healthy("https://evil.example/steal")
+            )
+            opener.assert_not_called()
 
 
 if __name__ == "__main__":
