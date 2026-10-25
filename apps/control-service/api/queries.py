@@ -114,11 +114,15 @@ RASPI_APPS_UP = (
 RASPI_APP_UP = 'iotgw_app_up{instance="$node",job="$job"}'
 RASPI_AGENT_UP = 'iotgw_agent_up{instance="$node",job="$job"}'
 RASPI_MQTT_UP = 'iotgw_mqtt_up{instance="$node",job="$job"}'
+RASPI_KAFKA_UP = 'iotgw_kafka_up{instance="$node",job="$job"}'
 RASPI_DECRYPT_MSGS_PER_MIN = (
     'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job"}[1m])) * 60'
 )
 RASPI_SHIPPER_LINES_PER_MIN = (
     'rate(iotgw_loki_lines_sent_total{instance="$node",job="$job"}[1m]) * 60'
+)
+RASPI_KAFKA_PRODUCE_PER_MIN = (
+    'sum(rate(iotgw_kafka_produce_total{instance="$node",job="$job",result="ok"}[1m])) * 60'
 )
 RASPI_UP = 'up{instance="$node",job="$job"}'
 RASPI_TEMP_C = 'node_hwmon_temp_celsius{instance="$node",job="$job"}'

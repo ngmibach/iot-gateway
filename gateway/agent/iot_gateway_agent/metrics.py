@@ -235,6 +235,41 @@ def find_mosquitto_pid() -> Optional[int]:
     return None
 
 
+def find_kafka_pid() -> Optional[int]:
+    """Best-effort PID for the local KRaft Kafka JVM (iotgw-kafka)."""
+    candidates = (
+        Path("/run/iotgw-kafka.pid"),
+        Path("/var/run/iotgw-kafka.pid"),
+    )
+    for path in candidates:
+        try:
+            pid = int(path.read_text(encoding="utf-8").strip().split()[0])
+        except (OSError, ValueError, IndexError):
+            continue
+        if pid > 1 and Path(f"/proc/{pid}").exists():
+            return pid
+    try:
+        for entry in Path("/proc").iterdir():
+            if not entry.name.isdigit():
+                continue
+            try:
+                raw = (entry / "cmdline").read_bytes()
+            except OSError:
+                continue
+            cmd = raw.replace(b"\x00", b" ").decode("utf-8", errors="ignore").lower()
+            # Official Kafka start scripts: java … kafka.Kafka / kraft
+            if "java" in cmd and (
+                "kafka.kafka" in cmd
+                or "kafka.raft" in cmd
+                or "/opt/kafka/" in cmd
+                or "iotgw.properties" in cmd
+            ):
+                return int(entry.name)
+    except OSError:
+        pass
+    return None
+
+
 def _host_metric_lines() -> list[str]:
     lines: list[str] = []
     load1 = 0.0
@@ -388,6 +423,9 @@ class AgentMetrics:
             mqtt_pid = find_mosquitto_pid()
         if mqtt_pid is not None:
             pids["mqtt"] = mqtt_pid
+        kafka_pid = find_kafka_pid()
+        if kafka_pid is not None:
+            pids["kafka"] = kafka_pid
         return pids
 
     def render(self) -> str:

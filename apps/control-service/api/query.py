@@ -650,7 +650,10 @@ _APP_STATUS_LABELS = {
     "mqtt": "MQTT",
     "decrypt": "Decrypt",
     "shipper": "Shipper",
+    "kafka": "Kafka",
 }
+# Stable Gateway Metrics Applications order (monolithic agent + local broker).
+_CANONICAL_APPS = ("agent", "mqtt", "decrypt", "shipper", "kafka")
 
 
 @router.get("/query/summaries/raspi")
@@ -757,8 +760,8 @@ def summary_raspi(
     net_tx_spark = prom_spark(Q.RASPI_NET_TX_MBPS, label="net_tx_sparkline")
     temp_spark = prom_spark(Q.RASPI_TEMP_C, label="temp_sparkline")
 
-    # Applications (monolithic agent) — prefer iotgw_app_*; fall back to legacy gauges.
-    app_status_rows = prom_named_bars(Q.RASPI_APP_UP, limit=8, label="app_status")
+    # Applications (monolithic agent + Kafka) — prefer iotgw_app_*; fall back to legacy.
+    app_status_rows = prom_named_bars(Q.RASPI_APP_UP, limit=12, label="app_status")
     if not app_status_rows:
         agent_up = prom_scalar(Q.RASPI_AGENT_UP)
         mqtt_up = prom_scalar(Q.RASPI_MQTT_UP)
@@ -767,26 +770,51 @@ def summary_raspi(
                 {"name": "agent", "value": 1.0 if agent_up or up else 0.0},
                 {"name": "mqtt", "value": 1.0 if mqtt_up else 0.0},
             ]
-    app_status: list[dict[str, Any]] = []
+    by_app: dict[str, dict[str, Any]] = {}
     for r in app_status_rows:
         raw_id = str(r.get("name") or "?").lower()
         val = float(r.get("value") or 0)
-        app_status.append(
-            {
-                "name": _APP_STATUS_LABELS.get(raw_id, raw_id),
-                "id": raw_id,
-                "up": val >= 0.5,
-                "value": round(val, 3),
-            }
-        )
+        by_app[raw_id] = {
+            "name": _APP_STATUS_LABELS.get(raw_id, raw_id),
+            "id": raw_id,
+            "up": val >= 0.5,
+            "value": round(val, 3),
+        }
+    # Ensure Kafka appears even when an older scrape omitted iotgw_app_up{app="kafka"}.
+    if "kafka" not in by_app:
+        kafka_up = prom_scalar(Q.RASPI_KAFKA_UP)
+        by_app["kafka"] = {
+            "name": _APP_STATUS_LABELS["kafka"],
+            "id": "kafka",
+            "up": kafka_up >= 0.5,
+            "value": round(float(kafka_up), 3),
+        }
+    app_status = []
+    for app_id in _CANONICAL_APPS:
+        if app_id in by_app:
+            app_status.append(by_app.pop(app_id))
+        else:
+            app_status.append(
+                {
+                    "name": _APP_STATUS_LABELS.get(app_id, app_id),
+                    "id": app_id,
+                    "up": False,
+                    "value": 0.0,
+                }
+            )
+    # Keep any unexpected app labels after the canonical set.
+    for extra in sorted(by_app.values(), key=lambda row: str(row.get("id") or "")):
+        app_status.append(extra)
     apps_up = sum(1 for a in app_status if a["up"])
     apps_total = len(app_status) if app_status else int(prom_scalar(Q.RASPI_APPS_UP) or 0)
 
     decrypt_rate = prom_scalar(Q.RASPI_DECRYPT_MSGS_PER_MIN)
     shipper_rate = prom_scalar(Q.RASPI_SHIPPER_LINES_PER_MIN)
+    kafka_produce_rate = prom_scalar(Q.RASPI_KAFKA_PRODUCE_PER_MIN)
     activity = [
         {"name": "Decrypt msgs/min", "value": round(decrypt_rate, 2)},
         {"name": "Loki lines/min", "value": round(shipper_rate, 2)},
+        {"name": "Kafka produce/min", "value": round(kafka_produce_rate, 2)},
     ]
 
     app_cpu = prom_named_bars(Q.RASPI_APP_CPU, label="app_cpu")

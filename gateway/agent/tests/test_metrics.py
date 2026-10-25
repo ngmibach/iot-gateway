@@ -70,6 +70,7 @@ class AgentMetricsTests(unittest.TestCase):
         self.assertIn("iotgw_loki_lines_sent_total 9", text)
         self.assertIn("iotgw_denied_publishes_total 0", text)
         self.assertIn("iotgw_kafka_up 0", text)
+        self.assertIn('iotgw_kafka_produce_total{result="ok"} 0', text)
         self.assertIn('iotgw_app_cpu_seconds_total{app="agent"}', text)
         self.assertIn('iotgw_app_memory_bytes{app="mqtt"}', text)
 
