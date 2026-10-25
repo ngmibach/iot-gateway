@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 from typing import Any, Optional
 
@@ -169,16 +170,51 @@ def query_prometheus(
     return _proxy_get(f"{prom}/api/v1/query", params)
 
 
+def _device_meta(row: dict[str, Any]) -> dict[str, Any]:
+    raw = row.get("meta_json")
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except ValueError:
+            return {}
+    return {}
+
+
 @router.get("/query/summaries/gateway")
 def summary_gateway(
-    range: str = Query(default="1h", alias="range"),
+    time_range: str = Query(default="1h", alias="range"),
+    gateway_id: Optional[str] = None,
     state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
 ) -> dict[str, Any]:
-    """Gateway Activities summary (tables + scalars for native Monitoring tab)."""
+    """Gateway Activities summary (general stats + registry sensors + Kafka topics)."""
+    from actions.kafka_capacity import (
+        DEFAULT_TOPIC_RETENTION_BYTES,
+        kafka_topic_name,
+    )
+
     loki, prom = _backend_urls(state)
-    start_ns, end_ns = _ns_window(range)
-    duration = range
+    start_ns, end_ns = _ns_window(time_range)
+    start, end, step = _range_window_s(time_range)
+    duration = time_range
     warnings: list[str] = []
+
+    # Resolve gateway: explicit id, else first registry row (Activities default).
+    gid = (gateway_id or "").strip() or None
+    if gid:
+        gw = registry.get_gateway(gid)
+        if gw is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"gateway {gid!r} not found",
+            )
+    else:
+        gateways = registry.list_gateways()
+        gw = gateways[0] if gateways else None
+        gid = str(gw["id"]) if gw else None
 
     def loki_scalar(expr: str) -> float:
         try:
@@ -206,8 +242,35 @@ def summary_gateway(
             warnings.append(f"prometheus: {e.detail}")
             return 0.0
 
-    total = int(loki_scalar(Q.GATEWAY_TOTAL_SENSOR_MSGS))
-    msgs_min = loki_scalar(Q.GATEWAY_MSGS_PER_MIN)
+    def prom_spark(expr: str, *, label: str = "spark") -> list[float]:
+        try:
+            data = _proxy_get(
+                f"{prom}/api/v1/query_range",
+                {"query": expr, "start": start, "end": end, "step": step},
+            )
+            for r in data.get("data", {}).get("result", []) or []:
+                vals = Q.sparkline_floats(r.get("values") or [], limit=60)
+                if vals:
+                    return vals
+        except HTTPException as e:
+            warnings.append(f"{label}: {e.detail}")
+        return []
+
+    # Gateway totals — prefer agent decrypt Prom metrics; Loki as fallback.
+    decrypt_total = prom_scalar(
+        Q.prep_prom(Q.GATEWAY_DECRYPT_MSGS_TOTAL, node="gateway")
+    )
+    decrypt_rate = prom_scalar(
+        Q.prep_prom(Q.GATEWAY_DECRYPT_MSGS_PER_SEC, node="gateway")
+    )
+    loki_total = int(loki_scalar(Q.GATEWAY_TOTAL_SENSOR_MSGS))
+    loki_msgs_min = loki_scalar(Q.GATEWAY_MSGS_PER_MIN)
+    total = int(decrypt_total) if decrypt_total > 0 else loki_total
+    msgs_per_sec = (
+        float(decrypt_rate)
+        if decrypt_rate > 0
+        else (float(loki_msgs_min) / 60.0 if loki_msgs_min else 0.0)
+    )
     denied = int(
         loki_scalar(Q.GATEWAY_DENIED_NODERED)
         + loki_scalar(Q.GATEWAY_DENIED_HAPROXY)
@@ -216,7 +279,8 @@ def summary_gateway(
     ids_alerts = int(loki_scalar(Q.GATEWAY_IDS_ALERTS))
     allowed_ips = int(prom_scalar(Q.GATEWAY_ALLOWED_IP_COUNT))
 
-    connected: list[dict[str, str]] = []
+    # Prom overlay for live MQTT client metadata.
+    prom_connected: dict[str, dict[str, str]] = {}
     try:
         data = _proxy_get(
             f"{prom}/api/v1/query", {"query": Q.GATEWAY_CONNECTED_SENSORS}
@@ -226,17 +290,16 @@ def summary_gateway(
             dev = m.get("device_id") or m.get("deviceId")
             if not dev:
                 continue
-            connected.append(
-                {
-                    "device_id": str(dev),
-                    "client_id": str(m.get("client_id") or ""),
-                    "source_ip": str(m.get("source_ip") or ""),
-                }
-            )
+            prom_connected[str(dev)] = {
+                "client_id": str(m.get("client_id") or ""),
+                "source_ip": str(m.get("source_ip") or ""),
+            }
     except HTTPException as e:
         warnings.append(f"connected_sensors: {e.detail}")
 
-    delay_series: list[dict[str, Any]] = []
+    # Delay by device from Loki.
+    delay_by_id: dict[str, dict[str, Any]] = {}
+    delay_series_legacy: list[dict[str, Any]] = []
     try:
         q = Q.prep_loki(Q.GATEWAY_DELAY_BY_DEVICE, duration=duration)
         data = _proxy_get(
@@ -251,28 +314,189 @@ def summary_gateway(
         )
         for stream in data.get("data", {}).get("result", []) or []:
             metric = stream.get("metric") or {}
-            spark = Q.sparkline_floats(stream.get("values") or [])
-            delay_series.append(
-                {
-                    "device_id": metric.get("deviceId") or "?",
-                    "latest": spark[-1] if spark else None,
-                    "sparkline": spark,
-                }
-            )
+            did = str(metric.get("deviceId") or metric.get("device_id") or "?")
+            spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
+            entry = {
+                "device_id": did,
+                "latest": spark[-1] if spark else None,
+                "sparkline": spark,
+            }
+            delay_by_id[did] = entry
+            delay_series_legacy.append(entry)
     except HTTPException as e:
         warnings.append(f"delay: {e.detail}")
 
+    # Per-device message counts / rates from Loki (optional labels).
+    msgs_count_by_id: dict[str, float] = {}
+    msgs_rate_by_id: dict[str, float] = {}
+    msgs_chart_by_id: dict[str, list[float]] = {}
+    try:
+        q = Q.prep_loki(Q.GATEWAY_MSGS_BY_DEVICE_COUNT, duration=duration)
+        data = _proxy_get(
+            f"{loki}/loki/api/v1/query_range",
+            {
+                "query": q,
+                "start": start_ns,
+                "end": end_ns,
+                "limit": 500,
+                "direction": "backward",
+            },
+        )
+        for stream in data.get("data", {}).get("result", []) or []:
+            metric = stream.get("metric") or {}
+            did = str(metric.get("deviceId") or metric.get("device_id") or "")
+            if not did:
+                continue
+            spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
+            if spark:
+                msgs_count_by_id[did] = spark[-1]
+                msgs_chart_by_id[did] = spark
+    except HTTPException as e:
+        warnings.append(f"msgs_by_device: {e.detail}")
+
+    try:
+        q = Q.prep_loki(Q.GATEWAY_MSGS_BY_DEVICE, duration=duration)
+        data = _proxy_get(
+            f"{loki}/loki/api/v1/query_range",
+            {
+                "query": q,
+                "start": start_ns,
+                "end": end_ns,
+                "limit": 500,
+                "direction": "backward",
+            },
+        )
+        for stream in data.get("data", {}).get("result", []) or []:
+            metric = stream.get("metric") or {}
+            did = str(metric.get("deviceId") or metric.get("device_id") or "")
+            if not did:
+                continue
+            spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
+            if spark:
+                msgs_rate_by_id[did] = spark[-1]
+                msgs_chart_by_id.setdefault(did, spark)
+    except HTTPException as e:
+        warnings.append(f"msgs_rate_by_device: {e.detail}")
+
+    gateway_delay_spark: list[float] = []
+    for entry in delay_series_legacy:
+        gateway_delay_spark.extend(entry.get("sparkline") or [])
+    # Prefer a single aggregate delay chart from first device series mean, else concat trimmed.
+    if delay_series_legacy:
+        # Average latest points across devices for a gateway-level spark when possible.
+        lengths = [len(e.get("sparkline") or []) for e in delay_series_legacy]
+        n = min(lengths) if lengths and min(lengths) > 0 else 0
+        if n > 0:
+            gateway_delay_spark = []
+            for i in range(n):
+                vals = [
+                    (e.get("sparkline") or [])[i]
+                    for e in delay_series_legacy
+                    if len(e.get("sparkline") or []) > i
+                ]
+                gateway_delay_spark.append(sum(vals) / len(vals) if vals else 0.0)
+        gateway_delay_latest = (
+            gateway_delay_spark[-1] if gateway_delay_spark else None
+        )
+    else:
+        gateway_delay_latest = None
+
+    decrypt_chart = prom_spark(
+        Q.prep_prom(Q.GATEWAY_DECRYPT_MSGS_PER_SEC_RANGE, node="gateway"),
+        label="decrypt_rate",
+    )
+
+    # Registry devices are authoritative for the Activities sensor list.
+    connected: list[dict[str, Any]] = []
+    if gid:
+        device_rows = registry.list_devices(gid)
+        for row in device_rows:
+            did = str(row["id"])
+            meta = _device_meta(row)
+            topic = meta.get("kafka_topic") or kafka_topic_name(did)
+            retention = meta.get("kafka_retention_bytes")
+            if retention is None:
+                retention = DEFAULT_TOPIC_RETENTION_BYTES
+            else:
+                try:
+                    retention = int(retention)
+                except (TypeError, ValueError):
+                    retention = DEFAULT_TOPIC_RETENTION_BYTES
+            overlay = prom_connected.get(did) or {}
+            delay = delay_by_id.get(did) or {}
+            kafka_chart = msgs_chart_by_id.get(did) or []
+            # Prefer decrypt gateway chart split only when single device; else per-device Loki.
+            if not kafka_chart and len(device_rows) == 1 and decrypt_chart:
+                kafka_chart = decrypt_chart
+            connected.append(
+                {
+                    "device_id": did,
+                    "ip": row.get("ip") or overlay.get("source_ip") or "",
+                    "kafka_topic": str(topic),
+                    "kafka_retention_bytes": int(retention),
+                    "monitor_enabled": bool(int(row.get("monitor_enabled", 1) or 0)),
+                    "client_id": overlay.get("client_id") or "",
+                    "source_ip": overlay.get("source_ip") or (row.get("ip") or ""),
+                    "metrics": {
+                        "total_messages": int(msgs_count_by_id.get(did) or 0),
+                        "messages_per_sec": round(float(msgs_rate_by_id.get(did) or 0.0), 4),
+                        "denied_publishes": 0,
+                        "ids_detections": 0,
+                        "delay_latest": delay.get("latest"),
+                    },
+                    "charts": {
+                        "kafka_messages": kafka_chart,
+                        "delay": delay.get("sparkline") or [],
+                    },
+                }
+            )
+    elif prom_connected:
+        # No registry gateway — fall back to Prom-only rows (legacy).
+        for did, overlay in sorted(prom_connected.items()):
+            delay = delay_by_id.get(did) or {}
+            connected.append(
+                {
+                    "device_id": did,
+                    "ip": overlay.get("source_ip") or "",
+                    "kafka_topic": kafka_topic_name(did),
+                    "kafka_retention_bytes": DEFAULT_TOPIC_RETENTION_BYTES,
+                    "monitor_enabled": True,
+                    "client_id": overlay.get("client_id") or "",
+                    "source_ip": overlay.get("source_ip") or "",
+                    "metrics": {
+                        "total_messages": int(msgs_count_by_id.get(did) or 0),
+                        "messages_per_sec": round(float(msgs_rate_by_id.get(did) or 0.0), 4),
+                        "denied_publishes": 0,
+                        "ids_detections": 0,
+                        "delay_latest": delay.get("latest"),
+                    },
+                    "charts": {
+                        "kafka_messages": msgs_chart_by_id.get(did) or [],
+                        "delay": delay.get("sparkline") or [],
+                    },
+                }
+            )
+
     return {
-        "range": range,
+        "range": time_range,
+        "gateway_id": gid,
         "metrics": {
             "total_sensor_messages": total,
-            "messages_per_minute": round(msgs_min, 3),
+            "messages_per_sec": round(msgs_per_sec, 4),
+            # Kept for older UI builds.
+            "messages_per_minute": round(msgs_per_sec * 60.0, 3),
             "denied_publishes": denied,
             "ids_detections": ids_alerts,
             "allowed_ips": allowed_ips,
+            "delay_latest": gateway_delay_latest,
+            "delay_sparkline": gateway_delay_spark[-60:],
+        },
+        "charts": {
+            "delay": gateway_delay_spark[-60:],
+            "messages": decrypt_chart,
         },
         "connected_sensors": connected,
-        "delay_by_device": delay_series,
+        "delay_by_device": delay_series_legacy,
         "warnings": warnings,
     }
 

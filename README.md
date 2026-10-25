@@ -124,7 +124,32 @@ API:
 | **Wizard / UI** `:9138` | Setup, Gateways, Monitoring, Control Plane |
 
 Monitoring tabs: **Gateway Metric** (host + application health), **Gateway Activities**
-(gateway activity / sensors / delay), **Control Plane** (sensor Registration + View).
+(gateway + per-sensor Kafka activity), **Control Plane** (sensor Registration + View).
+
+### Gateway Activities
+
+Activities is the operator view of message flow and per-sensor Kafka topics.
+
+1. **Gateway selector** — dropdown shows the gateway **name only** (host/IP is under
+   Gateways → Settings).
+2. **General information** — Total msgs, Msgs/sec, Denied, IDS, plus a transmission
+   delay subsection with a chart (empty-state when no series).
+3. **Connected sensors** — table of registry devices: Device, IP, Kafka topic,
+   Retention cap, Monitor.
+4. **Sensor detail**
+   - **One sensor** → a separate detail panel under the table (no tab bar).
+   - **Several sensors** → horizontal name tabs to cycle between sensors.
+   - Each sensor panel shows Total msgs, Msgs/sec, Denied, IDS; the Kafka topic
+     name + retention cap + topic activity chart; and a transmission delay
+     subsection with its own chart.
+
+Data: `GET /api/v1/query/summaries/gateway?gateway_id=…&range=…` merges the device
+registry (Kafka topic labels) with Prometheus decrypt counters and Loki when
+labeled series exist. Chart frames stay visible with “No data in range” until
+scrapes fill in.
+
+Deferred Kafka broker metrics and richer per-device counters:
+`docs/plan-activities-kafka-followups.md`.
 
 ---
 
@@ -136,4 +161,5 @@ Monitoring tabs: **Gateway Metric** (host + application health), **Gateway Activ
 | `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions (incl. Kafka capacity) |
 | `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
 | `docs/architecture.md` | Short architecture notes |
+| `docs/plan-activities-kafka-followups.md` | Deferred Activities / Kafka metrics work |
 | `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |

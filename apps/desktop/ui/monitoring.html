@@ -107,11 +107,50 @@
 
     <section class="panel mon-panel hidden" data-tab="activities" id="tab-activities">
       <h2>Gateway Activities</h2>
+
+      <h3>General information</h3>
       <div class="metrics" id="gw-metrics"></div>
+      <div class="act-subsection">
+        <h4 class="act-subhead">Transmission delay</h4>
+        <div class="metrics" id="gw-delay-metrics"></div>
+        <div class="chart-grid chart-grid-1">
+          <article class="chart-panel chart-panel-wide" data-chart="gw_delay">
+            <header class="chart-head"><span class="chart-title">Gateway delay</span><span class="chart-unit">s</span></header>
+            <div class="chart-body" id="chart-gw_delay"></div>
+          </article>
+        </div>
+      </div>
+
       <h3>Connected sensors</h3>
       <div class="table-wrap"><table id="gw-connected"><thead></thead><tbody></tbody></table></div>
-      <h3>Transmission delay</h3>
-      <div class="table-wrap"><table id="gw-delay"><thead></thead><tbody></tbody></table></div>
+      <div id="gw-sensors-empty" class="muted hidden">No sensors registered on this gateway.</div>
+
+      <div id="gw-sensor-detail" class="act-sensor-detail hidden">
+        <nav class="sensor-tabs hidden" id="gw-sensor-tabs" aria-label="Registered sensors"></nav>
+        <h3 id="gw-sensor-title">Sensor</h3>
+        <div class="metrics" id="gw-sensor-metrics"></div>
+        <div class="act-subsection">
+          <h4 class="act-subhead">Kafka topic</h4>
+          <div class="metrics" id="gw-sensor-kafka-meta"></div>
+          <div class="chart-grid chart-grid-1">
+            <article class="chart-panel chart-panel-wide" data-chart="sensor_kafka">
+              <header class="chart-head"><span class="chart-title">Topic activity</span><span class="chart-unit">msgs</span></header>
+              <div class="chart-body" id="chart-sensor_kafka"></div>
+            </article>
+          </div>
+        </div>
+        <div class="act-subsection">
+          <h4 class="act-subhead">Transmission delay</h4>
+          <div class="metrics" id="gw-sensor-delay-metrics"></div>
+          <div class="chart-grid chart-grid-1">
+            <article class="chart-panel chart-panel-wide" data-chart="sensor_delay">
+              <header class="chart-head"><span class="chart-title">Sensor delay</span><span class="chart-unit">s</span></header>
+              <div class="chart-body" id="chart-sensor_delay"></div>
+            </article>
+          </div>
+        </div>
+      </div>
+
       <div id="gw-msg" class="muted"></div>
     </section>
   </main>

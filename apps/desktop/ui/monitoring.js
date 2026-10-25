@@ -8,6 +8,8 @@
   let tab = "metric";
   let timer = null;
   let lastWarnings = [];
+  let activitiesSensors = [];
+  let selectedSensorId = null;
 
   function tabFromHash() {
     const h = (location.hash || "").replace(/^#/, "").toLowerCase();
@@ -202,6 +204,21 @@
     paintBarChart("chart-app_status", []);
     paintBarChart("chart-app_cpu", []);
     paintBarChart("chart-app_mem", []);
+    paintLineChart("chart-gw_delay", []);
+    paintLineChart("chart-sensor_kafka", []);
+    paintLineChart("chart-sensor_delay", []);
+  }
+
+  function fmtRetention(bytes) {
+    if (bytes == null || !isFinite(Number(bytes))) return "—";
+    return fmtBytes(Number(bytes));
+  }
+
+  function numOrDash(v, digits) {
+    if (v == null || v === "" || !isFinite(Number(v))) return "—";
+    const n = Number(v);
+    if (digits == null) return String(n);
+    return n.toFixed(digits);
   }
 
   function fmtBytes(n) {
@@ -319,11 +336,13 @@
     const sel = $("gateway-id");
     try {
       const rows = await control("/api/v1/gateways");
+      const prev = sel.value;
       sel.innerHTML = "";
       (rows || []).forEach((g) => {
         const opt = document.createElement("option");
         opt.value = g.id;
-        opt.textContent = `${g.id} (${g.host})`;
+        // Name only — host/IP lives under Gateways → Settings.
+        opt.textContent = g.id;
         sel.appendChild(opt);
       });
       if (!rows || !rows.length) {
@@ -331,6 +350,8 @@
         opt.value = "";
         opt.textContent = "(no gateways in registry)";
         sel.appendChild(opt);
+      } else if (prev && [...sel.options].some((o) => o.value === prev)) {
+        sel.value = prev;
       }
     } catch (e) {
       sel.innerHTML = `<option value="">control API offline</option>`;
@@ -339,36 +360,138 @@
     }
   }
 
+  function renderSensorDetail(sensor) {
+    const detail = $("gw-sensor-detail");
+    const empty = $("gw-sensors-empty");
+    const tabs = $("gw-sensor-tabs");
+    if (!detail) return;
+
+    if (!sensor) {
+      detail.classList.add("hidden");
+      if (tabs) {
+        tabs.classList.add("hidden");
+        tabs.innerHTML = "";
+      }
+      return;
+    }
+
+    detail.classList.remove("hidden");
+    if (empty) empty.classList.add("hidden");
+
+    const title = $("gw-sensor-title");
+    if (title) title.textContent = sensor.device_id || "Sensor";
+
+    const sm = sensor.metrics || {};
+    metricCards($("gw-sensor-metrics"), [
+      ["Total msgs", String(sm.total_messages ?? "—")],
+      ["Msgs / sec", numOrDash(sm.messages_per_sec, 4)],
+      ["Denied", String(sm.denied_publishes ?? "—")],
+      ["IDS", String(sm.ids_detections ?? "—")],
+    ]);
+    metricCards($("gw-sensor-kafka-meta"), [
+      ["Topic", sensor.kafka_topic || "—"],
+      ["Retention cap", fmtRetention(sensor.kafka_retention_bytes)],
+    ]);
+    metricCards($("gw-sensor-delay-metrics"), [
+      ["Latest delay", sm.delay_latest == null ? "—" : numOrDash(sm.delay_latest, 4)],
+    ]);
+
+    const charts = sensor.charts || {};
+    paintLineChart("chart-sensor_kafka", charts.kafka_messages || []);
+    paintLineChart("chart-sensor_delay", charts.delay || []);
+  }
+
+  function renderSensorTabs(sensors) {
+    const tabs = $("gw-sensor-tabs");
+    const detail = $("gw-sensor-detail");
+    const empty = $("gw-sensors-empty");
+    if (!tabs || !detail) return;
+
+    if (!sensors.length) {
+      tabs.classList.add("hidden");
+      tabs.innerHTML = "";
+      detail.classList.add("hidden");
+      if (empty) empty.classList.remove("hidden");
+      selectedSensorId = null;
+      return;
+    }
+
+    if (empty) empty.classList.add("hidden");
+
+    if (sensors.length === 1) {
+      tabs.classList.add("hidden");
+      tabs.innerHTML = "";
+      selectedSensorId = sensors[0].device_id;
+      renderSensorDetail(sensors[0]);
+      return;
+    }
+
+    if (
+      !selectedSensorId ||
+      !sensors.some((s) => s.device_id === selectedSensorId)
+    ) {
+      selectedSensorId = sensors[0].device_id;
+    }
+
+    tabs.classList.remove("hidden");
+    tabs.innerHTML = "";
+    sensors.forEach((s) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.textContent = s.device_id;
+      b.dataset.deviceId = s.device_id;
+      b.classList.toggle("active", s.device_id === selectedSensorId);
+      b.addEventListener("click", () => {
+        selectedSensorId = s.device_id;
+        tabs.querySelectorAll("button").forEach((btn) => {
+          btn.classList.toggle("active", btn.dataset.deviceId === selectedSensorId);
+        });
+        const row = activitiesSensors.find((x) => x.device_id === selectedSensorId);
+        renderSensorDetail(row || null);
+      });
+      tabs.appendChild(b);
+    });
+
+    const active = sensors.find((s) => s.device_id === selectedSensorId) || sensors[0];
+    renderSensorDetail(active);
+  }
+
   async function refreshGateway() {
     const range = $("range").value;
-    const data = await control(`/api/v1/query/summaries/gateway?range=${encodeURIComponent(range)}`);
+    const gid = ($("gateway-id") && $("gateway-id").value) || "";
+    let path = `/api/v1/query/summaries/gateway?range=${encodeURIComponent(range)}`;
+    if (gid) path += `&gateway_id=${encodeURIComponent(gid)}`;
+    const data = await control(path);
     const m = data.metrics || {};
+    const charts = data.charts || {};
+
     metricCards($("gw-metrics"), [
-      ["Sensor msgs", String(m.total_sensor_messages ?? "—")],
-      ["Msgs / min", String(m.messages_per_minute ?? "—")],
+      ["Total msgs", String(m.total_sensor_messages ?? "—")],
+      ["Msgs / sec", numOrDash(m.messages_per_sec, 4)],
       ["Denied", String(m.denied_publishes ?? "—")],
       ["IDS", String(m.ids_detections ?? "—")],
-      ["Allowed IPs", String(m.allowed_ips ?? "—")],
     ]);
+    metricCards($("gw-delay-metrics"), [
+      ["Latest delay", m.delay_latest == null ? "—" : numOrDash(m.delay_latest, 4)],
+    ]);
+    paintLineChart("chart-gw_delay", charts.delay || m.delay_sparkline || []);
+
+    activitiesSensors = data.connected_sensors || [];
     fillTable(
       $("gw-connected"),
-      ["Device", "Client", "Source IP"],
-      (data.connected_sensors || []).map((r) => [
+      ["Device", "IP", "Kafka topic", "Retention", "Monitor"],
+      activitiesSensors.map((r) => [
         escapeHtml(r.device_id),
-        escapeHtml(r.client_id),
-        escapeHtml(r.source_ip),
+        escapeHtml(r.ip || r.source_ip || ""),
+        escapeHtml(r.kafka_topic || ""),
+        escapeHtml(fmtRetention(r.kafka_retention_bytes)),
+        r.monitor_enabled ? "on" : "off",
       ])
     );
-    fillTable(
-      $("gw-delay"),
-      ["Device", "Latest", "Sparkline"],
-      (data.delay_by_device || []).map((r) => [
-        escapeHtml(r.device_id),
-        r.latest == null ? "—" : Number(r.latest).toFixed(4),
-        sparkSvg(r.sparkline || []),
-      ])
-    );
-    $("gw-msg").textContent = `range=${data.range}`;
+    renderSensorTabs(activitiesSensors);
+
+    $("gw-msg").textContent =
+      `gateway=${data.gateway_id || gid || "—"} range=${data.range || range}`;
     showWarnings(data.warnings);
   }
 
@@ -547,6 +670,8 @@
     $("auto-refresh").addEventListener("change", scheduleAuto);
     $("range").addEventListener("change", () => refresh().catch(console.error));
     $("gateway-id").addEventListener("change", () => {
+      selectedSensorId = null;
+      activitiesSensors = [];
       if (tab === "activities") refresh().catch(console.error);
     });
     $("mon-tabs").addEventListener("click", () => refresh().catch(console.error));

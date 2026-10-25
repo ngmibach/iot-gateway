@@ -366,15 +366,42 @@ class QueryApiTests(unittest.TestCase):
             raise HTTPException(status_code=502, detail="down")
 
         with patch("api.query._proxy_get", side_effect=boom):
-            r = self.client.get("/api/v1/query/summaries/gateway")
+            r = self.client.get(
+                "/api/v1/query/summaries/gateway", params={"gateway_id": "gw1"}
+            )
         self.assertEqual(r.status_code, 200, r.text)
         body = r.json()
         self.assertEqual(body["metrics"]["total_sensor_messages"], 0)
+        self.assertIn("messages_per_sec", body["metrics"])
         self.assertTrue(body["warnings"])
+        # Registry sensors still listed when backends are down.
+        ids = {s["device_id"] for s in body["connected_sensors"]}
+        self.assertEqual(ids, {"sensor_a", "sensor_b"})
 
     def test_summary_gateway_scalars(self) -> None:
+        self.registry.upsert_device(
+            gateway_id="gw1",
+            id="sensor_a",
+            ip="10.0.0.1",
+            monitor_enabled=1,
+            meta_json={
+                "kafka_topic": "sensor.sensor_a",
+                "kafka_retention_bytes": 1073741824,
+            },
+        )
+
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:
             q = str(params.get("query", ""))
+            if "iotgw_decrypt_messages_total" in q and "rate(" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "0.5"]}]},
+                }
+            if "iotgw_decrypt_messages_total" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "42"]}]},
+                }
             if "mqtt_connected_sensor" in q:
                 return {
                     "status": "success",
@@ -414,13 +441,24 @@ class QueryApiTests(unittest.TestCase):
             }
 
         with patch("api.query._proxy_get", side_effect=fake_proxy):
-            r = self.client.get("/api/v1/query/summaries/gateway", params={"range": "1h"})
+            r = self.client.get(
+                "/api/v1/query/summaries/gateway",
+                params={"range": "1h", "gateway_id": "gw1"},
+            )
         self.assertEqual(r.status_code, 200, r.text)
-        m = r.json()["metrics"]
-        self.assertEqual(m["total_sensor_messages"], 5)
+        body = r.json()
+        m = body["metrics"]
+        self.assertEqual(m["total_sensor_messages"], 42)
+        self.assertEqual(m["messages_per_sec"], 0.5)
         self.assertEqual(m["allowed_ips"], 3)
-        self.assertEqual(r.json()["connected_sensors"][0]["device_id"], "sensor_a")
-        self.assertEqual(r.json()["delay_by_device"][0]["sparkline"], [0.01, 0.02])
+        self.assertEqual(body["gateway_id"], "gw1")
+        by_id = {s["device_id"]: s for s in body["connected_sensors"]}
+        self.assertIn("sensor_a", by_id)
+        self.assertEqual(by_id["sensor_a"]["kafka_topic"], "sensor.sensor_a")
+        self.assertEqual(by_id["sensor_a"]["kafka_retention_bytes"], 1073741824)
+        self.assertEqual(by_id["sensor_a"]["client_id"], "c1")
+        self.assertEqual(body["delay_by_device"][0]["sparkline"], [0.01, 0.02])
+        self.assertIn("delay", body["charts"])
 
     def test_summary_raspi(self) -> None:
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:

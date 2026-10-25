@@ -15,6 +15,16 @@ GATEWAY_TOTAL_SENSOR_MSGS = (
 GATEWAY_MSGS_PER_MIN = (
     'sum(rate({container="iot-nodered", event_type="sensor_data"}[{range}])) * 60'
 )
+# Prefer agent decrypt counter (Docker-free). Loki legacy kept as fallback.
+GATEWAY_DECRYPT_MSGS_TOTAL = (
+    'sum(iotgw_decrypt_messages_total{instance="$node",job="$job",result="ok"})'
+)
+GATEWAY_DECRYPT_MSGS_PER_SEC = (
+    'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job",result="ok"}[1m]))'
+)
+GATEWAY_DECRYPT_MSGS_PER_SEC_RANGE = (
+    'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job",result="ok"}[1m]))'
+)
 GATEWAY_DENIED_NODERED = (
     'count_over_time({container="iot-nodered", event_type=~"denied_.*"}[{range}])'
 )
@@ -34,6 +44,13 @@ GATEWAY_CONNECTED_SENSORS = "mqtt_connected_sensor"
 GATEWAY_DELAY_BY_DEVICE = (
     'avg_over_time({container="iot-nodered", event_type="sensor_data"} '
     "| json | unwrap delay [5m]) by (deviceId)"
+)
+# Per-device message rate from Loki sensor_data (when deviceId labels exist).
+GATEWAY_MSGS_BY_DEVICE = (
+    'sum by (deviceId) (rate({event_type="sensor_data"} | json [{range}]))'
+)
+GATEWAY_MSGS_BY_DEVICE_COUNT = (
+    'sum by (deviceId) (count_over_time({event_type="sensor_data"} | json [{range}]))'
 )
 
 # ── Raspi / Host (raspi.py) ──────────────────────────────────────────────────
