@@ -137,6 +137,51 @@ def _sudo(
     return ssh.run(f"sudo -n -- sh -c {quoted}", timeout=timeout)
 
 
+def _login_owner(ssh: "SSHClient") -> str:
+    """Resolve ``user:group`` for the SSH login (not root under sudo sh -c)."""
+    who = ssh.run(
+        "printf '%s:%s\\n' \"$(id -un)\" \"$(id -gn)\"",
+        timeout=15.0,
+    )
+    owner = (who.stdout or "").strip().splitlines()
+    if who.exit_code == 0 and owner and ":" in owner[0]:
+        return owner[0].strip()
+    return "root:root"
+
+
+def _ensure_fake_dir_writable(
+    ssh: "SSHClient",
+    paths: GatewayPaths,
+    *,
+    sudo_password: str | None = None,
+) -> FakePlaybookResult | None:
+    """mkdir ``fake/`` under the agent data dir and chown to the SSH login user.
+
+    ``/var/lib/iot-gateway-agent`` is root-owned after Install, so a plain
+    ``mkdir -p`` as the login user fails and later SFTP writes raise
+    ``[Errno 2] No such file``.
+    """
+    owner = _login_owner(ssh)
+    result = _sudo(
+        ssh,
+        f"mkdir -p {shell_quote(paths.fake_dir)} && "
+        f"chown -R {shell_quote(owner)} {shell_quote(paths.fake_dir)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
+    )
+    if result.exit_code != 0:
+        return FakePlaybookResult(
+            ok=False,
+            status="failed",
+            message=(
+                "failed to prepare fake data dir: "
+                + (result.stderr or result.stdout or "").strip()[:300]
+            ),
+            details={"fake_dir": paths.fake_dir, "owner": owner},
+        )
+    return None
+
+
 def _empty_ip_map() -> dict[str, Any]:
     return {
         "version": 1,
@@ -169,7 +214,7 @@ def _read_ip_map(ssh: "SSHClient", paths: GatewayPaths) -> dict[str, Any]:
 
 
 def _write_ip_map(ssh: "SSHClient", paths: GatewayPaths, data: dict[str, Any]) -> None:
-    ssh.run(f"mkdir -p {shell_quote(paths.fake_dir)}")
+    # Caller must ensure fake_dir is writable (see _ensure_fake_dir_writable).
     body = json.dumps(data, indent=2, sort_keys=True) + "\n"
     ssh.write_text(paths.fake_ip_map, body, mode=0o644)
 
@@ -242,7 +287,11 @@ def ensure_fake_bridge(
             ),
             details={"bridge": FAKE_BRIDGE},
         )
-    ssh.run(f"mkdir -p {shell_quote(paths.fake_dir)}")
+    prepared = _ensure_fake_dir_writable(
+        ssh, paths, sudo_password=sudo_password
+    )
+    if prepared is not None:
+        return prepared
     ip_map = _read_ip_map(ssh, paths)
     if not ssh.exists(paths.fake_ip_map):
         _write_ip_map(ssh, paths, ip_map)

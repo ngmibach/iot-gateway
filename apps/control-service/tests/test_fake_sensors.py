@@ -41,6 +41,13 @@ class TestFakeSensorsPlaybooks(unittest.TestCase):
         self.assertTrue(any(FAKE_BRIDGE in c for c in ssh.commands))
         self.assertTrue(any("s3cret" in s for s in ssh.stdins if s))
         self.assertFalse(any("s3cret" in c for c in ssh.commands))
+        # Root-owned data dir: mkdir + chown fake/ so SFTP can write ip-map.json.
+        self.assertTrue(
+            any(
+                "mkdir -p" in c and FAKE_DIR in c and "chown" in c
+                for c in ssh.commands
+            )
+        )
         self.assertIn(IP_MAP, ssh.files)
         body = json.loads(ssh.read_text(IP_MAP))
         self.assertEqual(body["bridge"], FAKE_BRIDGE)
