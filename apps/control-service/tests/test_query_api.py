@@ -75,6 +75,8 @@ class QueryApiTests(unittest.TestCase):
         self.assertIn("iotgw_denied_publishes_total", Q.GATEWAY_DENIED_PROM)
         self.assertIn("iotgw_ids_detections_total", Q.GATEWAY_IDS_PROM)
         self.assertIn("iotgw_device_messages_total", Q.GATEWAY_MSGS_BY_DEVICE_PROM)
+        self.assertIn("iotgw_kafka_up", Q.RASPI_KAFKA_UP)
+        self.assertIn("iotgw_kafka_produce_total", Q.RASPI_KAFKA_PRODUCE_PER_MIN)
         self.assertIn("mqtt_connected_sensor", Q.GATEWAY_CONNECTED_SENSORS)
         self.assertIn("node_cpu_seconds_total", Q.RASPI_CPU_USAGE)
         self.assertIn("$node", Q.RASPI_MEM_TOTAL)
@@ -554,8 +556,19 @@ class QueryApiTests(unittest.TestCase):
                             {"metric": {"app": "mqtt"}, "value": [1, "1"]},
                             {"metric": {"app": "decrypt"}, "value": [1, "1"]},
                             {"metric": {"app": "shipper"}, "value": [1, "0"]},
+                            {"metric": {"app": "kafka"}, "value": [1, "1"]},
                         ]
                     },
+                }
+            if "iotgw_kafka_produce_total" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "4.5"]}]},
+                }
+            if "iotgw_kafka_up" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "1"]}]},
                 }
             if "iotgw_decrypt_messages_total" in q:
                 return {
@@ -614,9 +627,9 @@ class QueryApiTests(unittest.TestCase):
         self.assertTrue(body["up"])
         self.assertEqual(body["range"], "15m")
         self.assertEqual(body["metrics"]["cpu_cores"], 4)
-        self.assertEqual(body["metrics"]["apps_up"], 3)
-        self.assertEqual(body["metrics"]["apps_total"], 4)
-        self.assertEqual(body["metrics"]["active_containers"], 3)
+        self.assertEqual(body["metrics"]["apps_up"], 4)
+        self.assertEqual(body["metrics"]["apps_total"], 5)
+        self.assertEqual(body["metrics"]["active_containers"], 4)
         self.assertEqual(body["metrics"]["mem_used_pct"], 50.0)
         self.assertEqual(body["metrics"]["temp_c"], 48.2)
         self.assertIn("cpu_pct", body["charts"])
@@ -624,7 +637,13 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(body["cpu_sparkline_pct"], [10.0, 20.0])
         self.assertEqual(body["applications"]["status"][0]["name"], "Agent")
         self.assertTrue(body["applications"]["status"][0]["up"])
+        status_by_id = {s["id"]: s for s in body["applications"]["status"]}
+        self.assertIn("kafka", status_by_id)
+        self.assertEqual(status_by_id["kafka"]["name"], "Kafka")
+        self.assertTrue(status_by_id["kafka"]["up"])
         self.assertEqual(body["applications"]["activity"][0]["name"], "Decrypt msgs/min")
+        activity_names = [a["name"] for a in body["applications"]["activity"]]
+        self.assertIn("Kafka produce/min", activity_names)
         self.assertEqual(body["applications"]["cpu"][0]["name"], "agent")
         self.assertEqual(body["applications"]["mem_mib"][0]["name"], "agent")
         self.assertEqual(body["containers"]["cpu"][0]["name"], "agent")
