@@ -110,9 +110,11 @@ API:
   **409** when the gateway is at Kafka capacity.
 - Device responses include `kafka_topic` and `kafka_retention_bytes`.
 
-> **Note:** Registration already enforces the catalog and capacity math. A
-> Kafka-compatible broker (e.g. Redpanda) on the Pi that applies
-> `retention.bytes` from the catalog is the next provisioning step.
+> **Note:** Gateway provision installs **Apache Kafka** in minimal KRaft
+> single-node mode (`iotgw-kafka`, heap 128–256M, localhost:9092) — not
+> Redpanda. Sensor register/unregister creates or deletes topics with
+> `retention.bytes` from the catalog. The agent produces decrypted payloads to
+> `sensor.<device_id>` after MQTT decrypt.
 
 ### Monitoring stack (operator PC)
 
@@ -144,9 +146,10 @@ Activities is the operator view of message flow and per-sensor Kafka topics.
      subsection with its own chart.
 
 Data: `GET /api/v1/query/summaries/gateway?gateway_id=…&range=…` merges the device
-registry (Kafka topic labels) with Prometheus decrypt counters and Loki when
-labeled series exist. Chart frames stay visible with “No data in range” until
-scrapes fill in.
+registry (Kafka topic labels), live `topics.json` catalog sync over SSH, and
+Prometheus agent series (`iotgw_decrypt_*`, `iotgw_device_*`, denied/IDS). Loki
+legacy queries remain as fallback. Chart frames stay visible with “No data in
+range” until scrapes fill in.
 
 Deferred Kafka broker metrics and richer per-device counters:
 `docs/plan-activities-kafka-followups.md`.

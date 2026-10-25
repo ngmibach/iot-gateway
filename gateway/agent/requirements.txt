@@ -2,3 +2,4 @@
 zeroconf>=0.132.0,<1
 paho-mqtt>=2.0,<3
 cryptography>=42.0
+kafka-python>=2.0.2,<3

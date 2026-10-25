@@ -8,8 +8,8 @@ is derived from total gateway disk:
 
 With the default safety ratio of 0.70, a 10-unit disk and 1-unit topic cap
 allows 7 sensors. The control-service writes the topic catalog under
-``/var/lib/iot-gateway-agent/kafka/topics.json``; a real Kafka/Redpanda broker
-will be provisioned in a follow-up to enforce these retention caps on disk.
+``/var/lib/iot-gateway-agent/kafka/topics.json``. Provision installs Apache
+Kafka (KRaft single-node) on the gateway and applies ``retention.bytes`` per topic.
 """
 
 from __future__ import annotations
