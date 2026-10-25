@@ -55,8 +55,10 @@ IoTGatewayMonitor                          iot-gateway-agent (systemd)
   Prometheus :9090 (native)                  │    retention.bytes = topic cap
   registry.sqlite (gateways + devices)       ├─ decrypt → sensor_data.log
   keyring (CA passphrases)                   ├─ Loki shipper → PC:3100
-                                             ├─ GET :9139/metrics /v1/health
-                                             └─ mDNS
+  FakeCertRenewer (fakes only)               ├─ GET :9139/metrics /v1/health
+                                             ├─ mDNS
+                                             └─ iotgw-fake bridge / iotgw-fake@ units
+                                                  (optional test sensors)
 ```
 
 Sensors publish over **MQTTS :8883** (password + client certificate) to the
@@ -82,14 +84,16 @@ activities. Gateways → Install creates the gateway CA and server certificate
 
 ### Sensor registration and Kafka capacity
 
-When a sensor is registered (Control Plane → Registration):
+When a sensor is registered (Control Plane → Registration), including
+**Create fake sensor**:
 
 1. The control service probes **total gateway disk** (`df` on the agent data dir).
 2. It loads the Kafka topic catalog at
    `/var/lib/iot-gateway-agent/kafka/topics.json`.
-3. It reserves a new topic only if capacity remains.
+3. It reserves a new topic only if capacity remains (fakes count toward the same cap).
 4. It upserts Mosquitto ACL + password hash, signs the client cert, and reloads Mosquitto.
-5. Unregister removes the MQTT user and the Kafka catalog entry.
+5. Unregister removes the MQTT user and the Kafka catalog entry (and tears down
+   fake netns/units when the device is a fake).
 
 **Capacity formula** (safety headroom for OS, Mosquitto, logs, agent):
 
@@ -132,7 +136,23 @@ API:
 | **Wizard / UI** `:9138` | Setup, Gateways, Monitoring, Control Plane |
 
 Monitoring tabs: **Gateway Metric** (host + application health), **Gateway Activities**
-(gateway + per-sensor Kafka activity), **Control Plane** (sensor Registration + View).
+(gateway + per-sensor Kafka activity), **Control Plane** (Registration | View | Simulate).
+
+### Fake sensors (Control Plane testing)
+
+Operators can spawn **fake sensors on the gateway itself** for MQTTS / Kafka /
+Activities testing without extra LAN hardware.
+
+| Step | What happens |
+|------|----------------|
+| **Registration → Create fake sensor** | Allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>` |
+| **View** | Shows a **Fake** / **Real** badge; fakes show auto-renew status and **Open Simulate** |
+| **Simulate** | Fake devices only: Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line |
+| **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only (real sensors still download a cert zip for the operator). TLS attack toggles pause auto-feed until cleared |
+| **Capacity** | Each fake consumes one Kafka capacity slot (same formula as real sensors) |
+| **Uninstall / delete** | Deleting a fake tears down its unit + netns; Gateways → Clean up / Settings → Remove tears down **all** `iotgw-fake@*` units, leftover `iotgw-fake-*` netns, and the `iotgw-fake` bridge |
+
+Behavior toggles are for lab/testing only. Privileged netns steps use sudo on the gateway.
 
 ### Gateway Activities
 
@@ -142,18 +162,19 @@ Activities is the operator view of message flow and per-sensor Kafka topics.
    Gateways → Settings).
 2. **General information** — Total msgs, Msgs/sec, Denied, IDS, plus a transmission
    delay subsection with a chart (empty-state when no series).
-3. **Connected sensors** — table of registry devices: Device, IP, Kafka topic,
-   Retention cap, Monitor.
+3. **Connected sensors** — table of registry devices: Device, **Type** (Fake/Real),
+   IP, Kafka topic, Retention cap, Monitor.
 4. **Sensor detail**
    - **One sensor** → a separate detail panel under the table (no tab bar).
-   - **Several sensors** → horizontal name tabs to cycle between sensors.
+   - **Several sensors** → horizontal name tabs (with Fake/Real badge) to cycle
+     between sensors.
    - Each sensor panel shows Total msgs, Msgs/sec, Denied, IDS; the Kafka topic
      name + retention cap + topic activity chart; and a transmission delay
      subsection with its own chart.
 
 Data: `GET /api/v1/query/summaries/gateway?gateway_id=…&range=…` merges the device
-registry (Kafka topic labels), live `topics.json` catalog sync over SSH, and
-Prometheus agent series (`iotgw_decrypt_*`, `iotgw_device_*`, denied/IDS). Loki
+registry (Kafka topic labels + `is_fake`), live `topics.json` catalog sync over SSH,
+and Prometheus agent series (`iotgw_decrypt_*`, `iotgw_device_*`, denied/IDS). Loki
 legacy queries remain as fallback. Chart frames stay visible with “No data in
 range” until scrapes fill in.
 

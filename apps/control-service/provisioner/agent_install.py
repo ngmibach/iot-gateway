@@ -811,28 +811,56 @@ def uninstall_monolithic_agent(
 
     Leaves apt ``mosquitto`` packages installed. Idempotent when already gone.
     ``sudo_password`` is only passed on ``sudo -S`` stdin (never argv / disk).
+
+    Also tears down every gateway-side fake sensor (``iotgw-fake@`` units,
+    ``iotgw-fake-*`` netns, ``iotgw-fake`` bridge) so uninstall leaves no orphans.
     """
     if not (sudo_password or "").strip():
         raise AgentInstallError(
             "sudo password required — enter it before Uninstall Gateway"
         )
     notes: list[str] = []
+
+    # Prefer the playbook so netns / veth / unit enumeration stays correct.
+    try:
+        from actions.fake_sensors import teardown_all_fakes  # type: ignore[import-not-found]
+
+        torn = teardown_all_fakes(
+            ssh,  # type: ignore[arg-type]
+            sudo_password=sudo_password,
+            data_dir=data_dir,
+            remove_unit_template=True,
+        )
+        if torn.ok:
+            notes.append("fake sensors / iotgw-fake bridge torn down")
+        else:
+            notes.append(
+                f"fake sensor teardown degraded: {(torn.message or '')[:200]}"
+            )
+    except Exception as exc:  # noqa: BLE001 — uninstall must continue
+        notes.append(f"fake sensor teardown skipped: {exc}"[:240])
+
     stop = sudo_run(
         ssh,
         "systemctl stop iot-gateway-agent 2>/dev/null || true; "
         "systemctl disable iot-gateway-agent 2>/dev/null || true; "
         "systemctl stop iotgw-kafka 2>/dev/null || true; "
         "systemctl disable iotgw-kafka 2>/dev/null || true; "
-        # Tear down any fake-sensor template instances + bridge leftovers.
-        "systemctl stop 'iotgw-fake@*' 2>/dev/null || true; "
-        "systemctl disable 'iotgw-fake@*' 2>/dev/null || true; "
+        # Belt-and-suspenders if playbook import/path failed above.
+        "for u in $(systemctl list-units --type=service --all --no-legend "
+        "'iotgw-fake@*' 2>/dev/null | awk '{print $1}'); do "
+        "systemctl stop \"$u\" 2>/dev/null || true; "
+        "systemctl disable \"$u\" 2>/dev/null || true; done; "
+        "for ns in $(ip netns list 2>/dev/null | awk '{print $1}'); do "
+        "case \"$ns\" in iotgw-fake-*) ip netns del \"$ns\" 2>/dev/null || true ;; "
+        "esac; done; "
         "ip link del iotgw-fake 2>/dev/null || true; "
         "rm -f /etc/systemd/system/iot-gateway-agent.service "
         "/etc/systemd/system/iotgw-kafka.service "
         "/etc/systemd/system/iotgw-fake@.service; "
         "systemctl daemon-reload 2>/dev/null || true",
         sudo_password=sudo_password,
-        timeout=60.0,
+        timeout=90.0,
     )
     if not stop.ok:
         raise AgentInstallError(

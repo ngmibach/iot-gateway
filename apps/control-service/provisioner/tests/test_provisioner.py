@@ -179,11 +179,17 @@ class ProvisionFlowTests(unittest.TestCase):
         notes = uninstall_monolithic_agent(ssh, sudo_password="test-sudo-secret")
         self.assertTrue(any("stopped" in n for n in notes))
         self.assertTrue(any("removed" in n for n in notes))
+        self.assertTrue(
+            any("fake" in n.lower() and "torn" in n.lower() for n in notes)
+            or any("fake sensor" in n.lower() for n in notes),
+            notes,
+        )
         self.assertFalse(any("test-sudo-secret" in c for c in ssh.commands))
         self.assertTrue(any("iot-gateway-agent" in c for c in ssh.commands))
         self.assertTrue(any("/opt/iot-gateway-agent" in c for c in ssh.commands))
         self.assertTrue(any("iotgw-fake@" in c for c in ssh.commands))
         self.assertTrue(any("iotgw-fake@.service" in c for c in ssh.commands))
+        self.assertTrue(any("ip netns" in c for c in ssh.commands))
 
     def test_sudo_run_wraps_compound_command_in_sh_c(self) -> None:
         from provisioner.agent_install import sudo_run
