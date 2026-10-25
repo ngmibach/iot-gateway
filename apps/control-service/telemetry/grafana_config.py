@@ -1,8 +1,29 @@
-"""Render Grafana custom.ini and base Prometheus/Loki datasource provisioning."""
+"""Render Grafana custom.ini and Prometheus/Loki/Kafka datasource provisioning."""
 
 from __future__ import annotations
 
+import re
+import ssl
 from pathlib import Path
+from typing import Any
+from urllib.error import URLError
+from urllib.request import Request, urlopen
+
+_KAFKA_PLUGIN_ID = "hamedkarbasi93-kafka-datasource"
+_UID_SAFE = re.compile(r"[^a-zA-Z0-9-]+")
+
+
+def _sanitize_uid_part(value: str) -> str:
+    cleaned = _UID_SAFE.sub("-", (value or "").strip()).strip("-")
+    return cleaned or "gateway"
+
+
+def _gateway_id(gw: dict[str, Any]) -> str:
+    return str(gw.get("id") or gw.get("gateway_id") or "").strip()
+
+
+def _gateway_host(gw: dict[str, Any]) -> str:
+    return str(gw.get("host") or "").strip()
 
 
 def render_grafana_ini(
@@ -65,6 +86,9 @@ def render_grafana_ini(
         "[auth.basic]\n"
         "enabled = false\n"
         "\n"
+        "[plugins]\n"
+        f"allow_loading_unsigned_plugins = {_KAFKA_PLUGIN_ID}\n"
+        "\n"
         "[analytics]\n"
         "reporting_enabled = false\n"
         "check_for_updates = false\n"
@@ -74,9 +98,9 @@ def render_grafana_ini(
     )
 
 
-def render_datasources_yaml() -> str:
-    """Prometheus + Loki datasources only (Kafka is PR 2b)."""
-    return (
+def render_datasources_yaml(*, gateways: list[dict[str, Any]] | None = None) -> str:
+    """Prometheus + Loki, plus one Kafka datasource per gateway with a host."""
+    parts = [
         "apiVersion: 1\n"
         "datasources:\n"
         "  - name: Prometheus\n"
@@ -92,7 +116,26 @@ def render_datasources_yaml() -> str:
         "    uid: iotgw-loki\n"
         "    url: http://127.0.0.1:3100\n"
         "    editable: true\n"
-    )
+    ]
+    for gw in gateways or []:
+        if not isinstance(gw, dict):
+            continue
+        gid = _gateway_id(gw)
+        host = _gateway_host(gw)
+        if not gid or not host:
+            continue
+        uid = f"iotgw-kafka-{_sanitize_uid_part(gid)}"
+        parts.append(
+            f"  - name: Kafka ({gid})\n"
+            f"    type: {_KAFKA_PLUGIN_ID}\n"
+            "    access: proxy\n"
+            f"    uid: {uid}\n"
+            "    editable: true\n"
+            "    jsonData:\n"
+            f'      bootstrapServers: "{host}:9092"\n'
+            '      securityProtocol: "PLAINTEXT"\n'
+        )
+    return "".join(parts)
 
 
 def write_grafana_base_config(
@@ -105,8 +148,9 @@ def write_grafana_base_config(
     cert_key: Path,
     admin_password: str,
     http_port: int = 9140,
+    gateways: list[dict[str, Any]] | None = None,
 ) -> dict[str, Path]:
-    """Write ``grafana.ini`` and Prom/Loki ``datasources.yaml`` under ``config_dir``."""
+    """Write ``grafana.ini`` and Prom/Loki/Kafka ``datasources.yaml`` under ``config_dir``."""
     config_dir = Path(config_dir)
     provisioning = config_dir / "provisioning"
     ds_dir = provisioning / "datasources"
@@ -128,5 +172,76 @@ def write_grafana_base_config(
         ),
         encoding="utf-8",
     )
-    ds_path.write_text(render_datasources_yaml(), encoding="utf-8")
+    ds_path.write_text(
+        render_datasources_yaml(gateways=gateways), encoding="utf-8"
+    )
     return {"grafana_ini": ini_path, "datasources_yaml": ds_path}
+
+
+def _grafana_https_healthy(grafana_url: str, *, timeout: float = 2.0) -> bool:
+    ctx = ssl._create_unverified_context()
+    url = grafana_url.rstrip("/") + "/api/health"
+    try:
+        with urlopen(url, context=ctx, timeout=timeout) as resp:  # noqa: S310
+            return 200 <= getattr(resp, "status", 200) < 300
+    except (URLError, OSError, TimeoutError):
+        return False
+
+
+def _reload_grafana_datasources(grafana_url: str, *, timeout: float = 5.0) -> bool:
+    ctx = ssl._create_unverified_context()
+    url = grafana_url.rstrip("/") + "/api/admin/provisioning/datasources/reload"
+    req = Request(url, data=b"", method="POST")
+    try:
+        with urlopen(req, context=ctx, timeout=timeout) as resp:  # noqa: S310
+            return 200 <= getattr(resp, "status", 200) < 300
+    except (URLError, OSError, TimeoutError):
+        return False
+
+
+def sync_grafana_datasources(
+    *,
+    config_dir: Path,
+    registry_path: Path | None = None,
+    grafana_url: str = "https://127.0.0.1:9140",
+    reload: bool = True,
+) -> dict[str, Any]:
+    """Rewrite provisioned datasources from the local registry; optional Grafana reload.
+
+    File write always happens. Reload is best-effort when Grafana is up
+    (anonymous Admin; unverified localhost TLS). Does not raise if Grafana is down.
+    """
+    from registry.registry import Registry  # type: ignore[import-not-found]
+
+    config_dir = Path(config_dir)
+    ds_dir = config_dir / "provisioning" / "datasources"
+    ds_dir.mkdir(parents=True, exist_ok=True)
+    ds_path = ds_dir / "datasources.yaml"
+
+    if registry_path is None:
+        from .native import default_native_root
+
+        # <data>/telemetry → <data>/registry.sqlite
+        registry_path = default_native_root().parent / "registry.sqlite"
+
+    gateways: list[dict[str, Any]] = []
+    reg_path = Path(registry_path)
+    if reg_path.is_file():
+        reg = Registry(str(reg_path))
+        try:
+            gateways = reg.list_gateways()
+        finally:
+            reg.close()
+
+    ds_path.write_text(render_datasources_yaml(gateways=gateways), encoding="utf-8")
+
+    reloaded = False
+    if reload:
+        if _grafana_https_healthy(grafana_url):
+            reloaded = _reload_grafana_datasources(grafana_url)
+
+    return {
+        "gateways": len(gateways),
+        "reloaded": reloaded,
+        "path": str(ds_path),
+    }

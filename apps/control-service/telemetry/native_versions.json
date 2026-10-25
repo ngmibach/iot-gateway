@@ -49,5 +49,16 @@
         "root_dir_glob": "grafana-*"
       }
     }
+  },
+  "grafana_kafka_plugin": {
+    "version": "1.9.1",
+    "plugin_id": "hamedkarbasi93-kafka-datasource",
+    "assets": {
+      "any": {
+        "url": "https://storage.googleapis.com/grafana-plugins-catalog/hamedkarbasi93-kafka-datasource/release/1.9.1/hamedkarbasi93-kafka-datasource-1.9.1.zip",
+        "sha256": "e68db165ee33ca687512e3e52c14041ea4824cd7de4195c67bdfdfcb7d27dcb4",
+        "archive": "zip"
+      }
+    }
   }
 }

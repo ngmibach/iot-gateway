@@ -32,13 +32,17 @@ class RegistryGatewaysTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             data = Path(tmp)
             with mock.patch.object(registry_gateways, "ensure_data_dir", return_value=data):
-                row = registry_gateways.upsert_local_gateway(
-                    gateway_id="gateway",
-                    host="172.20.10.2",
-                    ssh_user="admin",
-                    fingerprint="SHA256:test",
-                    monitoring_ip="172.20.10.3",
-                )
+                with mock.patch.object(
+                    registry_gateways, "_best_effort_sync_grafana_datasources"
+                ) as sync:
+                    row = registry_gateways.upsert_local_gateway(
+                        gateway_id="gateway",
+                        host="172.20.10.2",
+                        ssh_user="admin",
+                        fingerprint="SHA256:test",
+                        monitoring_ip="172.20.10.3",
+                    )
+                    sync.assert_called_once()
             self.assertEqual(row["id"], "gateway")
             self.assertEqual(row["host"], "172.20.10.2")
             self.assertEqual(row["ssh_user"], "admin")

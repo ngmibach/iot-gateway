@@ -152,9 +152,26 @@ def remove_gateway_from_registry(gateway_id: str) -> bool:
         return False
     reg = Registry(str(reg_path))
     try:
-        return reg.delete_gateway(gateway_id)
+        deleted = reg.delete_gateway(gateway_id)
     finally:
         reg.close()
+    if deleted:
+        try:
+            from telemetry.grafana_config import (  # type: ignore[import-not-found]
+                sync_grafana_datasources,
+            )
+
+            data = ensure_data_dir()
+            sync_grafana_datasources(
+                config_dir=data / "telemetry" / "config",
+                registry_path=data / "registry.sqlite",
+            )
+        except Exception:  # noqa: BLE001 — Grafana may be down
+            logger.debug(
+                "grafana datasource sync after gateway delete failed",
+                exc_info=True,
+            )
+    return deleted
 
 
 def remove_all_gateways_from_registry() -> list[str]:
