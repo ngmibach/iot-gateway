@@ -145,6 +145,50 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(rows[0]["id"], "gw1")
         self.assertEqual(rows[0]["node_instance"], "gateway")
 
+    def test_list_devices_is_fake_flag_and_filter(self) -> None:
+        self.registry.upsert_device(
+            "gw1",
+            "real1",
+            ip="10.0.0.2",
+            meta_json={"kafka_topic": "sensor.real1"},
+        )
+        self.registry.upsert_device(
+            "gw1",
+            "fake1",
+            ip="10.255.0.2",
+            meta_json={
+                "kafka_topic": "sensor.fake1",
+                "is_fake": True,
+                "fake": {
+                    "ip": "10.255.0.2",
+                    "status": "running",
+                    "send_interval_ms": 1000,
+                },
+            },
+        )
+        all_rows = self.client.get("/api/v1/gateways/gw1/devices")
+        self.assertEqual(all_rows.status_code, 200)
+        by_id = {d["id"]: d for d in all_rows.json()}
+        self.assertFalse(by_id["real1"]["is_fake"])
+        self.assertIsNone(by_id["real1"].get("fake"))
+        self.assertTrue(by_id["fake1"]["is_fake"])
+        self.assertEqual(by_id["fake1"]["fake"]["status"], "running")
+        self.assertEqual(by_id["fake1"]["fake"]["ip"], "10.255.0.2")
+
+        only_fake = self.client.get(
+            "/api/v1/gateways/gw1/devices", params={"is_fake": "true"}
+        )
+        self.assertEqual(only_fake.status_code, 200)
+        fake_ids = [d["id"] for d in only_fake.json()]
+        self.assertEqual(fake_ids, ["fake1"])
+
+        only_real = self.client.get(
+            "/api/v1/gateways/gw1/devices", params={"is_fake": "false"}
+        )
+        self.assertEqual(only_real.status_code, 200)
+        real_ids = [d["id"] for d in only_real.json()]
+        self.assertEqual(real_ids, ["real1"])
+
     def test_register_device_upserts_registry_and_token(self) -> None:
         with patch("api.devices.register_device", side_effect=_register_ok) as mocked:
             r = self.client.post(
@@ -162,6 +206,8 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(body["device"]["id"], "sensor5")
         self.assertEqual(body["device"]["ip"], "192.168.1.60")
         self.assertEqual(body["device"]["kafka_topic"], "sensor.sensor5")
+        self.assertFalse(body["device"]["is_fake"])
+        self.assertIsNone(body["device"].get("fake"))
         self.assertEqual(body["kafka_topic"], "sensor.sensor5")
         self.assertEqual(body["kafka_capacity"]["max_sensors"], 7)
         self.assertFalse(body["idempotent"])
@@ -177,6 +223,7 @@ class ApiDeviceTests(unittest.TestCase):
         listed = self.client.get("/api/v1/gateways/gw1/devices")
         self.assertEqual(listed.status_code, 200)
         self.assertEqual(len(listed.json()), 1)
+        self.assertFalse(listed.json()[0]["is_fake"])
 
         token = body["cert_bundle_token"]
         dl = self.client.get(
