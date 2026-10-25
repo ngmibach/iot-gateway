@@ -10,7 +10,7 @@ import sys
 import threading
 from pathlib import Path
 
-from . import AGENT_PORT, __version__
+from . import AGENT_PORT, MQTT_TLS_PORT, __version__
 from .broker import MosquittoSupervisor, write_mosquitto_conf
 from .decrypt_worker import DecryptWorker
 from .denied_watcher import DeniedWatcher
@@ -61,7 +61,23 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--mqtt-port",
         type=int,
-        default=int(os.environ.get("MQTT_PORT", "1883")),
+        default=int(os.environ.get("MQTT_PORT", str(MQTT_TLS_PORT))),
+        help=f"MQTT(S) broker port (default {MQTT_TLS_PORT})",
+    )
+    parser.add_argument(
+        "--mqtt-ca",
+        default=os.environ.get("IOTGW_MQTT_CA"),
+        help="CA cert for MQTTS client (default: {data_dir}/certs/ca.crt)",
+    )
+    parser.add_argument(
+        "--mqtt-cert",
+        default=os.environ.get("IOTGW_MQTT_CERT"),
+        help="Client cert for MQTTS (default: {data_dir}/certs/decrypt.crt)",
+    )
+    parser.add_argument(
+        "--mqtt-key",
+        default=os.environ.get("IOTGW_MQTT_KEY"),
+        help="Client key for MQTTS (default: {data_dir}/certs/decrypt.key)",
     )
     parser.add_argument(
         "--decrypt-user",
@@ -112,6 +128,11 @@ def main(argv: list[str] | None = None) -> int:
 
     data = Path(args.data_dir)
     data.mkdir(parents=True, exist_ok=True)
+    certs_dir = data / "certs"
+    mqtt_ca = Path(args.mqtt_ca) if args.mqtt_ca else certs_dir / "ca.crt"
+    mqtt_cert = Path(args.mqtt_cert) if args.mqtt_cert else certs_dir / "decrypt.crt"
+    mqtt_key = Path(args.mqtt_key) if args.mqtt_key else certs_dir / "decrypt.key"
+
     conf_dir = data / "mosquitto"
     passwords = conf_dir / "passwords"
     acl = conf_dir / "acl"
@@ -124,6 +145,24 @@ def main(argv: list[str] | None = None) -> int:
             encoding="utf-8",
         )
 
+    server_ca = certs_dir / "ca.crt"
+    server_cert = certs_dir / "server.crt"
+    server_key = certs_dir / "server.key"
+    broker_tls: dict = {}
+    if server_ca.is_file() and server_cert.is_file() and server_key.is_file():
+        broker_tls = {
+            "cafile": server_ca,
+            "certfile": server_cert,
+            "keyfile": server_key,
+        }
+    elif args.mqtt_port == MQTT_TLS_PORT:
+        logger.warning(
+            "MQTT broker TLS certs missing under %s (need ca.crt, server.crt, "
+            "server.key) — writing plain listener on %s",
+            certs_dir,
+            args.mqtt_port,
+        )
+
     conf = write_mosquitto_conf(
         conf_dir / "mosquitto.conf",
         data_dir=conf_dir / "data",
@@ -131,6 +170,7 @@ def main(argv: list[str] | None = None) -> int:
         passwords=passwords,
         acl=acl,
         listen_port=args.mqtt_port,
+        **broker_tls,
     )
 
     broker = MosquittoSupervisor(conf)
@@ -180,6 +220,26 @@ def main(argv: list[str] | None = None) -> int:
 
     sensor_log = data / "logs" / "sensor_data.log"
     if not args.no_decrypt:
+        # Prefer TLS on :8883; warn if client certs are missing but still attempt TLS.
+        tls_kwargs: dict = {}
+        certs_present = mqtt_ca.is_file() and mqtt_cert.is_file() and mqtt_key.is_file()
+        if args.mqtt_port == MQTT_TLS_PORT or certs_present:
+            for label, path in (
+                ("CA", mqtt_ca),
+                ("client cert", mqtt_cert),
+                ("client key", mqtt_key),
+            ):
+                if not path.is_file():
+                    logger.warning(
+                        "MQTT TLS %s missing at %s — decrypt worker connect may fail",
+                        label,
+                        path,
+                    )
+            tls_kwargs = {
+                "tls_ca": mqtt_ca,
+                "tls_cert": mqtt_cert,
+                "tls_key": mqtt_key,
+            }
         worker = DecryptWorker(
             host="127.0.0.1",
             port=args.mqtt_port,
@@ -187,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
             password=args.decrypt_password,
             log_path=sensor_log,
             kafka=kafka,
+            **tls_kwargs,
         )
         worker.start()
         metrics.decrypt_worker = worker

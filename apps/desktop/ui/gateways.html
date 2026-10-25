@@ -79,6 +79,24 @@
           <input id="sudo-pass" type="password" autocomplete="new-password" />
         </div>
         <div class="row">
+          <input type="checkbox" id="ca-auto" checked />
+          <label for="ca-auto" style="min-width:auto">
+            Generate CA passphrase
+            <span class="field-help" tabindex="0" aria-label="What is Generate CA passphrase?">?
+              <span class="field-help-tip">Creates a signing password for this gateway.</span>
+            </span>
+          </label>
+        </div>
+        <div class="row hidden" id="ca-pass-row">
+          <label for="ca-pass">
+            CA passphrase
+            <span class="field-help" tabindex="0" aria-label="What is CA passphrase?">?
+              <span class="field-help-tip">Signing password for this gateway.</span>
+            </span>
+          </label>
+          <input id="ca-pass" type="password" autocomplete="off" />
+        </div>
+        <div class="row">
           <button type="button" class="primary" id="btn-provision-agent">Install gateway</button>
         </div>
         <div id="provision-msg"></div>

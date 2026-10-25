@@ -8,7 +8,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 |-------|------|
 | **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, Actions, Monitoring, Admin |
 | **Local Loki + Prometheus** | App-managed native processes (downloaded once in-UI) |
-| **Gateway agent** | One systemd service: Mosquitto (MQTT ingress) + Kafka topic store (per sensor) + decrypt → log + metrics + Loki shipper + mDNS |
+| **Gateway agent** | One systemd service: Mosquitto (MQTTS :8883 mTLS ingress) + Kafka topic store (per sensor) + decrypt → log + metrics + Loki shipper + mDNS |
 | **Communication** | SSH for control/provision; MQTT + HTTP for data |
 
 ---
@@ -49,23 +49,29 @@ App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGat
 Operator PC (monitoring)                 Gateway device (e.g. Raspberry Pi)
 ────────────────────────                 ──────────────────────────────────
 IoTGatewayMonitor                          iot-gateway-agent (systemd)
-  Wizard / Gateways / Control Plane          ├─ Mosquitto (MQTT :1883)     ← sensor publish
-  Monitoring (Metric / Activities)           ├─ Kafka topic store          ← one topic per sensor
-  Loki :3100 (native)                        │    retention.bytes = topic cap
-  Prometheus :9090 (native)                  ├─ decrypt → sensor_data.log
-  registry.sqlite (gateways + devices)       ├─ Loki shipper → PC:3100
+  Wizard / Gateways / Control Plane          ├─ Mosquitto (MQTTS :8883 mTLS)
+  Monitoring (Metric / Activities)           │    ← sensor + decrypt worker
+  Loki :3100 (native)                        ├─ Kafka topic store          ← one topic per sensor
+  Prometheus :9090 (native)                  │    retention.bytes = topic cap
+  registry.sqlite (gateways + devices)       ├─ decrypt → sensor_data.log
+  keyring (CA passphrases)                   ├─ Loki shipper → PC:3100
                                              ├─ GET :9139/metrics /v1/health
                                              └─ mDNS
 ```
 
-Sensors publish over MQTT to the gateway. The gateway stores each sensor’s
-messages in a dedicated Kafka topic (size-capped), decrypts for the local log,
-and ships cleartext lines to the operator Loki. The desktop app scrapes the
-agent Prometheus metrics and queries Loki for activities.
+Sensors publish over **MQTTS :8883** (password + client certificate) to the
+gateway. Plaintext MQTT :1883 is not used for production ingress. The gateway
+stores each sensor’s messages in a dedicated Kafka topic (size-capped),
+decrypts for the local log, and ships cleartext lines to the operator Loki.
+The desktop app scrapes the agent Prometheus metrics and queries Loki for
+activities. Gateways → Install creates the gateway CA and server certificate
+(and can auto-generate the CA passphrase into the app keyring).
 
 ### Data path
 
-1. **Sensor → Mosquitto** — TLS/password MQTT on the gateway (`sensors/…` topics).
+1. **Sensor → Mosquitto** — MQTTS :8883 with password + client cert
+   (`sensors/…` topics). Decrypt worker uses the same listener with its own
+   client cert.
 2. **Mosquitto → Kafka** — each registered sensor owns one Kafka topic
    (`sensor.<device_id>`) with a hard `retention.bytes` cap so retained
    segments cannot grow without bound.

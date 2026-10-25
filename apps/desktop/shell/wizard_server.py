@@ -19,6 +19,7 @@ from urllib.parse import parse_qs, urlparse
 
 from . import (
     admin_auth,
+    ca_passphrase,
     detect,
     discover,
     firewall_apply,
@@ -835,6 +836,8 @@ def _handle_api(
             ).strip()
             # Never persist sudo password to settings / disk / logs.
             sudo_password = str(body.get("sudo_password") or "")
+            generate_ca = bool(body.get("generate_ca_passphrase"))
+            ca_pass = ""
             if not host:
                 _json_response(handler, 400, {"error": "SSH host required (complete step 3)"})
                 return
@@ -854,8 +857,25 @@ def _handle_api(
                     },
                 )
                 return
+            try:
+                if generate_ca:
+                    ca_pass = ca_passphrase.generate_ca_passphrase(
+                        sudo_password=sudo_password,
+                        gateway_id=gateway_id,
+                    )
+                else:
+                    ca_pass = ca_passphrase.validate_ca_passphrase(
+                        str(body.get("ca_passphrase") or "")
+                    )
+            except ValueError as e:
+                sudo_password = ""
+                ca_pass = ""
+                _json_response(handler, 400, {"error": str(e)})
+                return
             key_path = ssh_setup.key_paths_for(gateway_id).private
             if not key_path.is_file():
+                sudo_password = ""
+                ca_pass = ""
                 _json_response(
                     handler,
                     400,
@@ -884,11 +904,17 @@ def _handle_api(
                             gateway_ip=gateway_ip or host,
                             monitoring_ip=monitoring_ip,
                             sudo_password=sudo_password,
+                            ca_passphrase=ca_pass,
                         ),
                     )
                 finally:
                     ssh.close()
                     sudo_password = ""  # drop local reference ASAP
+                # Persist CA after successful provision (used later for sensor certs).
+                try:
+                    keyring_store.set_secret(gateway_id, ca_pass, kind="ca")
+                finally:
+                    ca_pass = ""
                 settings["gateway_ip"] = gateway_ip or host
                 settings["ssh_host"] = host
                 settings["ssh_user"] = username
@@ -941,6 +967,8 @@ def _handle_api(
                     },
                 )
             except Exception as e:  # noqa: BLE001
+                ca_pass = ""
+                sudo_password = ""
                 _json_response(handler, 500, {"error": str(e), "ok": False})
             return
 

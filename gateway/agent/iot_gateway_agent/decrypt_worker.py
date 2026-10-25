@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import json
 import logging
+import ssl
 import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Optional, Union
 
 from .decrypt import decrypt_wrapper_payload
 from .kafka_store import kafka_topic_name
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
     from .kafka_producer import SensorKafkaProducer
 
 logger = logging.getLogger(__name__)
+
+PathLike = Union[str, Path]
 
 
 @dataclass
@@ -87,6 +90,15 @@ def _delay_ms_from_payload(clear_json: str, *, received_ms: int) -> Optional[flo
     return None
 
 
+def _tls_version() -> int:
+    """Prefer TLS 1.2+ (PROTOCOL_TLS_CLIENT negotiates the highest available)."""
+    if hasattr(ssl, "PROTOCOL_TLS_CLIENT"):
+        return int(ssl.PROTOCOL_TLS_CLIENT)
+    if hasattr(ssl, "PROTOCOL_TLSv1_2"):
+        return int(ssl.PROTOCOL_TLSv1_2)
+    return int(ssl.PROTOCOL_TLS)
+
+
 class DecryptWorker:
     """Background MQTT client that writes cleartext sensor lines to a log file."""
 
@@ -100,6 +112,9 @@ class DecryptWorker:
         password: str = "",
         log_path: Path,
         kafka: Optional["SensorKafkaProducer"] = None,
+        tls_ca: PathLike | None = None,
+        tls_cert: PathLike | None = None,
+        tls_key: PathLike | None = None,
     ):
         self.host = host
         self.port = port
@@ -108,12 +123,19 @@ class DecryptWorker:
         self.password = password
         self.log_path = Path(log_path)
         self.kafka = kafka
+        self.tls_ca = Path(tls_ca) if tls_ca else None
+        self.tls_cert = Path(tls_cert) if tls_cert else None
+        self.tls_key = Path(tls_key) if tls_key else None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.messages_ok = 0
         self.messages_fail = 0
         self._by_device: dict[str, DeviceCounters] = defaultdict(DeviceCounters)
         self._lock = threading.Lock()
+
+    @property
+    def tls_enabled(self) -> bool:
+        return bool(self.tls_ca and self.tls_cert and self.tls_key)
 
     @property
     def alive(self) -> bool:
@@ -207,6 +229,19 @@ class DecryptWorker:
             client = mqtt.Client(client_id="iotgw-decrypt")
         if self.username:
             client.username_pw_set(self.username, self.password or None)
+        if self.tls_enabled:
+            assert self.tls_ca and self.tls_cert and self.tls_key
+            client.tls_set(
+                ca_certs=str(self.tls_ca),
+                certfile=str(self.tls_cert),
+                keyfile=str(self.tls_key),
+                tls_version=_tls_version(),
+            )
+            logger.info(
+                "decrypt worker TLS enabled ca=%s cert=%s",
+                self.tls_ca,
+                self.tls_cert,
+            )
         client.on_message = on_message
 
         while not self._stop.is_set():

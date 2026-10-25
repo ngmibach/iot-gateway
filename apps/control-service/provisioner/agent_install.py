@@ -128,9 +128,285 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
 _BASIC_ACL = """# Managed by iot-gateway-agent / control-service playbooks
 user anonymous
 topic none
+
+user nodered
+topic readwrite sensors/#
 """
 
 _MOSQUITTO_CONF_D = "/etc/mosquitto/conf.d/iot-gateway-agent.conf"
+MQTT_TLS_PORT = 8883
+
+
+def _mqtts_conf_body(*, data_dir: str) -> str:
+    """Mosquitto conf.d body: MQTTS :8883 mTLS + password/ACL only (no :1883)."""
+    mosq_dir = f"{data_dir}/mosquitto"
+    certs_dir = f"{data_dir}/certs"
+    return (
+        f"listener {MQTT_TLS_PORT} 0.0.0.0\n"
+        "allow_anonymous false\n"
+        f"cafile {certs_dir}/ca.crt\n"
+        f"certfile {certs_dir}/server.crt\n"
+        f"keyfile {certs_dir}/server.key\n"
+        "require_certificate true\n"
+        f"password_file {mosq_dir}/passwords\n"
+        f"acl_file {mosq_dir}/acl\n"
+    )
+
+
+def _reject_ca_admin(passphrase: str) -> str:
+    value = (passphrase or "").strip()
+    if not value:
+        raise AgentInstallError("CA passphrase required for MQTTS bootstrap")
+    if value == "admin":
+        raise AgentInstallError("CA passphrase must not be 'admin'")
+    return value
+
+
+def ensure_gateway_ca_and_server_cert(
+    ssh: SSHSession,
+    *,
+    sudo_password: str,
+    gateway_ip: str,
+    ca_passphrase: str,
+    data_dir: str = DEFAULT_AGENT_DATA,
+    ca_days: int = 3650,
+    server_days: int = 730,
+) -> str:
+    """Create CA + server cert (IP SAN) under ``data_dir/certs`` when missing.
+
+    Uses remote OpenSSL with ``-passin/-passout file:`` only (passphrase never on argv).
+    Idempotent when ``ca.crt`` / ``server.crt`` already exist.
+    """
+    import ipaddress
+    import secrets as _secrets
+
+    ca_passphrase = _reject_ca_admin(ca_passphrase)
+    gateway_ip = (gateway_ip or "").strip()
+    if not gateway_ip:
+        raise AgentInstallError("gateway_ip required for server certificate SAN")
+    try:
+        ipaddress.ip_address(gateway_ip)
+    except ValueError as exc:
+        raise AgentInstallError(
+            f"gateway_ip must be a single IP (not CIDR): {gateway_ip!r}"
+        ) from exc
+
+    certs_dir = f"{data_dir}/certs"
+    ca_crt = f"{certs_dir}/ca.crt"
+    ca_key = f"{certs_dir}/ca.key"
+    server_crt = f"{certs_dir}/server.crt"
+    server_key = f"{certs_dir}/server.key"
+    token = _secrets.token_hex(8)
+    remote_pass = f"/tmp/iotgw-ca-pass-{token}"
+    remote_ext = f"/tmp/iotgw-server-ext-{token}"
+    notes: list[str] = []
+
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp_pass:
+        tmp_pass.write(ca_passphrase.encode("utf-8"))
+        local_pass = Path(tmp_pass.name)
+    with tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8") as tmp_ext:
+        tmp_ext.write(f"subjectAltName=IP:{gateway_ip}\n")
+        local_ext = Path(tmp_ext.name)
+
+    try:
+        ssh.upload_file(local_pass, remote_pass, mode=0o600)
+        ssh.upload_file(local_ext, remote_ext, mode=0o600)
+
+        # CA (once)
+        ca_script = (
+            f"mkdir -p {shlex.quote(certs_dir)} && "
+            f"if [ ! -f {shlex.quote(ca_crt)} ] || [ ! -f {shlex.quote(ca_key)} ]; then "
+            f"openssl genrsa -aes256 -passout file:{remote_pass} "
+            f"-out {shlex.quote(ca_key)} 2048 && "
+            f"openssl req -new -x509 -days {int(ca_days)} "
+            f"-key {shlex.quote(ca_key)} -passin file:{remote_pass} "
+            f"-out {shlex.quote(ca_crt)} "
+            f"-subj '/C=VN/ST=Hanoi/L=Hanoi/O=My IOT Org/OU=IOT Devices/CN=My IOT CA Root' && "
+            f"chmod 600 {shlex.quote(ca_key)} && chmod 644 {shlex.quote(ca_crt)} && "
+            "echo CA_CREATED; "
+            "else echo CA_EXISTS; fi"
+        )
+        ca_res = sudo_run(
+            ssh, ca_script, sudo_password=sudo_password, timeout=120.0
+        )
+        if not ca_res.ok:
+            raise AgentInstallError(
+                "creating gateway CA failed: "
+                f"{(ca_res.stderr or ca_res.stdout).strip()[:400]}"
+            )
+        if "CA_CREATED" in (ca_res.stdout or ""):
+            notes.append("gateway CA created")
+        else:
+            notes.append("gateway CA already present")
+
+        # Server cert with IP SAN (once)
+        server_script = (
+            f"if [ ! -f {shlex.quote(server_crt)} ] || [ ! -f {shlex.quote(server_key)} ]; then "
+            f"openssl genrsa -out {shlex.quote(server_key)} 2048 && "
+            f"openssl req -new -key {shlex.quote(server_key)} "
+            f"-out /tmp/iotgw-server-{token}.csr "
+            f"-subj '/C=VN/ST=Hanoi/L=Hanoi/O=My IOT Org/OU=Broker/CN={gateway_ip}' && "
+            f"openssl x509 -req -in /tmp/iotgw-server-{token}.csr "
+            f"-CA {shlex.quote(ca_crt)} -CAkey {shlex.quote(ca_key)} "
+            f"-passin file:{remote_pass} -CAcreateserial "
+            f"-out {shlex.quote(server_crt)} -days {int(server_days)} "
+            f"-extfile {remote_ext} && "
+            f"cat {shlex.quote(server_crt)} {shlex.quote(server_key)} "
+            f"> {shlex.quote(certs_dir)}/server.pem && "
+            f"chmod 600 {shlex.quote(server_key)} && "
+            f"chmod 644 {shlex.quote(server_crt)} {shlex.quote(certs_dir)}/server.pem && "
+            f"rm -f /tmp/iotgw-server-{token}.csr && "
+            "echo SERVER_CREATED; "
+            "else echo SERVER_EXISTS; fi && "
+            f"(chown -R mosquitto:mosquitto {shlex.quote(certs_dir)} 2>/dev/null || true)"
+        )
+        srv_res = sudo_run(
+            ssh, server_script, sudo_password=sudo_password, timeout=120.0
+        )
+        if not srv_res.ok:
+            raise AgentInstallError(
+                "creating MQTT server certificate failed: "
+                f"{(srv_res.stderr or srv_res.stdout).strip()[:400]}"
+            )
+        if "SERVER_CREATED" in (srv_res.stdout or ""):
+            notes.append(f"server cert created (SAN IP:{gateway_ip})")
+        else:
+            notes.append("server cert already present")
+    finally:
+        local_pass.unlink(missing_ok=True)
+        local_ext.unlink(missing_ok=True)
+        ssh.run(
+            f"rm -f {shlex.quote(remote_pass)} {shlex.quote(remote_ext)}",
+            timeout=15.0,
+        )
+
+    return "; ".join(notes)
+
+
+def ensure_decrypt_mqtt_identity(
+    ssh: SSHSession,
+    *,
+    sudo_password: str,
+    ca_passphrase: str,
+    data_dir: str = DEFAULT_AGENT_DATA,
+    decrypt_password: str | None = None,
+    cert_days: int = 730,
+) -> str:
+    """Ensure ``nodered`` MQTT user + mTLS client cert for the decrypt worker.
+
+    Returns the plaintext decrypt password (caller writes it into agent env).
+    """
+    import secrets as _secrets
+
+    from actions.csr import generate_client_key_and_csr  # type: ignore[import-not-found]
+    from actions.files import merge_password_line, upsert_user_acl  # type: ignore[import-not-found]
+    from actions.mosquitto_hash import hash_password_line  # type: ignore[import-not-found]
+
+    ca_passphrase = _reject_ca_admin(ca_passphrase)
+    password = (decrypt_password or "").strip() or _secrets.token_urlsafe(24)
+    mosq_dir = f"{data_dir}/mosquitto"
+    passwords_path = f"{mosq_dir}/passwords"
+    acl_path = f"{mosq_dir}/acl"
+    certs_dir = f"{data_dir}/certs"
+    decrypt_crt = f"{certs_dir}/decrypt.crt"
+    decrypt_key = f"{certs_dir}/decrypt.key"
+    ca_crt = f"{certs_dir}/ca.crt"
+    ca_key = f"{certs_dir}/ca.key"
+
+    # Ensure ACL + password files exist, then upsert nodered.
+    material = generate_client_key_and_csr(cn="nodered", org_unit="Broker")
+    hash_line = hash_password_line("nodered", password)
+    token = _secrets.token_hex(8)
+    remote_pass = f"/tmp/iotgw-ca-pass-{token}"
+    remote_csr = f"/tmp/iotgw-decrypt-{token}.csr"
+    remote_crt_tmp = f"/tmp/iotgw-decrypt-{token}.crt"
+    remote_key_tmp = f"/tmp/iotgw-decrypt-{token}.key"
+
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp_pass:
+        tmp_pass.write(ca_passphrase.encode("utf-8"))
+        local_pass = Path(tmp_pass.name)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp_csr:
+        tmp_csr.write(material.csr_pem)
+        local_csr = Path(tmp_csr.name)
+    with tempfile.NamedTemporaryFile("wb", delete=False) as tmp_key:
+        tmp_key.write(material.private_key_pem)
+        local_key = Path(tmp_key.name)
+
+    local_acl: Path | None = None
+    local_pw: Path | None = None
+    try:
+        # Read current ACL/passwords via cat (provisioner SSH has no read_text).
+        acl_res = ssh.run(
+            f"cat {shlex.quote(acl_path)} 2>/dev/null || true", timeout=15.0
+        )
+        pw_res = ssh.run(
+            f"cat {shlex.quote(passwords_path)} 2>/dev/null || true", timeout=15.0
+        )
+        acl_body = upsert_user_acl(
+            acl_res.stdout or _BASIC_ACL,
+            "nodered",
+            topic_rw="sensors/#",
+        )
+        pw_body = merge_password_line(pw_res.stdout or "", hash_line)
+
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".acl", delete=False, encoding="utf-8"
+        ) as tmp_acl:
+            tmp_acl.write(acl_body)
+            local_acl = Path(tmp_acl.name)
+        with tempfile.NamedTemporaryFile(
+            "w", suffix=".pw", delete=False, encoding="utf-8"
+        ) as tmp_pw:
+            tmp_pw.write(pw_body if pw_body.endswith("\n") else pw_body + "\n")
+            local_pw = Path(tmp_pw.name)
+
+        remote_acl = f"/tmp/iotgw-acl-{token}"
+        remote_pw = f"/tmp/iotgw-pw-{token}"
+        ssh.upload_file(local_acl, remote_acl, mode=0o600)
+        ssh.upload_file(local_pw, remote_pw, mode=0o600)
+        ssh.upload_file(local_pass, remote_pass, mode=0o600)
+        ssh.upload_file(local_csr, remote_csr, mode=0o600)
+        ssh.upload_file(local_key, remote_key_tmp, mode=0o600)
+
+        sign_script = (
+            f"mkdir -p {shlex.quote(mosq_dir)}/log {shlex.quote(certs_dir)} && "
+            f"mv {shlex.quote(remote_acl)} {shlex.quote(acl_path)} && "
+            f"mv {shlex.quote(remote_pw)} {shlex.quote(passwords_path)} && "
+            f"chmod 600 {shlex.quote(acl_path)} {shlex.quote(passwords_path)} && "
+            f"openssl x509 -req -in {remote_csr} "
+            f"-CA {shlex.quote(ca_crt)} -CAkey {shlex.quote(ca_key)} "
+            f"-passin file:{remote_pass} -CAcreateserial "
+            f"-out {remote_crt_tmp} -days {int(cert_days)} && "
+            f"mv {remote_crt_tmp} {shlex.quote(decrypt_crt)} && "
+            f"mv {remote_key_tmp} {shlex.quote(decrypt_key)} && "
+            f"chmod 644 {shlex.quote(decrypt_crt)} && "
+            f"chmod 600 {shlex.quote(decrypt_key)} && "
+            f"(chown -R mosquitto:mosquitto {shlex.quote(mosq_dir)} "
+            f"{shlex.quote(certs_dir)} 2>/dev/null || true) && "
+            "echo DECRYPT_OK"
+        )
+        res = sudo_run(
+            ssh, sign_script, sudo_password=sudo_password, timeout=120.0
+        )
+        if not res.ok or "DECRYPT_OK" not in (res.stdout or ""):
+            raise AgentInstallError(
+                "decrypt worker MQTT identity failed: "
+                f"{(res.stderr or res.stdout).strip()[:400]}"
+            )
+    finally:
+        local_pass.unlink(missing_ok=True)
+        local_csr.unlink(missing_ok=True)
+        local_key.unlink(missing_ok=True)
+        if local_acl is not None:
+            local_acl.unlink(missing_ok=True)
+        if local_pw is not None:
+            local_pw.unlink(missing_ok=True)
+        ssh.run(
+            f"rm -f {shlex.quote(remote_pass)} {shlex.quote(remote_csr)} "
+            f"{remote_crt_tmp} {remote_key_tmp}",
+            timeout=15.0,
+        )
+    return password
 
 
 def configure_system_mosquitto(
@@ -138,21 +414,43 @@ def configure_system_mosquitto(
     *,
     sudo_password: str,
     data_dir: str = DEFAULT_AGENT_DATA,
-) -> str:
-    """Create agent mosquitto dirs + conf.d so system Mosquitto reads ACL/passwords.
+    gateway_ip: str | None = None,
+    ca_passphrase: str | None = None,
+) -> tuple[str, str | None]:
+    """Create agent mosquitto dirs + MQTTS :8883 conf.d (mTLS + password/ACL).
 
-    Idempotent: empty ``passwords`` and a basic ``acl`` are created only when missing.
+    When ``gateway_ip`` and ``ca_passphrase`` are provided, bootstraps CA + server
+    cert and the decrypt worker client identity before writing conf.
+
+    Returns ``(notes, decrypt_password_or_none)``.
+    Idempotent for ACL/passwords files that already exist.
     """
     mosq_dir = f"{data_dir}/mosquitto"
     certs_dir = f"{data_dir}/certs"
     passwords = f"{mosq_dir}/passwords"
     acl = f"{mosq_dir}/acl"
-    conf_body = (
-        "listener 1883 0.0.0.0\n"
-        "allow_anonymous false\n"
-        f"password_file {passwords}\n"
-        f"acl_file {acl}\n"
-    )
+    notes: list[str] = []
+    decrypt_password: str | None = None
+
+    if gateway_ip and ca_passphrase:
+        notes.append(
+            ensure_gateway_ca_and_server_cert(
+                ssh,
+                sudo_password=sudo_password,
+                gateway_ip=gateway_ip,
+                ca_passphrase=ca_passphrase,
+                data_dir=data_dir,
+            )
+        )
+        decrypt_password = ensure_decrypt_mqtt_identity(
+            ssh,
+            sudo_password=sudo_password,
+            ca_passphrase=ca_passphrase,
+            data_dir=data_dir,
+        )
+        notes.append("decrypt MQTT identity ready")
+
+    conf_body = _mqtts_conf_body(data_dir=data_dir)
 
     with tempfile.NamedTemporaryFile(
         "w", suffix=".conf", delete=False, encoding="utf-8"
@@ -183,9 +481,10 @@ def configure_system_mosquitto(
             f"mv {shlex.quote(remote_conf)} {_MOSQUITTO_CONF_D} && "
             f"chmod 600 {shlex.quote(passwords)} {shlex.quote(acl)} && "
             f"chmod 644 {_MOSQUITTO_CONF_D} && "
-            f"(chown -R mosquitto:mosquitto {shlex.quote(mosq_dir)} 2>/dev/null || true) && "
+            f"(chown -R mosquitto:mosquitto {shlex.quote(mosq_dir)} "
+            f"{shlex.quote(certs_dir)} 2>/dev/null || true) && "
             "systemctl enable --now mosquitto && "
-            "(systemctl reload mosquitto || systemctl restart mosquitto)",
+            "(systemctl restart mosquitto || systemctl reload mosquitto)",
             sudo_password=sudo_password,
             timeout=90.0,
         )
@@ -200,7 +499,8 @@ def configure_system_mosquitto(
         # Best-effort cleanup if sudo mv did not consume the temps.
         ssh.run(f"rm -f {shlex.quote(remote_conf)} {shlex.quote(remote_acl)}", timeout=15.0)
 
-    return f"system mosquitto configured ({_MOSQUITTO_CONF_D})"
+    notes.append(f"system mosquitto MQTTS :{MQTT_TLS_PORT} ({_MOSQUITTO_CONF_D})")
+    return "; ".join(notes), decrypt_password
 
 
 _EMPTY_KAFKA_CATALOG = """{
@@ -340,12 +640,22 @@ def _write_env(
     monitoring_ip: str,
     sudo_password: str,
     data_dir: str = DEFAULT_AGENT_DATA,
+    decrypt_password: str | None = None,
+    mqtt_port: int = MQTT_TLS_PORT,
 ) -> None:
-    content = (
-        f"MONITORING_IP={monitoring_ip}\n"
-        f"IOTGW_AGENT_DATA={data_dir}\n"
-        f"LOKI_URL=http://{monitoring_ip}:3100\n"
-    )
+    lines = [
+        f"MONITORING_IP={monitoring_ip}",
+        f"IOTGW_AGENT_DATA={data_dir}",
+        f"LOKI_URL=http://{monitoring_ip}:3100",
+        f"MQTT_PORT={int(mqtt_port)}",
+        "IOTGW_DECRYPT_USER=nodered",
+        f"IOTGW_MQTT_CA={data_dir}/certs/ca.crt",
+        f"IOTGW_MQTT_CERT={data_dir}/certs/decrypt.crt",
+        f"IOTGW_MQTT_KEY={data_dir}/certs/decrypt.key",
+    ]
+    if decrypt_password:
+        lines.append(f"IOTGW_DECRYPT_PASSWORD={decrypt_password}")
+    content = "\n".join(lines) + "\n"
     with tempfile.NamedTemporaryFile(
         "w", suffix=".env", delete=False, encoding="utf-8"
     ) as tmp:
@@ -416,23 +726,34 @@ def provision_monolithic_agent(
     sudo_password: str,
     remote_root: str = DEFAULT_AGENT_ROOT,
     data_dir: str = DEFAULT_AGENT_DATA,
+    ca_passphrase: str | None = None,
 ) -> list[str]:
     """Install packages (sudo) + agent venv + systemd. Returns notes.
 
     ``sudo_password`` comes from the Setup Wizard UI and is never written to disk
     or placed on remote argv (only ``sudo -S`` stdin).
+
+    ``ca_passphrase`` bootstraps the gateway CA + MQTTS server cert and decrypt
+    worker client identity. Required for MQTTS-only installs.
     """
     if not (sudo_password or "").strip():
         raise AgentInstallError(
             "sudo password required — enter it in the Setup Wizard before Install"
         )
+    if not (ca_passphrase or "").strip():
+        raise AgentInstallError(
+            "CA passphrase required — generate automatically or enter on Install"
+        )
     notes: list[str] = []
     notes.append(ensure_mosquitto(ssh, sudo_password=sudo_password))
-    notes.append(
-        configure_system_mosquitto(
-            ssh, sudo_password=sudo_password, data_dir=data_dir
-        )
+    mosq_note, decrypt_password = configure_system_mosquitto(
+        ssh,
+        sudo_password=sudo_password,
+        data_dir=data_dir,
+        gateway_ip=gateway_ip,
+        ca_passphrase=ca_passphrase,
     )
+    notes.append(mosq_note)
     notes.append(
         ensure_kafka_layout(ssh, sudo_password=sudo_password, data_dir=data_dir)
     )
@@ -455,12 +776,14 @@ def provision_monolithic_agent(
         monitoring_ip=monitoring_ip,
         sudo_password=sudo_password,
         data_dir=data_dir,
+        decrypt_password=decrypt_password,
+        mqtt_port=MQTT_TLS_PORT,
     )
     _install_systemd(ssh, remote_root, sudo_password=sudo_password)
     notes.append("systemd iot-gateway-agent enabled")
     _probe_agent(ssh)
     notes.append(
-        f"agent healthy; system mosquitto MQTT on gateway {gateway_ip}:1883, "
+        f"agent healthy; system mosquitto MQTTS on gateway {gateway_ip}:{MQTT_TLS_PORT}, "
         "agent metrics :9139 (--no-broker)"
     )
     return notes

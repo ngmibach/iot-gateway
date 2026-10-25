@@ -163,6 +163,7 @@ class ProvisionFlowTests(unittest.TestCase):
             gateway_src=self.repo / "gateway",
             repo_root=self.repo,
             sudo_password="test-sudo-secret",
+            ca_passphrase="test-ca-passphrase-not-admin",
         )
         base.update(kwargs)
         return ProvisionConfig(**base)
@@ -252,28 +253,45 @@ class ProvisionFlowTests(unittest.TestCase):
         ssh.when("mosquitto", CommandResult(0, "", ""))
         self.assertFalse(_mosquitto_present(ssh))
 
-    def test_configure_system_mosquitto_writes_conf_d(self) -> None:
+    def test_configure_system_mosquitto_writes_mqtts_conf_d(self) -> None:
         from provisioner.agent_install import (
             DEFAULT_AGENT_DATA,
+            MQTT_TLS_PORT,
             _MOSQUITTO_CONF_D,
+            _mqtts_conf_body,
             configure_system_mosquitto,
         )
+
+        body = _mqtts_conf_body(data_dir=DEFAULT_AGENT_DATA)
+        self.assertIn(f"listener {MQTT_TLS_PORT}", body)
+        self.assertIn("require_certificate true", body)
+        self.assertIn("cafile", body)
+        self.assertNotIn("listener 1883", body)
 
         ssh = FakeSSH()
         ssh.when("sudo -S", CommandResult(0, "", ""))
         ssh.when("rm -f", CommandResult(0, "", ""))
-        note = configure_system_mosquitto(ssh, sudo_password="secret")
-        self.assertIn("system mosquitto configured", note)
+        note, decrypt_pw = configure_system_mosquitto(ssh, sudo_password="secret")
+        self.assertIn("MQTTS", note)
+        self.assertIsNone(decrypt_pw)
         self.assertTrue(any(_MOSQUITTO_CONF_D in c for c in ssh.commands))
         self.assertTrue(
             any(DEFAULT_AGENT_DATA + "/mosquitto" in c for c in ssh.commands)
         )
-        self.assertTrue(
-            any("password_file" in u.decode() for u in ssh.files.values() if u)
-            or any(
-                b"password_file" in data for _, data in ((p, ssh.files[p]) for p in ssh.files)
-            )
-        )
+        conf_bytes = b""
+        for path, data in ssh.files.items():
+            if path.endswith(".conf") or "mosquitto-agent.conf" in path:
+                conf_bytes = data
+                break
+        if not conf_bytes:
+            # Uploaded temp path may vary; scan all uploads.
+            for data in ssh.files.values():
+                if b"listener" in data and b"8883" in data:
+                    conf_bytes = data
+                    break
+        self.assertIn(b"listener 8883", conf_bytes)
+        self.assertIn(b"require_certificate true", conf_bytes)
+        self.assertNotIn(b"listener 1883", conf_bytes)
         conf_uploads = [p for p, _ in ssh.uploads if p.endswith(".conf") or "mosquitto" in p]
         self.assertTrue(conf_uploads)
         sudo_cmds = [c for c in ssh.commands if "sudo -S" in c]
@@ -314,15 +332,23 @@ class ProvisionFlowTests(unittest.TestCase):
             CommandResult(0, '{"status":"ok"}', ""),
         )
         ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
-        ssh.when("sudo -S", CommandResult(0, "", ""))
+        # TLS bootstrap sudo scripts echo markers; generic sudo stays empty.
+        ssh.when("DECRYPT_OK", CommandResult(0, "DECRYPT_OK\n", ""))
+        ssh.when("CA_CREATED", CommandResult(0, "CA_EXISTS\n", ""))
+        ssh.when("SERVER_CREATED", CommandResult(0, "SERVER_EXISTS\n", ""))
+        ssh.when("openssl", CommandResult(0, "CA_EXISTS\nSERVER_EXISTS\nDECRYPT_OK\n", ""))
+        ssh.when("sudo -S", CommandResult(0, "CA_EXISTS\nSERVER_EXISTS\nDECRYPT_OK\n", ""))
         result = provision(ssh, self._config())
         self.assertEqual(result.backend, "agent")
         self.assertEqual(result.install_root, DEFAULT_INSTALL_ROOT)
         self.assertTrue(result.agent_installed)
         self.assertTrue(any("no Docker" in n for n in result.notes))
+        self.assertTrue(any("8883" in (result.probes.get("mqtts") or "") for _ in [0]))
+        self.assertEqual(result.probes.get("mqtts"), "192.168.1.50:8883")
         self.assertFalse(any("docker info" in c for c in ssh.commands))
         self.assertFalse(any("docker compose" in c for c in ssh.commands))
         self.assertFalse(any("test-sudo-secret" in c for c in ssh.commands))
+        self.assertFalse(any("test-ca-passphrase" in c for c in ssh.commands))
 
     def test_agent_backend_apt_uses_sudo_stdin(self) -> None:
         ssh = _ok_ssh()
@@ -345,7 +371,10 @@ class ProvisionFlowTests(unittest.TestCase):
             if "printf '%s:%s" in command:
                 return CommandResult(0, "admin:admin\n", "")
             if "sudo -S" in command:
-                return CommandResult(0, "", "")
+                # Mimic TLS bootstrap markers from ensure_* scripts.
+                return CommandResult(
+                    0, "CA_EXISTS\nSERVER_EXISTS\nDECRYPT_OK\n", ""
+                )
             if "command -v python3" in command:
                 return CommandResult(0, "/usr/bin/python3\n", "")
             if "df -Pk" in command:
@@ -371,6 +400,13 @@ class ProvisionFlowTests(unittest.TestCase):
         with self.assertRaises(ProvisionError) as ctx:
             provision(ssh, self._config(sudo_password=""))
         self.assertIn("sudo password", str(ctx.exception).lower())
+
+    def test_agent_backend_requires_ca_passphrase(self) -> None:
+        ssh = _ok_ssh()
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        with self.assertRaises(ProvisionError) as ctx:
+            provision(ssh, self._config(ca_passphrase=""))
+        self.assertIn("ca passphrase", str(ctx.exception).lower())
 
     def test_disk_preflight_aborts(self) -> None:
         ssh = _ok_ssh(free_k=100)
