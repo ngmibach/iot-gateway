@@ -12,6 +12,9 @@ _TRUNCATE_RE = re.compile(
     r"(?::\s*>\s*'([^']+)'|truncate\s+-s\s+0\s+'([^']+)')"
 )
 
+# 100 GiB filesystem (1K-blocks) so Kafka capacity tests have headroom by default.
+_FAKE_DF_LINE = "/dev/root 104857600 1024000 103833600 1% /\n"
+
 
 class FakeSSH:
     def __init__(
@@ -32,7 +35,20 @@ class FakeSSH:
     def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
         self.commands.append(command)
         if self._run_handler is not None:
-            return self._run_handler(command)
+            handled = self._run_handler(command)
+            # Handlers often return empty stdout; synthesize df so capacity probes work.
+            if "df -Pk" in command and not (handled.stdout or "").strip():
+                return CommandResult(
+                    argv=command,
+                    exit_code=handled.exit_code,
+                    stdout=_FAKE_DF_LINE,
+                    stderr=handled.stderr,
+                )
+            return handled
+        if "df -Pk" in command:
+            return CommandResult(
+                argv=command, exit_code=0, stdout=_FAKE_DF_LINE, stderr=""
+            )
         for m in _TRUNCATE_RE.finditer(command):
             path = m.group(1) or m.group(2)
             if path and path in self.files:

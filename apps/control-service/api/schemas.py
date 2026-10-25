@@ -76,6 +76,21 @@ class DeviceOut(BaseModel):
     cert_expires_at: Optional[int] = None
     cert_fingerprint: Optional[str] = None
     created_at: Optional[int] = None
+    kafka_topic: Optional[str] = None
+    kafka_retention_bytes: Optional[int] = None
+
+
+class KafkaCapacityOut(BaseModel):
+    """Gateway sensor slots from disk size × 70% / per-topic retention cap."""
+
+    total_storage_bytes: int
+    topic_retention_bytes: int
+    safety_ratio: float
+    budget_bytes: int
+    max_sensors: int
+    registered_sensors: int
+    remaining_slots: int
+    at_capacity: bool = False
 
 
 class UpdateDeviceRequest(BaseModel):
@@ -153,6 +168,8 @@ class RegisterDeviceResponse(BaseModel):
         default=False,
         description="True if device row already existed; playbook still ran (full upsert).",
     )
+    kafka_topic: Optional[str] = None
+    kafka_capacity: Optional[KafkaCapacityOut] = None
 
 
 class HealthResponse(BaseModel):

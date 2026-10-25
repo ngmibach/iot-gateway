@@ -57,5 +57,14 @@ class GatewayPaths:
     def sensor_data_log(self) -> str:
         return f"{self.data_dir}/logs/sensor_data.log"
 
+    @property
+    def kafka_dir(self) -> str:
+        return f"{self.data_dir}/kafka"
+
+    @property
+    def kafka_topics_catalog(self) -> str:
+        """Logical per-sensor Kafka topic catalog (retention.bytes caps)."""
+        return f"{self.data_dir}/kafka/topics.json"
+
     def log_paths(self) -> tuple[str, ...]:
         return (self.mosquitto_log, self.sensor_data_log)

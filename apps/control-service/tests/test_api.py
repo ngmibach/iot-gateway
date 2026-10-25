@@ -27,14 +27,50 @@ class _FakeSSH:
 
 
 def _register_ok(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+    user_id = kwargs.get("user_id")
     return RegisterResult(
         ok=True,
         status="ok",
         message="device registered",
-        details={"user_id": kwargs.get("user_id"), "ip": kwargs.get("ip")},
+        details={
+            "user_id": user_id,
+            "ip": kwargs.get("ip"),
+            "kafka_topic": f"sensor.{user_id}",
+            "kafka_retention_bytes": 1 * 1024**3,
+            "kafka_capacity": {
+                "total_storage_bytes": 10 * 1024**3,
+                "topic_retention_bytes": 1 * 1024**3,
+                "safety_ratio": 0.7,
+                "budget_bytes": int(10 * 1024**3 * 0.7),
+                "max_sensors": 7,
+                "registered_sensors": 1,
+                "remaining_slots": 6,
+            },
+        },
         cert_bundle=b"PK\x03\x04fake-zip",
         cert_fingerprint="ab" * 32,
         cert_expires_at="2030-01-01T00:00:00+00:00",
+    )
+
+
+def _register_capacity_full(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+    return RegisterResult(
+        ok=False,
+        status="failed",
+        message=(
+            "gateway Kafka capacity full: 7/7 sensors "
+            "(topic cap 1 bytes, disk 10 bytes, safety 70%)"
+        ),
+        details={
+            "user_id": kwargs.get("user_id"),
+            "ip": kwargs.get("ip"),
+            "kafka_capacity": {
+                "max_sensors": 7,
+                "registered_sensors": 7,
+                "topic_retention_bytes": 1,
+                "total_storage_bytes": 10,
+            },
+        },
     )
 
 
@@ -125,6 +161,9 @@ class ApiDeviceTests(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["device"]["id"], "sensor5")
         self.assertEqual(body["device"]["ip"], "192.168.1.60")
+        self.assertEqual(body["device"]["kafka_topic"], "sensor.sensor5")
+        self.assertEqual(body["kafka_topic"], "sensor.sensor5")
+        self.assertEqual(body["kafka_capacity"]["max_sensors"], 7)
         self.assertFalse(body["idempotent"])
         self.assertIsNotNone(body["cert_bundle_token"])
         mocked.assert_called_once()
@@ -260,6 +299,44 @@ class ApiDeviceTests(unittest.TestCase):
             )
         self.assertEqual(r.status_code, 502)
         self.assertIn("boom", r.json()["detail"])
+
+    def test_register_capacity_full_409(self) -> None:
+        with patch(
+            "api.devices.register_device", side_effect=_register_capacity_full
+        ):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices",
+                json={
+                    "user_id": "sensor_new",
+                    "password": "password123",
+                    "ip": "10.0.0.99",
+                },
+            )
+        self.assertEqual(r.status_code, 409, r.text)
+        detail = r.json()["detail"]
+        self.assertIn("capacity full", detail["message"])
+        self.assertEqual(detail["kafka_capacity"]["max_sensors"], 7)
+
+    def test_get_kafka_capacity(self) -> None:
+        from actions.kafka_capacity import CapacityPlan
+
+        plan = CapacityPlan(
+            total_storage_bytes=10,
+            topic_retention_bytes=1,
+            safety_ratio=0.7,
+            budget_bytes=7,
+            max_sensors=7,
+            registered_sensors=2,
+            remaining_slots=5,
+        )
+        with patch("api.devices.gateway_kafka_capacity", return_value=plan):
+            r = self.client.get("/api/v1/gateways/gw1/kafka/capacity")
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["max_sensors"], 7)
+        self.assertEqual(body["registered_sensors"], 2)
+        self.assertEqual(body["remaining_slots"], 5)
+        self.assertFalse(body["at_capacity"])
 
     def test_delete_device(self) -> None:
         self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
