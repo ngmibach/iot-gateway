@@ -28,6 +28,20 @@ def _chmod_private(path: Path) -> None:
         pass
 
 
+def _write_private_bytes(path: Path, data: bytes) -> None:
+    """Write ``data`` creating the file with mode 0o600 when the OS supports it."""
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC
+    if hasattr(os, "O_BINARY"):
+        flags |= os.O_BINARY
+    # On POSIX, pass mode so the file is never created world-readable.
+    fd = os.open(path, flags, 0o600)
+    try:
+        os.write(fd, data)
+    finally:
+        os.close(fd)
+    _chmod_private(path)
+
+
 def ensure_grafana_admin_password(certs_dir: Path) -> str:
     """Return admin password from ``grafana-admin.pass``, creating once if missing."""
     certs_dir = Path(certs_dir)
@@ -38,8 +52,7 @@ def ensure_grafana_admin_password(certs_dir: Path) -> str:
         if text:
             return text
     password = secrets.token_urlsafe(24)
-    path.write_text(password + "\n", encoding="utf-8")
-    _chmod_private(path)
+    _write_private_bytes(path, (password + "\n").encode("utf-8"))
     return password
 
 
@@ -110,12 +123,11 @@ def ensure_grafana_certs(
     )
     cert_pem = cert.public_bytes(serialization.Encoding.PEM)
 
-    # Write key first privately, then cert (replace atomically where possible).
+    # Write key privately first, then cert (tmp + replace).
     tmp_key = key_path.with_suffix(key_path.suffix + ".tmp")
     tmp_cert = cert_path.with_suffix(cert_path.suffix + ".tmp")
     try:
-        tmp_key.write_bytes(key_pem)
-        _chmod_private(tmp_key)
+        _write_private_bytes(tmp_key, key_pem)
         tmp_cert.write_bytes(cert_pem)
         tmp_key.replace(key_path)
         _chmod_private(key_path)
