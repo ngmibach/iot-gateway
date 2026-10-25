@@ -16,7 +16,6 @@ def _grafana_versions(digest: str, plat: str = "linux-amd64") -> dict:
     return {
         "grafana": {
             "version": "13.2.4",
-            "extract": "tree",
             "assets": {
                 plat: {
                     "url": "https://example.test/grafana.tar.gz",
@@ -140,7 +139,7 @@ class BinaryFetchTests(unittest.TestCase):
         self.assertIn("linux-amd64", data["prometheus"]["assets"])
         self.assertIn("grafana", data)
         self.assertEqual(data["grafana"]["version"], "13.2.4")
-        self.assertEqual(data["grafana"]["extract"], "tree")
+        self.assertNotIn("extract", data["grafana"])
         assets = data["grafana"]["assets"]
         self.assertIn("linux-amd64", assets)
         self.assertIn("windows-amd64", assets)
@@ -204,7 +203,7 @@ class BinaryFetchTests(unittest.TestCase):
             self.assertIn("SHA256", str(ctx.exception))
             self.assertFalse(dest.exists())
             self.assertFalse((root / "grafana.new").exists())
-            self.assertFalse(list(root.glob(".grafana-*.ok")))
+            self.assertFalse((dest / ".grafana-13.2.4-linux-amd64.ok").exists())
 
     def test_ensure_grafana_tree_missing_public_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
