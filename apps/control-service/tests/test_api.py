@@ -98,6 +98,7 @@ class ApiDeviceTests(unittest.TestCase):
             registry_path=db,
             ca_passphrase="test-ca-secret",
             api_token=None,
+            fake_cert_renewer_enabled=False,
         )
         self.cache = CertBundleCache(ttl_s=60)
 
@@ -111,6 +112,7 @@ class ApiDeviceTests(unittest.TestCase):
             registry=self.registry,
             open_ssh=open_ssh,
             cert_cache=self.cache,
+            start_fake_cert_renewer=False,
         )
         self.client = TestClient(self.app)
 
@@ -122,12 +124,14 @@ class ApiDeviceTests(unittest.TestCase):
             registry_path=Path(self._tmp.name) / "registry.sqlite",
             api_token=token,
             ca_passphrase="test-ca-secret",
+            fake_cert_renewer_enabled=False,
         )
         app = create_app(
             settings=settings,
             registry=self.registry,
             open_ssh=self.open_ssh,
             cert_cache=self.cache,
+            start_fake_cert_renewer=False,
         )
         return TestClient(app)
 
@@ -935,6 +939,55 @@ class ApiDeviceTests(unittest.TestCase):
             r = self.client.delete("/api/v1/gateways/gw1/devices/sensor1")
         self.assertEqual(r.status_code, 200, r.text)
         torn.assert_not_called()
+
+    def test_rotate_ca_feeds_fake_devices(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+
+        def _ok(_ssh: Any = None, **kwargs: Any) -> RotateCAResult:
+            return RotateCAResult(
+                ok=True,
+                status="ok",
+                message="CA rotated",
+                ca_crt_pem=b"CA",
+                server_crt_pem=b"SRV",
+                devices=[
+                    DeviceReissue(
+                        device_id="fake1",
+                        client_key_pem=b"KEY",
+                        client_crt_pem=b"CRT",
+                        ca_crt_pem=b"CA",
+                        cert_bundle=b"PK\x03\x04fake",
+                        fingerprint_sha256="cc" * 32,
+                    ),
+                    DeviceReissue(
+                        device_id="sensor1",
+                        client_key_pem=b"KEY2",
+                        client_crt_pem=b"CRT2",
+                        ca_crt_pem=b"CA",
+                        cert_bundle=b"PK\x03\x04real",
+                        fingerprint_sha256="dd" * 32,
+                    ),
+                ],
+            )
+
+        with (
+            patch("api.actions.rotate_ca", side_effect=_ok),
+            patch(
+                "api.actions.feed_and_record_certs",
+                return_value=(FakePlaybookResult(ok=True), {}),
+            ) as fed,
+        ):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/actions/rotate-ca",
+                json={"confirm_break_glass": True},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        # Only the fake device is fed.
+        self.assertEqual(fed.call_count, 1)
+        self.assertEqual(fed.call_args.kwargs["device_id"], "fake1")
 
 
 if __name__ == "__main__":

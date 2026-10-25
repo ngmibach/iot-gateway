@@ -97,6 +97,8 @@ class AppState:
     registry: Registry
     cert_cache: CertBundleCache = field(default_factory=CertBundleCache)
     open_ssh: Optional[OpenSSH] = None
+    # Background fake-sensor cert renewer (started from app lifespan).
+    fake_cert_renewer: Any = None
 
 
 def get_state(request: Request) -> AppState:

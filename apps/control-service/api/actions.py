@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import logging
 from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -21,6 +22,8 @@ from .deps import (
     require_gateway,
     require_token,
 )
+from .device_meta import is_fake_meta, parse_meta
+from .fake_cert_renewer import attack_pauses_auto_renew, feed_and_record_certs
 from .schemas import (
     DeviceBundleToken,
     RotateCARequest,
@@ -28,6 +31,8 @@ from .schemas import (
     RotateServerRequest,
     RotateServerResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -172,6 +177,46 @@ def post_rotate_ca(
             detail=result.message or "rotate_ca failed",
         )
 
+    # Feed new CA/client material into fake sensor runtimes (skip attack modes).
+    fake_feed_errors: list[str] = []
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            for item in result.devices:
+                row = registry.get_device(gid, item.device_id)
+                if row is None:
+                    continue
+                meta = parse_meta(row.get("meta_json"))
+                if not is_fake_meta(meta):
+                    continue
+                if attack_pauses_auto_renew(meta):
+                    continue
+                try:
+                    fed, _ = feed_and_record_certs(
+                        ssh,
+                        registry=registry,
+                        gateway_id=gid,
+                        device_id=item.device_id,
+                        ca_pem=item.ca_crt_pem,
+                        client_crt_pem=item.client_crt_pem,
+                        client_key_pem=item.client_key_pem,
+                        fingerprint=item.fingerprint_sha256,
+                        install_root=gw["install_root"],
+                    )
+                    if not fed.ok:
+                        fake_feed_errors.append(
+                            f"{item.device_id}: {fed.message or 'feed failed'}"
+                        )
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "rotate_ca fake feed failed device=%s: %s",
+                        item.device_id,
+                        exc,
+                    )
+                    fake_feed_errors.append(f"{item.device_id}: {exc}")
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("rotate_ca fake feed SSH failed: %s", exc)
+        fake_feed_errors.append(f"ssh: {exc}")
+
     tokens: list[DeviceBundleToken] = []
     for item in result.devices:
         tok = cert_cache.put(gid, item.device_id, item.cert_bundle)
@@ -189,10 +234,18 @@ def post_rotate_ca(
             )
         )
 
+    message = result.message
+    if fake_feed_errors:
+        message = (
+            (message or "CA rotated")
+            + "; fake cert feed issues: "
+            + "; ".join(fake_feed_errors[:5])
+        )
+
     return RotateCAResponse(
         ok=result.ok,
         status=result.status,
-        message=result.message,
+        message=message,
         gateway_ip=gateway_ip,
         redistribute=bool(result.ok),
         devices=tokens,
