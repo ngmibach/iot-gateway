@@ -802,6 +802,99 @@ def teardown_fake(
     )
 
 
+def teardown_all_fakes(
+    ssh: "SSHClient",
+    *,
+    sudo_password: str | None = None,
+    install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
+    remove_unit_template: bool = True,
+) -> FakePlaybookResult:
+    """Stop every ``iotgw-fake@`` unit, delete netns/veth/bridge, clear fake data.
+
+    Used by gateway uninstall so no orphan namespaces or bridge remain after the
+    agent tree is removed. Idempotent when nothing is present.
+    """
+    del install_root
+    paths = _paths(DEFAULT_INSTALL_ROOT, data_dir)
+    # Enumerate known devices from the IP map for precise veth cleanup, then
+    # sweep leftover netns / units by name prefix.
+    ip_map = _read_ip_map(ssh, paths)
+    devices = ip_map.get("devices") if isinstance(ip_map.get("devices"), dict) else {}
+    host_ifs: list[str] = []
+    if isinstance(devices, dict):
+        for entry in devices.values():
+            if isinstance(entry, dict) and entry.get("host_if"):
+                host_ifs.append(str(entry["host_if"]))
+
+    link_dels = " ".join(
+        f"ip link del {shell_quote(name)} 2>/dev/null || true;" for name in host_ifs
+    )
+    unit_cleanup = (
+        "for u in $(systemctl list-units --type=service --all --no-legend "
+        "'iotgw-fake@*' 2>/dev/null | awk '{print $1}'); do "
+        "systemctl stop \"$u\" 2>/dev/null || true; "
+        "systemctl disable \"$u\" 2>/dev/null || true; "
+        "done; "
+        # Also catch inactive template instances listed only under list-unit-files.
+        "for u in $(systemctl list-unit-files --type=service --no-legend "
+        "'iotgw-fake@*' 2>/dev/null | awk '{print $1}'); do "
+        "systemctl stop \"$u\" 2>/dev/null || true; "
+        "systemctl disable \"$u\" 2>/dev/null || true; "
+        "done"
+    )
+    netns_cleanup = (
+        "for ns in $(ip netns list 2>/dev/null | awk '{print $1}'); do "
+        "case \"$ns\" in iotgw-fake-*) ip netns del \"$ns\" 2>/dev/null || true ;; "
+        "esac; "
+        "done"
+    )
+    parts = [
+        unit_cleanup,
+        link_dels.rstrip(";"),
+        netns_cleanup,
+        f"ip link del {shell_quote(FAKE_BRIDGE)} 2>/dev/null || true",
+    ]
+    if remove_unit_template:
+        parts.append(
+            f"rm -f /etc/systemd/system/{FAKE_UNIT_TEMPLATE}; "
+            "systemctl daemon-reload 2>/dev/null || true"
+        )
+    result = _sudo(
+        ssh,
+        "; ".join(p for p in parts if p),
+        sudo_password=sudo_password,
+        timeout=120.0,
+    )
+
+    # Drop fake runtime files + IP map (agent data dir may be wiped next).
+    ssh.run(f"rm -rf {shell_quote(paths.fake_dir)}")
+
+    if result.exit_code != 0:
+        return FakePlaybookResult(
+            ok=False,
+            status="degraded",
+            message=(
+                "teardown_all_fakes partially failed: "
+                + (result.stderr or result.stdout or "").strip()[:300]
+            ),
+            details={
+                "bridge": FAKE_BRIDGE,
+                "removed_dir": paths.fake_dir,
+                "device_count": len(devices) if isinstance(devices, dict) else 0,
+            },
+        )
+    return FakePlaybookResult(
+        ok=True,
+        message=f"torn down all fake sensors ({FAKE_BRIDGE})",
+        details={
+            "bridge": FAKE_BRIDGE,
+            "removed_dir": paths.fake_dir,
+            "device_count": len(devices) if isinstance(devices, dict) else 0,
+        },
+    )
+
+
 def read_fake_allocation(
     ssh: "SSHClient",
     device_id: str,

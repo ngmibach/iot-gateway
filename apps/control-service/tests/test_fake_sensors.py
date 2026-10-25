@@ -19,6 +19,7 @@ from actions.fake_sensors import (
     install_fake_files,
     netns_name,
     read_fake_allocation,
+    teardown_all_fakes,
     teardown_fake,
     unit_instance,
     update_fake_config,
@@ -213,6 +214,26 @@ class TestFakeSensorsPlaybooks(unittest.TestCase):
         # IP reusable after teardown.
         again = allocate_fake_ip(ssh, "fake1")  # type: ignore[arg-type]
         self.assertEqual(again.ip, "10.255.0.2")
+
+    def test_teardown_all_fakes_clears_bridge_netns_and_dir(self) -> None:
+        ssh = FakeSSH()
+        create_netns(ssh, "fake1", sudo_password="pw")  # type: ignore[arg-type]
+        create_netns(ssh, "fake2", sudo_password="pw")  # type: ignore[arg-type]
+        install_fake_files(ssh, "fake1", config={"mqtt_password": "x"})  # type: ignore[arg-type]
+        install_fake_files(ssh, "fake2", config={"mqtt_password": "y"})  # type: ignore[arg-type]
+        torn = teardown_all_fakes(ssh, sudo_password="pw")  # type: ignore[arg-type]
+        self.assertTrue(torn.ok, torn.message)
+        joined = "\n".join(ssh.commands)
+        self.assertIn("iotgw-fake@*", joined)
+        self.assertIn("ip netns list", joined)
+        self.assertIn("ip link del", joined)
+        self.assertIn(FAKE_BRIDGE, joined)
+        self.assertIn(FAKE_UNIT_TEMPLATE, joined)
+        self.assertTrue(
+            not any(p == FAKE_DIR or p.startswith(FAKE_DIR + "/") for p in ssh.files),
+            ssh.files.keys(),
+        )
+        self.assertEqual(torn.details.get("device_count"), 2)
 
     def test_bridge_failure_surfaces_message(self) -> None:
         def handler(cmd: str) -> CommandResult:
