@@ -314,6 +314,20 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .hidden { display: none !important; }
 .err { color: var(--bad); font-size: 0.85rem; margin-top: 0.5rem; }
 .okmsg { color: var(--ok); font-size: 0.85rem; margin-top: 0.5rem; }
+.reg-path-actions {
+  gap: 0.5rem;
+}
+.fake-payload-row {
+  align-items: flex-start;
+}
+.fake-payload-row label {
+  padding-top: 0.4rem;
+}
+.fake-payload-row textarea {
+  flex: 1;
+  min-width: 16rem;
+  max-width: 36rem;
+}
 .note-box {
   border-left: 3px solid var(--warn);
   padding: 0.6rem 0.8rem;

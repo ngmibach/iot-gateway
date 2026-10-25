@@ -31,11 +31,12 @@
 
     <section class="panel action-panel" data-action="register" id="panel-register">
       <h2>Sensor registration</h2>
-      <p class="muted">Search the selected gateway for nearby devices, then register one.</p>
+      <p class="muted">Find a real sensor on the gateway, or create a test sensor.</p>
 
       <div id="reg-find">
-        <div class="row">
+        <div class="row reg-path-actions">
           <button type="button" class="primary" id="btn-find-sensor">Find sensor</button>
+          <button type="button" class="secondary" id="btn-create-fake">Create fake sensor</button>
           <span id="scan-badge"></span>
         </div>
         <div class="note-box" id="scan-msg">
@@ -103,6 +104,71 @@
         </div>
         <div id="reg-msg"></div>
         <div id="reg-download" class="hidden"></div>
+      </div>
+
+      <div id="fake-form" class="hidden">
+        <h3>Fake sensor</h3>
+        <p class="muted">Creates a test sensor on this gateway.</p>
+        <div class="row">
+          <label for="fake-user">
+            Device ID
+            <span class="field-help" tabindex="0" aria-label="What is Device ID?">?
+              <span class="field-help-tip">Name for this test sensor in MQTT and the app.</span>
+            </span>
+          </label>
+          <input id="fake-user" autocomplete="off" placeholder="fake1" />
+        </div>
+        <div class="row">
+          <label for="fake-pass">
+            Password
+            <span class="field-help" tabindex="0" aria-label="What is Password?">?
+              <span class="field-help-tip">MQTT password for this sensor (min 8 characters).</span>
+            </span>
+          </label>
+          <input id="fake-pass" type="password" autocomplete="off" />
+        </div>
+        <div class="row">
+          <label for="fake-topic-rw">
+            Topic RW
+            <span class="field-help" tabindex="0" aria-label="What is Topic RW?">?
+              <span class="field-help-tip">Topic the sensor may publish and subscribe.</span>
+            </span>
+          </label>
+          <input id="fake-topic-rw" placeholder="sensors/fake1/#" />
+        </div>
+        <div class="row">
+          <label for="fake-topic-r">
+            Topic R
+            <span class="field-help" tabindex="0" aria-label="What is Topic R?">?
+              <span class="field-help-tip">Optional read-only topic for this sensor.</span>
+            </span>
+          </label>
+          <input id="fake-topic-r" placeholder="alerts/+" />
+        </div>
+        <div class="row">
+          <label for="fake-interval">
+            Send interval
+            <span class="field-help" tabindex="0" aria-label="What is Send interval?">?
+              <span class="field-help-tip">Milliseconds between published messages.</span>
+            </span>
+          </label>
+          <input id="fake-interval" type="number" min="100" step="100" value="1000" />
+        </div>
+        <div class="row fake-payload-row">
+          <label for="fake-payload">
+            Payload
+            <span class="field-help" tabindex="0" aria-label="What is Payload?">?
+              <span class="field-help-tip">JSON message template the test sensor publishes.</span>
+            </span>
+          </label>
+          <textarea id="fake-payload" rows="4" placeholder='{ "hello": 1 }'></textarea>
+        </div>
+        <div class="row">
+          <button type="button" class="primary" id="btn-fake-create">Create</button>
+          <button type="button" class="secondary" id="btn-fake-cancel">Cancel</button>
+        </div>
+        <div id="fake-msg"></div>
+        <div id="fake-download" class="hidden"></div>
       </div>
     </section>
 

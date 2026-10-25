@@ -242,6 +242,13 @@
     $("hdr-status").innerHTML = '<span class="badge ok">Ready</span>';
   }
 
+  function hideFakeForm() {
+    if (!$("fake-form")) return;
+    $("fake-form").classList.add("hidden");
+    $("fake-download").classList.add("hidden");
+    if ($("fake-msg")) $("fake-msg").innerHTML = "";
+  }
+
   function hideRegForm() {
     selectedSensorIp = "";
     $("reg-form").classList.add("hidden");
@@ -250,6 +257,7 @@
   }
 
   function showRegForm(ip, { editable } = {}) {
+    hideFakeForm();
     selectedSensorIp = ip || "";
     $("reg-ip").value = selectedSensorIp;
     $("reg-ip").readOnly = !editable;
@@ -263,6 +271,24 @@
     $("reg-form").classList.remove("hidden");
     $("reg-download").classList.add("hidden");
     if ($("reg-msg")) $("reg-msg").innerHTML = "";
+  }
+
+  function showFakeForm() {
+    hideRegForm();
+    $("reg-results").classList.add("hidden");
+    $("scan-badge").innerHTML = "";
+    $("scan-msg").textContent =
+      "Neighbor lists only show devices the gateway has recently talked to.";
+    if (!$("fake-payload").value.trim()) {
+      $("fake-payload").value = '{\n  "hello": 1\n}';
+    }
+    if (!$("fake-interval").value) {
+      $("fake-interval").value = "1000";
+    }
+    $("fake-form").classList.remove("hidden");
+    $("fake-download").classList.add("hidden");
+    if ($("fake-msg")) $("fake-msg").innerHTML = "";
+    setTimeout(() => $("fake-user").focus(), 50);
   }
 
   function renderHostList(hosts) {
@@ -304,6 +330,7 @@
 
   async function findSensors() {
     const gid = requireGateway();
+    hideFakeForm();
     $("scan-msg").textContent = "Looking for sensors on the gateway…";
     $("scan-badge").innerHTML = '<span class="badge warn">Scanning…</span>';
     $("btn-find-sensor").disabled = true;
@@ -380,6 +407,76 @@
       $("reg-pass").value = "";
     } finally {
       $("btn-register").disabled = false;
+    }
+  }
+
+  function parseFakePayload(raw) {
+    const text = (raw || "").trim();
+    if (!text) return { hello: 1 };
+    try {
+      return JSON.parse(text);
+    } catch {
+      throw new Error("Payload must be valid JSON.");
+    }
+  }
+
+  async function createFakeDevice() {
+    const gid = requireGateway();
+    const user_id = $("fake-user").value.trim();
+    const password = $("fake-pass").value;
+    if (!user_id || !password) {
+      throw new Error("Device ID and password are required.");
+    }
+    if (password.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+    const intervalRaw = ($("fake-interval").value || "").trim();
+    const send_interval_ms = intervalRaw ? Number(intervalRaw) : 1000;
+    if (!Number.isFinite(send_interval_ms) || send_interval_ms < 100) {
+      throw new Error("Send interval must be at least 100 ms.");
+    }
+    const payload = parseFakePayload($("fake-payload").value);
+    const body = {
+      user_id,
+      password,
+      send_interval_ms: Math.floor(send_interval_ms),
+      payload,
+    };
+    const tr = $("fake-topic-r").value.trim();
+    const tw = $("fake-topic-rw").value.trim();
+    if (tr) body.topic_read = tr;
+    if (tw) body.topic_readwrite = tw;
+
+    $("fake-msg").textContent = "Creating…";
+    $("fake-download").classList.add("hidden");
+    $("btn-fake-create").disabled = true;
+    try {
+      const data = await withCaRetry(gid, () =>
+        control(
+          "POST",
+          `/api/v1/gateways/${encodeURIComponent(gid)}/devices/fake`,
+          { body }
+        )
+      );
+      const status = (data.device && data.device.fake && data.device.fake.status) || "";
+      const okLine =
+        status === "running" || !status
+          ? "Fake sensor running."
+          : `Fake sensor created (${escapeHtml(status)}).`;
+      $("fake-msg").innerHTML = `<div class="okmsg">${okLine}</div>`;
+      if (data.cert_bundle_token) {
+        renderDownloadCards($("fake-download"), gid, [
+          {
+            device_id: user_id,
+            cert_bundle_token: data.cert_bundle_token,
+            fingerprint_sha256:
+              (data.device && data.device.cert_fingerprint) || null,
+          },
+        ]);
+      }
+      $("fake-pass").value = "";
+    } finally {
+      $("btn-fake-create").disabled = false;
     }
   }
 
@@ -636,12 +733,19 @@
   function showErr(e) {
     console.error(e);
     const msg = e.message || String(e);
-    const active =
-      document.querySelector(".action-panel:not(.hidden) #view-msg") ||
-      document.querySelector(".action-panel:not(.hidden) #reg-msg") ||
-      $("ctrl-msg");
-    if (active) {
-      active.innerHTML = `<div class="err">${escapeHtml(msg)}</div>`;
+    const panel = document.querySelector(".action-panel:not(.hidden)");
+    let target = $("ctrl-msg");
+    if (panel) {
+      if ($("fake-form") && !$("fake-form").classList.contains("hidden")) {
+        target = $("fake-msg") || target;
+      } else if ($("reg-form") && !$("reg-form").classList.contains("hidden")) {
+        target = $("reg-msg") || target;
+      } else if (panel.querySelector("#view-msg")) {
+        target = panel.querySelector("#view-msg");
+      }
+    }
+    if (target) {
+      target.innerHTML = `<div class="err">${escapeHtml(msg)}</div>`;
     } else {
       alert(msg);
     }
@@ -662,6 +766,7 @@
     );
     $("gw-select").addEventListener("change", () => {
       hideRegForm();
+      hideFakeForm();
       $("reg-results").classList.add("hidden");
       $("host-list").innerHTML = "";
       $("scan-badge").innerHTML = "";
@@ -675,6 +780,27 @@
     $("btn-find-sensor").addEventListener("click", () =>
       findSensors().catch(showErr)
     );
+    $("btn-create-fake").addEventListener("click", () => {
+      try {
+        requireGateway();
+        showFakeForm();
+      } catch (e) {
+        showErr(e);
+      }
+    });
+    $("btn-fake-cancel").addEventListener("click", () => hideFakeForm());
+    $("btn-fake-create").addEventListener("click", () =>
+      createFakeDevice().catch(showErr)
+    );
+    $("fake-user").addEventListener("input", () => {
+      const uid = $("fake-user").value.trim();
+      if (uid && !$("fake-topic-rw").dataset.touched) {
+        $("fake-topic-rw").value = `sensors/${uid}/#`;
+      }
+    });
+    $("fake-topic-rw").addEventListener("input", () => {
+      $("fake-topic-rw").dataset.touched = "1";
+    });
     $("btn-manual-ip").addEventListener("click", () => {
       try {
         requireGateway();
