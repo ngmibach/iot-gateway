@@ -10,7 +10,7 @@
   <header>
     <div>
       <h1>Control Plane</h1>
-      <div class="sub">Registration · View</div>
+      <div class="sub">Registration · View · Simulate</div>
     </div>
     <div id="hdr-status"></div>
   </header>
@@ -27,6 +27,7 @@
     <nav class="tabs" id="action-tabs">
       <button type="button" data-action="register" class="active">Registration</button>
       <button type="button" data-action="view">View</button>
+      <button type="button" data-action="simulate">Simulate</button>
     </nav>
 
     <section class="panel action-panel" data-action="register" id="panel-register">
@@ -188,6 +189,7 @@
         <div class="row">
           <label for="view-id">Device ID</label>
           <input id="view-id" readonly />
+          <span id="view-type-badge" class="badge"></span>
         </div>
         <div class="row">
           <label for="view-ip">Device IP</label>
@@ -222,6 +224,19 @@
           <label>Expires</label>
           <span id="view-expires">—</span>
         </div>
+        <div id="view-fake-meta" class="hidden">
+          <div class="row">
+            <label>Auto-renew</label>
+            <span id="view-auto-renew">on</span>
+          </div>
+          <div class="row">
+            <label>Last fed</label>
+            <span id="view-cert-fed">—</span>
+          </div>
+          <div class="row">
+            <button type="button" class="secondary" id="btn-open-simulate">Open Simulate</button>
+          </div>
+        </div>
 
         <div id="view-msg"></div>
         <div id="view-download" class="hidden"></div>
@@ -243,6 +258,90 @@
           <button type="button" class="secondary" id="btn-view-reissue">Re-issue cert</button>
           <button type="button" class="danger" id="btn-view-delete" disabled>Delete</button>
         </div>
+      </div>
+    </section>
+
+    <section class="panel action-panel hidden" data-action="simulate" id="panel-simulate">
+      <h2>Simulate</h2>
+      <p class="muted">Drive fake sensors on this gateway.</p>
+
+      <div class="row">
+        <label for="sim-device">Device</label>
+        <select id="sim-device"></select>
+        <button type="button" class="secondary" id="btn-refresh-sim">Refresh</button>
+      </div>
+
+      <div id="sim-empty" class="muted">No fake sensors on this gateway.</div>
+
+      <div id="sim-form" class="hidden">
+        <div class="row">
+          <label>Status</label>
+          <span id="sim-status-badge" class="badge warn">—</span>
+          <button type="button" class="primary" id="btn-sim-start">Start</button>
+          <button type="button" class="secondary" id="btn-sim-stop">Stop</button>
+        </div>
+        <div class="row">
+          <label for="sim-interval">
+            Send interval
+            <span class="field-help" tabindex="0" aria-label="What is Send interval?">?
+              <span class="field-help-tip">Milliseconds between published messages.</span>
+            </span>
+          </label>
+          <input id="sim-interval" type="number" min="100" step="100" value="1000" />
+        </div>
+        <div class="row">
+          <label for="sim-topic">
+            MQTT topic
+            <span class="field-help" tabindex="0" aria-label="What is MQTT topic?">?
+              <span class="field-help-tip">Publish topic for this fake sensor.</span>
+            </span>
+          </label>
+          <input id="sim-topic" autocomplete="off" placeholder="sensors/fake1/process" />
+        </div>
+        <div class="row fake-payload-row">
+          <label for="sim-payload">
+            Payload
+            <span class="field-help" tabindex="0" aria-label="What is Payload?">?
+              <span class="field-help-tip">JSON message template the test sensor publishes.</span>
+            </span>
+          </label>
+          <textarea id="sim-payload" rows="4" placeholder='{ "hello": 1 }'></textarea>
+        </div>
+
+        <fieldset class="sim-behaviors">
+          <legend>Behaviors</legend>
+          <div class="row">
+            <input type="checkbox" id="sim-omit-cert" />
+            <label for="sim-omit-cert" style="min-width:auto">Omit client certificate</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-wrong-cert" />
+            <label for="sim-wrong-cert" style="min-width:auto">Wrong client certificate</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-skip-enc" />
+            <label for="sim-skip-enc" style="min-width:auto">Skip payload encryption</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-bad-enc" />
+            <label for="sim-bad-enc" style="min-width:auto">Bad encryption</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-wrong-pass" />
+            <label for="sim-wrong-pass" style="min-width:auto">Wrong MQTT password</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-wrong-topic" />
+            <label for="sim-wrong-topic" style="min-width:auto">Wrong topic</label>
+          </div>
+        </fieldset>
+
+        <div class="sim-cert-line muted" id="sim-cert-line">Cert: —</div>
+
+        <div class="row view-actions">
+          <button type="button" class="primary" id="btn-sim-apply">Apply</button>
+        </div>
+        <div id="sim-msg"></div>
       </div>
     </section>
   </main>
