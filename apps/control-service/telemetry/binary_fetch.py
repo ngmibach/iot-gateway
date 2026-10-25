@@ -1,4 +1,4 @@
-"""Download and verify pinned Loki/Prometheus binaries and Grafana OSS trees.
+"""Download and verify pinned Loki/Prometheus binaries, Grafana OSS trees, and plugins.
 
 The desktop app performs the download — the user never opens a browser for it.
 """
@@ -346,6 +346,111 @@ def ensure_grafana_tree(
     if progress:
         progress("grafana ready", 1.0)
     return dest_dir
+
+
+def _find_plugin_root(extract_dir: Path, plugin_id: str) -> Path:
+    """Locate extracted plugin directory containing plugin.json."""
+    direct = extract_dir / plugin_id
+    if (direct / "plugin.json").is_file():
+        return direct
+    if (extract_dir / "plugin.json").is_file():
+        return extract_dir
+    matches = [
+        p.parent
+        for p in extract_dir.rglob("plugin.json")
+        if p.is_file() and p.parent.name == plugin_id
+    ]
+    if len(matches) == 1:
+        return matches[0]
+    if len(matches) > 1:
+        raise BinaryFetchError(
+            f"multiple {plugin_id!r} plugin roots in archive"
+        )
+    raise BinaryFetchError(
+        f"plugin.json for {plugin_id!r} not found in archive"
+    )
+
+
+def ensure_grafana_kafka_plugin(
+    plugins_dir: Path,
+    *,
+    versions: dict[str, Any] | None = None,
+    progress: ProgressCb | None = None,
+    force: bool = False,
+) -> Path:
+    """Download and install the pinned Grafana Kafka datasource plugin.
+
+    Extracts into ``plugins_dir / <plugin_id>/``. Writes a version marker only
+    after a successful replace. TODO(PR3): call from NativeTelemetryManager
+    ensure_binaries / write_configs.
+    """
+    plugins_dir = Path(plugins_dir)
+    versions = versions or load_versions()
+    if "grafana_kafka_plugin" not in versions:
+        raise BinaryFetchError("versions pin missing grafana_kafka_plugin section")
+    meta = versions["grafana_kafka_plugin"]
+    plugin_id = str(meta.get("plugin_id") or "").strip()
+    if not plugin_id:
+        raise BinaryFetchError("grafana_kafka_plugin missing plugin_id")
+    assets = meta.get("assets") or {}
+    asset = assets.get("any")
+    if not isinstance(asset, dict):
+        raise BinaryFetchError("grafana_kafka_plugin missing assets.any")
+    version = str(meta["version"])
+    dest = plugins_dir / plugin_id
+    marker = plugins_dir / f".{plugin_id}-{version}.ok"
+
+    if dest.is_dir() and marker.is_file() and not force:
+        if (dest / "plugin.json").is_file():
+            if progress:
+                progress("grafana kafka plugin already present", 1.0)
+            return dest
+
+    plugins_dir.mkdir(parents=True, exist_ok=True)
+    staging = plugins_dir / f"{plugin_id}.new"
+    old = plugins_dir / f"{plugin_id}.old"
+    _rmtree_if_exists(staging)
+    _rmtree_if_exists(old)
+
+    digest = ""
+    try:
+        with tempfile.TemporaryDirectory(prefix="iotgw-gf-kafka-") as tmp:
+            tmp_path = Path(tmp)
+            archive_name = str(asset["url"]).rsplit("/", 1)[-1]
+            archive_path = tmp_path / archive_name
+            if progress:
+                progress(f"Fetching grafana kafka plugin {version}", 0.05)
+            _download(str(asset["url"]), archive_path, progress=progress)
+            digest = _sha256_file(archive_path)
+            if digest.lower() != str(asset["sha256"]).lower():
+                raise BinaryFetchError(
+                    f"SHA256 mismatch for grafana_kafka_plugin: got {digest}, "
+                    f"expected {asset['sha256']}"
+                )
+            if progress:
+                progress("Extracting grafana kafka plugin", 0.9)
+            extract_dir = tmp_path / "extract"
+            _extract_archive(archive_path, extract_dir, kind=str(asset["archive"]))
+            root = _find_plugin_root(extract_dir, plugin_id)
+            if not (root / "plugin.json").is_file():
+                raise BinaryFetchError(
+                    "grafana kafka plugin archive layout invalid: need plugin.json"
+                )
+            shutil.move(str(root), staging)
+        _atomic_replace_dir(staging, dest, old)
+        marker.write_text(f"{version}\n{digest}\n", encoding="utf-8")
+    except Exception:
+        _rmtree_if_exists(staging)
+        if marker.is_file() and not (dest / "plugin.json").is_file():
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+        raise
+
+    if progress:
+        progress("grafana kafka plugin ready", 1.0)
+    return dest
 
 
 def ensure_telemetry_binaries(

@@ -327,6 +327,33 @@ class ProvisionFlowTests(unittest.TestCase):
         )
         self.assertFalse(any("secret" in c for c in ssh.commands))
 
+    def test_kafka_server_properties_lan_advertise(self) -> None:
+        from provisioner.kafka_install import _server_properties
+
+        props = _server_properties(
+            data_dir="/var/lib/iot-gateway-agent",
+            advertise_host="192.168.1.50",
+        )
+        self.assertIn(
+            "listeners=PLAINTEXT://0.0.0.0:9092,CONTROLLER://127.0.0.1:9093",
+            props,
+        )
+        self.assertIn(
+            "advertised.listeners=PLAINTEXT://192.168.1.50:9092",
+            props,
+        )
+        self.assertNotIn("PLAINTEXT://127.0.0.1:9092,CONTROLLER", props)
+
+    def test_kafka_server_properties_fallback_loopback(self) -> None:
+        from provisioner.kafka_install import _server_properties
+
+        props = _server_properties(
+            data_dir="/var/lib/iot-gateway-agent",
+            advertise_host="",
+        )
+        self.assertIn("advertised.listeners=PLAINTEXT://127.0.0.1:9092", props)
+        self.assertIn("listeners=PLAINTEXT://0.0.0.0:9092,", props)
+
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))

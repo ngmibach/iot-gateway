@@ -6,10 +6,13 @@ import hashlib
 import tarfile
 import tempfile
 import unittest
+import zipfile
 from pathlib import Path
 from unittest import mock
 
 from telemetry import binary_fetch as bf
+
+_KAFKA_PLUGIN_ID = "hamedkarbasi93-kafka-datasource"
 
 
 def _grafana_versions(digest: str, plat: str = "linux-amd64") -> dict:
@@ -26,6 +29,39 @@ def _grafana_versions(digest: str, plat: str = "linux-amd64") -> dict:
             },
         }
     }
+
+
+def _kafka_plugin_versions(digest: str) -> dict:
+    return {
+        "grafana_kafka_plugin": {
+            "version": "1.9.1",
+            "plugin_id": _KAFKA_PLUGIN_ID,
+            "assets": {
+                "any": {
+                    "url": "https://example.test/kafka-plugin.zip",
+                    "sha256": digest,
+                    "archive": "zip",
+                }
+            },
+        }
+    }
+
+
+def _make_kafka_plugin_zip(root: Path) -> tuple[Path, str]:
+    plugin = root / "pkg" / _KAFKA_PLUGIN_ID
+    plugin.mkdir(parents=True)
+    (plugin / "plugin.json").write_text(
+        '{"id":"%s","type":"datasource"}' % _KAFKA_PLUGIN_ID,
+        encoding="utf-8",
+    )
+    (plugin / "module.js").write_text("// stub\n", encoding="utf-8")
+    archive = root / "kafka-plugin.zip"
+    with zipfile.ZipFile(archive, "w") as zf:
+        for path in plugin.rglob("*"):
+            if path.is_file():
+                zf.write(path, arcname=str(path.relative_to(root / "pkg")))
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    return archive, digest
 
 
 def _make_grafana_archive(
@@ -148,6 +184,13 @@ class BinaryFetchTests(unittest.TestCase):
             self.assertEqual(assets[plat]["root_dir_glob"], "grafana-*")
             self.assertTrue(assets[plat]["url"].startswith("https://dl.grafana.com/"))
             self.assertEqual(len(assets[plat]["sha256"]), 64)
+        plugin = data["grafana_kafka_plugin"]
+        self.assertEqual(plugin["version"], "1.9.1")
+        self.assertEqual(plugin["plugin_id"], _KAFKA_PLUGIN_ID)
+        any_asset = plugin["assets"]["any"]
+        self.assertEqual(any_asset["archive"], "zip")
+        self.assertEqual(len(any_asset["sha256"]), 64)
+        self.assertTrue(any_asset["url"].startswith("https://storage.googleapis.com/"))
 
     def test_ensure_grafana_tree_extract_and_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -287,6 +330,54 @@ class BinaryFetchTests(unittest.TestCase):
                         dl.assert_not_called()
             self.assertIn("insufficient disk", str(ctx.exception).lower())
             self.assertFalse(dest.exists())
+
+    def test_ensure_grafana_kafka_plugin_extract_and_marker(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, digest = _make_kafka_plugin_zip(root)
+            versions = _kafka_plugin_versions(digest)
+            plugins = root / "plugins"
+
+            def _dl(url, dest_path, progress=None):
+                dest_path.write_bytes(archive.read_bytes())
+                if progress:
+                    progress("x", 1.0)
+
+            with mock.patch.object(bf, "_download", side_effect=_dl) as dl:
+                path = bf.ensure_grafana_kafka_plugin(plugins, versions=versions)
+                self.assertEqual(dl.call_count, 1)
+
+            dest = plugins / _KAFKA_PLUGIN_ID
+            self.assertEqual(path, dest)
+            self.assertTrue((dest / "plugin.json").is_file())
+            marker = plugins / f".{_KAFKA_PLUGIN_ID}-1.9.1.ok"
+            self.assertTrue(marker.is_file())
+            self.assertIn("1.9.1", marker.read_text(encoding="utf-8"))
+
+            with mock.patch.object(bf, "_download") as dl2:
+                path2 = bf.ensure_grafana_kafka_plugin(plugins, versions=versions)
+                dl2.assert_not_called()
+            self.assertEqual(path2, dest)
+
+    def test_ensure_grafana_kafka_plugin_sha_mismatch_cleans(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, _digest = _make_kafka_plugin_zip(root)
+            versions = _kafka_plugin_versions("0" * 64)
+            plugins = root / "plugins"
+
+            def _dl(url, dest_path, progress=None):
+                dest_path.write_bytes(archive.read_bytes())
+
+            with mock.patch.object(bf, "_download", side_effect=_dl):
+                with self.assertRaises(bf.BinaryFetchError) as ctx:
+                    bf.ensure_grafana_kafka_plugin(plugins, versions=versions)
+            self.assertIn("SHA256", str(ctx.exception))
+            self.assertFalse((plugins / _KAFKA_PLUGIN_ID).exists())
+            self.assertFalse((plugins / f"{_KAFKA_PLUGIN_ID}.new").exists())
+            self.assertFalse(
+                (plugins / f".{_KAFKA_PLUGIN_ID}-1.9.1.ok").exists()
+            )
 
 
 if __name__ == "__main__":

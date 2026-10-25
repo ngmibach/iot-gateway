@@ -6,13 +6,31 @@ control-service registry. Settings.json alone is not enough.
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
 from .paths import ensure_data_dir
 
+logger = logging.getLogger(__name__)
 
 DEFAULT_AGENT_ROOT = "/opt/iot-gateway-agent"
 DEFAULT_AGENT_PORT = 9139
+
+
+def _best_effort_sync_grafana_datasources() -> None:
+    """Refresh Grafana Kafka datasources after registry changes; never raise."""
+    try:
+        from telemetry.grafana_config import (  # type: ignore[import-not-found]
+            sync_grafana_datasources,
+        )
+
+        data = ensure_data_dir()
+        sync_grafana_datasources(
+            config_dir=data / "telemetry" / "config",
+            registry_path=data / "registry.sqlite",
+        )
+    except Exception:  # noqa: BLE001 — Grafana may be down; upsert must succeed
+        logger.debug("grafana datasource sync after gateway upsert failed", exc_info=True)
 
 
 def upsert_local_gateway(
@@ -42,7 +60,7 @@ def upsert_local_gateway(
     reg_path = ensure_data_dir() / "registry.sqlite"
     reg = Registry(str(reg_path))
     try:
-        return reg.upsert_gateway(
+        row = reg.upsert_gateway(
             gid,
             host=host_s,
             ssh_user=user_s,
@@ -55,6 +73,8 @@ def upsert_local_gateway(
         )
     finally:
         reg.close()
+    _best_effort_sync_grafana_datasources()
+    return row
 
 
 def fingerprint_from_settings(settings: dict[str, Any], host: str, port: int = 22) -> str:

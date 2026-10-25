@@ -773,7 +773,10 @@ def provision_monolithic_agent(
 
         notes.append(
             ensure_kafka_kraft(
-                ssh, sudo_password=sudo_password, data_dir=data_dir
+                ssh,
+                sudo_password=sudo_password,
+                data_dir=data_dir,
+                advertise_host=gateway_ip,
             )
         )
     except Exception as exc:  # noqa: BLE001 — Kafka is best-effort on first install
