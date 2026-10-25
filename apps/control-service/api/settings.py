@@ -30,6 +30,11 @@ class Settings:
     allow_unknown_host: bool = False
     loki_url: str = "http://127.0.0.1:3100"
     prometheus_url: str = "http://127.0.0.1:9090"
+    # Fake-sensor mTLS auto-renew (control-service background watcher).
+    client_cert_days: int = 730
+    fake_cert_renew_window_s: int | None = None  # None → min(30d, 10% of client days)
+    fake_cert_renew_interval_s: int = 600
+    fake_cert_renewer_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -51,6 +56,18 @@ class Settings:
         )
         loki = (os.environ.get("LOKI_URL") or "http://127.0.0.1:3100").strip()
         prom = (os.environ.get("PROMETHEUS_URL") or "http://127.0.0.1:9090").strip()
+        client_days = int(os.environ.get("IOTGW_CLIENT_CERT_DAYS", "730") or "730")
+        window_raw = os.environ.get("IOTGW_FAKE_CERT_RENEW_WINDOW_S", "").strip()
+        window_s = int(window_raw) if window_raw else None
+        interval_s = int(
+            os.environ.get("IOTGW_FAKE_CERT_RENEW_INTERVAL_S", "600") or "600"
+        )
+        renewer_on = os.environ.get("IOTGW_FAKE_CERT_RENEWER", "1").strip().lower() not in (
+            "0",
+            "false",
+            "no",
+            "off",
+        )
         return cls(
             host=os.environ.get("IOTGW_CONTROL_HOST", "127.0.0.1").strip() or "127.0.0.1",
             port=int(os.environ.get("IOTGW_CONTROL_PORT", "9137") or "9137"),
@@ -63,4 +80,8 @@ class Settings:
             allow_unknown_host=allow,
             loki_url=loki or "http://127.0.0.1:3100",
             prometheus_url=prom or "http://127.0.0.1:9090",
+            client_cert_days=max(1, client_days),
+            fake_cert_renew_window_s=window_s,
+            fake_cert_renew_interval_s=max(30, interval_s),
+            fake_cert_renewer_enabled=renewer_on,
         )
