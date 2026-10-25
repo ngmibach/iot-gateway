@@ -28,12 +28,20 @@ class FakeSSH:
             k: v.encode("utf-8") for k, v in (files or {}).items()
         }
         self.commands: list[str] = []
+        self.stdins: list[str | None] = []
         self._run_handler = run_handler
         self.unlinked: list[str] = []
         self.backup_keep = backup_keep
 
-    def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
+    def run(
+        self,
+        command: str,
+        *,
+        timeout: float | None = None,
+        stdin: str | None = None,
+    ) -> CommandResult:
         self.commands.append(command)
+        self.stdins.append(stdin)
         if self._run_handler is not None:
             handled = self._run_handler(command)
             # Handlers often return empty stdout; synthesize df so capacity probes work.
@@ -49,6 +57,7 @@ class FakeSSH:
             return CommandResult(
                 argv=command, exit_code=0, stdout=_FAKE_DF_LINE, stderr=""
             )
+        self._apply_rm(command)
         for m in _TRUNCATE_RE.finditer(command):
             path = m.group(1) or m.group(2)
             if path and path in self.files:
@@ -121,3 +130,22 @@ class FakeSSH:
     def unlink(self, path: str) -> None:
         self.unlinked.append(path)
         self.files.pop(path, None)
+
+    def _apply_rm(self, command: str) -> None:
+        """Best-effort simulate ``rm -rf`` / ``rm -f`` for playbook tests."""
+        # Match rm -rf 'path' or rm -f 'path' (possibly several paths).
+        for m in re.finditer(
+            r"\brm\s+(-[a-zA-Z]+\s+)*'([^']+)'",
+            command,
+        ):
+            flags = m.group(1) or ""
+            path = m.group(2)
+            recursive = "r" in flags
+            if recursive:
+                prefix = path.rstrip("/") + "/"
+                for full in list(self.files):
+                    if full == path or full.startswith(prefix):
+                        self.unlink(full)
+            else:
+                if path in self.files:
+                    self.unlink(path)
