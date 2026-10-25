@@ -25,17 +25,45 @@
 - Agent provides decrypt (mTLS client on :8883) → `sensor_data.log` → Kafka
   produce, Loki shipper, `/metrics` (incl. per-device + denied/IDS),
   `/v1/health`, `/v1/crypto/day/current`, mDNS.
-- **Envelope v1** application crypto (see `docs/plan-encryption-redesign.md`):
-  registration provisions per-device `crypto/devices/<id>.json` + schema;
-  sensors publish stamped halves on `sensors/<id>/env/key` and `…/env/data`;
-  decrypt worker pairs by `msg_id`, validates day_id + schema, AES-GCM opens.
-  Legacy Fernet `{"key","encrypted"}` still accepted until
-  `IOTGW_ENVELOPE_REQUIRE=1`. Daily DMEC under `certs/day/`.
 - Optional **fake sensors** for Control Plane testing: private bridge
   `iotgw-fake` (`10.255.0.0/24`), per-device netns `iotgw-fake-<id>`, systemd
   `iotgw-fake@<id>`, runtime under `/var/lib/iot-gateway-agent/fake/`.
   Gateway uninstall tears down all fake units, netns, and the bridge.
 - Provision and day-2 actions use SSH from the desktop app (no container engine).
+
+## Application encryption (envelope v1)
+
+Full reference: [`docs/encryption.md`](encryption.md).  
+Design / migration plan: [`docs/plan-encryption-redesign.md`](plan-encryption-redesign.md).
+
+```text
+Sensor                          Gateway (agent)
+──────                          ───────────────
+mTLS client cert + MQTT user
+seal(JSON) → key + data parts
+  PUB sensors/<id>/env/key  ──►  decrypt worker (mTLS)
+  PUB sensors/<id>/env/data ──►    pair msg_id
+                                   verify HMAC stamps
+                                   unwrap CEK (PSK or DMEC)
+                                   AES-128-GCM open
+                                   schema validate
+                                → sensor_data.log → Kafka → Loki
+```
+
+| Piece | Detail |
+|-------|--------|
+| Profiles | `v1-psk` (registration wrap secret) · `v1-ecdhe` (ephemeral ECDH + daily DMEC) |
+| Content | AES-128-GCM; per-message CEK; binding HMAC with registration `mac_key` |
+| Topics | `sensors/<id>/env/key` and `sensors/<id>/env/data` (separate stamped halves) |
+| Device secrets | `/var/lib/iot-gateway-agent/crypto/devices/<id>.json` |
+| Schemas | `/var/lib/iot-gateway-agent/schemas/<schema_id>.json` |
+| DMEC | `/var/lib/iot-gateway-agent/certs/day/{YYYYMMDD}.{crt,key}`; pull via `GET :9139/v1/crypto/day/current` |
+| Metrics | `iotgw_envelope_messages_total{result="ok\|fail"}` |
+| Flags | `IOTGW_ENVELOPE_V1` (on), `IOTGW_ENVELOPE_REQUIRE` (off until Fernet cutover), pair timeout, replay cache |
+| Legacy | Fernet `{"key","encrypted"}` on a single topic still accepted while require=0 |
+
+Transport security (MQTTS mTLS) and application envelope are independent layers.
+The gateway always opens payloads so it can validate, log, and produce Kafka.
 
 ## Sensor capacity (Kafka)
 

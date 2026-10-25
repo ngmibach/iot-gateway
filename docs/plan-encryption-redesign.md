@@ -1,6 +1,10 @@
 # Plan: Sensor payload encryption redesign
 
-Status: **implemented on branch `windows`** (Stages 1–7 foundation).  
+Status: **implemented** (Stages 1–7 foundation; live MQTTS roundtrip verified).  
+**Canonical operator / architecture reference:** [`encryption.md`](encryption.md)
+(also summarized in [`architecture.md`](architecture.md)).  
+This file keeps the design rationale, staged rollout, and fake-lab checklist.
+
 Audience: gateway agent, Control Plane registration, fake-sensor Simulate lab.  
 Related code: `envelope_v1.py`, `schema_validate.py`, `day_crypto.py`, `device_crypto.py`,
 `decrypt_worker.py`, `fake_sensor/simulator.py`, `actions/device_crypto.py`.

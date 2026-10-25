@@ -78,7 +78,8 @@ activities. Gateways → Install creates the gateway CA and server certificate
    registration provisions device crypto + schema; daily DMEC via
    `GET :9139/v1/crypto/day/current`). Legacy Fernet `{"key","encrypted"}`
    remains accepted until `IOTGW_ENVELOPE_REQUIRE=1`. See
-   `docs/plan-encryption-redesign.md`.
+   [`docs/encryption.md`](docs/encryption.md) (reference) and
+   [`docs/architecture.md`](docs/architecture.md).
 2. **Mosquitto → Kafka** — each registered sensor owns one Kafka topic
    (`sensor.<device_id>`) with a hard `retention.bytes` cap so retained
    segments cannot grow without bound.
@@ -195,7 +196,9 @@ Deferred Kafka broker metrics and richer per-device counters:
 | `apps/desktop/` | Packaged UI, wizard shell, Windows/Linux packaging |
 | `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions (incl. Kafka capacity) |
 | `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
-| `docs/architecture.md` | Short architecture notes |
+| `docs/architecture.md` | Architecture notes (gateway, Kafka, envelope crypto) |
+| `docs/encryption.md` | Envelope v1 application encryption reference |
+| `docs/plan-encryption-redesign.md` | Encryption redesign plan / migration stages |
 | `docs/samples/fake-sensor-payload.json` | Sample manufacturing JSON for Simulate → Payload |
 | `docs/plan-activities-kafka-followups.md` | Deferred Activities / Kafka metrics work |
 | `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |
