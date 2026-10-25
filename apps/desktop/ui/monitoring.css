@@ -155,5 +155,11 @@ th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: 
   color: #9ec5ff;
   font-weight: 600;
 }
+.sensor-tabs button .badge,
+#gw-sensor-title .badge,
+#gw-connected .badge {
+  margin-left: 0.35rem;
+  vertical-align: middle;
+}
 .chart-grid-1 { grid-template-columns: 1fr; }
 .hidden { display: none !important; }

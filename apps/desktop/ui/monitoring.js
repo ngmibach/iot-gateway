@@ -360,6 +360,12 @@
     }
   }
 
+  function typeBadgeHtml(isFake) {
+    return isFake
+      ? '<span class="badge fake">Fake</span>'
+      : '<span class="badge real">Real</span>';
+  }
+
   function renderSensorDetail(sensor) {
     const detail = $("gw-sensor-detail");
     const empty = $("gw-sensors-empty");
@@ -379,7 +385,11 @@
     if (empty) empty.classList.add("hidden");
 
     const title = $("gw-sensor-title");
-    if (title) title.textContent = sensor.device_id || "Sensor";
+    if (title) {
+      title.innerHTML = `${escapeHtml(sensor.device_id || "Sensor")} ${typeBadgeHtml(
+        !!sensor.is_fake
+      )}`;
+    }
 
     const sm = sensor.metrics || {};
     metricCards($("gw-sensor-metrics"), [
@@ -438,7 +448,7 @@
     sensors.forEach((s) => {
       const b = document.createElement("button");
       b.type = "button";
-      b.textContent = s.device_id;
+      b.innerHTML = `${escapeHtml(s.device_id)} ${typeBadgeHtml(!!s.is_fake)}`;
       b.dataset.deviceId = s.device_id;
       b.classList.toggle("active", s.device_id === selectedSensorId);
       b.addEventListener("click", () => {
@@ -479,9 +489,10 @@
     activitiesSensors = data.connected_sensors || [];
     fillTable(
       $("gw-connected"),
-      ["Device", "IP", "Kafka topic", "Retention", "Monitor"],
+      ["Device", "Type", "IP", "Kafka topic", "Retention", "Monitor"],
       activitiesSensors.map((r) => [
         escapeHtml(r.device_id),
+        typeBadgeHtml(!!r.is_fake),
         escapeHtml(r.ip || r.source_ip || ""),
         escapeHtml(r.kafka_topic || ""),
         escapeHtml(fmtRetention(r.kafka_retention_bytes)),
