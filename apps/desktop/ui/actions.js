@@ -16,6 +16,18 @@
     bad_encryption: "sim-bad-enc",
     wrong_password: "sim-wrong-pass",
     wrong_topic: "sim-wrong-topic",
+    key_only: "sim-key-only",
+    data_only: "sim-data-only",
+    stamp_mismatch_key: "sim-stamp-key",
+    stamp_mismatch_data: "sim-stamp-data",
+    swapped_msg_id: "sim-swap-msgid",
+    wrong_day_id: "sim-wrong-day",
+    missing_day_material: "sim-missing-day",
+    schema_missing_field: "sim-schema-missing",
+    schema_wrong_type: "sim-schema-type",
+    schema_extra_field: "sim-schema-extra",
+    wrong_schema_id: "sim-wrong-schema",
+    legacy_fernet_wrapper: "sim-legacy-fernet",
   };
 
   function escapeHtml(s) {
@@ -305,12 +317,26 @@
     if ($("reg-msg")) $("reg-msg").innerHTML = "";
   }
 
+  function clearScanMsg() {
+    const el = $("scan-msg");
+    if (!el) return;
+    el.textContent = "";
+    el.classList.add("hidden");
+  }
+
+  function setScanMsg(text, { html } = {}) {
+    const el = $("scan-msg");
+    if (!el) return;
+    if (html) el.innerHTML = text;
+    else el.textContent = text || "";
+    el.classList.toggle("hidden", !(text && String(text).trim()));
+  }
+
   function showFakeForm() {
     hideRegForm();
     $("reg-results").classList.add("hidden");
     $("scan-badge").innerHTML = "";
-    $("scan-msg").textContent =
-      "Neighbor lists only show devices the gateway has recently talked to.";
+    clearScanMsg();
     $("fake-form").classList.remove("hidden");
     $("fake-download").classList.add("hidden");
     if ($("fake-msg")) $("fake-msg").innerHTML = "";
@@ -357,7 +383,7 @@
   async function findSensors() {
     const gid = requireGateway();
     hideFakeForm();
-    $("scan-msg").textContent = "Looking for sensors on the gateway…";
+    setScanMsg("Looking for sensors on the gateway…");
     $("scan-badge").innerHTML = '<span class="badge warn">Scanning…</span>';
     $("btn-find-sensor").disabled = true;
     hideRegForm();
@@ -373,12 +399,17 @@
       $("scan-badge").innerHTML = hosts.length
         ? `<span class="badge ok">${hosts.length} found</span>`
         : '<span class="badge warn">0 found</span>';
-      $("scan-msg").textContent = hosts.length
-        ? "Select a device to continue."
-        : "No neighbors found. Enter an IP manually if you know it.";
+      setScanMsg(
+        hosts.length
+          ? "Select a device to continue."
+          : "No neighbors found. Enter an IP manually if you know it."
+      );
     } catch (e) {
       $("scan-badge").innerHTML = '<span class="badge bad">Failed</span>';
-      $("scan-msg").innerHTML = `<div class="err">${escapeHtml(e.message || e)}</div>`;
+      setScanMsg(
+        `<div class="err">${escapeHtml(e.message || e)}</div>`,
+        { html: true }
+      );
       throw e;
     } finally {
       $("btn-find-sensor").disabled = false;
@@ -990,8 +1021,7 @@
       $("reg-results").classList.add("hidden");
       $("host-list").innerHTML = "";
       $("scan-badge").innerHTML = "";
-      $("scan-msg").textContent =
-        "Neighbor lists only show devices the gateway has recently talked to.";
+      clearScanMsg();
       const active = document.querySelector("#action-tabs button.active");
       const tab = active && active.dataset.action;
       if (tab === "view") {
