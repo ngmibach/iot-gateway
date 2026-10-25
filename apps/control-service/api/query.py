@@ -497,7 +497,11 @@ def summary_gateway(
                     if did and topic:
                         catalog_topics[did] = rec
         except Exception as exc:  # noqa: BLE001 — Activities must not fail on SSH
-            warnings.append(f"kafka_catalog_sync: {exc}")
+            from .deps import sanitize_user_error
+
+            # Never surface SSH key material (base64 bodies) in Activities UI.
+            safe = sanitize_user_error(str(exc), fallback="SSH unavailable")
+            warnings.append(f"kafka_catalog_sync: {safe}")
 
     # Registry devices are authoritative for the Activities sensor list.
     connected: list[dict[str, Any]] = []

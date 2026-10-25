@@ -121,9 +121,10 @@ class SSHClient:
                     and remote_key.get_base64() != self.target.host_key_base64
                 ):
                     client.close()
+                    # Never include key material in the message (UI/logs).
                     raise RuntimeError(
                         f"SSH host key mismatch for {self.target.host}: "
-                        f"got {remote_key.get_base64()}"
+                        "remote host key does not match the pinned key"
                     )
                 self._client = client
                 self._sftp = client.open_sftp()
