@@ -32,5 +32,23 @@
         "binary": "loki-windows-amd64.exe"
       }
     }
+  },
+  "grafana": {
+    "version": "13.2.4",
+    "extract": "tree",
+    "assets": {
+      "linux-amd64": {
+        "url": "https://dl.grafana.com/grafana/release/13.2.4/grafana_13.2.4_38252365904_linux_amd64.tar.gz",
+        "sha256": "c48765988fd88572607e4ea670251af8a8e64ab3e360d0f3cf67a6f3587b92ab",
+        "archive": "tar.gz",
+        "root_dir_glob": "grafana-*"
+      },
+      "windows-amd64": {
+        "url": "https://dl.grafana.com/grafana/release/13.2.4/grafana_13.2.4_38252365904_windows_amd64.tar.gz",
+        "sha256": "3e005ff50fe3bb6b8cb428ef127636fac4ee676bf9b6d819c6a2297d21f4bcbd",
+        "archive": "tar.gz",
+        "root_dir_glob": "grafana-*"
+      }
+    }
   }
 }
