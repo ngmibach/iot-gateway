@@ -1,0 +1,20 @@
+[Unit]
+Description=IoT Gateway fake sensor %i
+Documentation=file:///opt/iot-gateway-agent
+After=network-online.target mosquitto.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+NetworkNamespacePath=/run/netns/iotgw-fake-%i
+Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
+EnvironmentFile=-/etc/iot-gateway-agent.env
+ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id %i
+Restart=on-failure
+RestartSec=3
+WorkingDirectory=/var/lib/iot-gateway-agent/fake/%i
+StandardOutput=append:/var/lib/iot-gateway-agent/fake/%i/run.log
+StandardError=append:/var/lib/iot-gateway-agent/fake/%i/run.log
+
+[Install]
+WantedBy=multi-user.target

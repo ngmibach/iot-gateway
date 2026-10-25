@@ -75,5 +75,30 @@ class GatewayPaths:
         """Logical per-sensor Kafka topic catalog (retention.bytes caps)."""
         return f"{self.data_dir}/kafka/topics.json"
 
+    @property
+    def fake_dir(self) -> str:
+        """Gateway-side fake sensor runtime root (netns + certs + config)."""
+        return f"{self.data_dir}/fake"
+
+    @property
+    def fake_ip_map(self) -> str:
+        """Allocator state: device_id → bridge IP / veth names."""
+        return f"{self.data_dir}/fake/ip-map.json"
+
+    def fake_device_dir(self, device_id: str) -> str:
+        return f"{self.fake_dir}/{device_id}"
+
+    def fake_certs_dir(self, device_id: str) -> str:
+        return f"{self.fake_device_dir(device_id)}/certs"
+
+    def fake_config_path(self, device_id: str) -> str:
+        return f"{self.fake_device_dir(device_id)}/config.json"
+
+    def fake_payload_path(self, device_id: str) -> str:
+        return f"{self.fake_device_dir(device_id)}/payload.json"
+
+    def fake_run_log(self, device_id: str) -> str:
+        return f"{self.fake_device_dir(device_id)}/run.log"
+
     def log_paths(self) -> tuple[str, ...]:
         return (self.mosquitto_log, self.sensor_data_log)

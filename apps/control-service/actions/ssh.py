@@ -172,9 +172,19 @@ class SSHClient:
             raise RuntimeError("SSH client not connected")
         return self._client
 
-    def run(self, command: str, *, timeout: float | None = None) -> CommandResult:
+    def run(
+        self,
+        command: str,
+        *,
+        timeout: float | None = None,
+        stdin: Optional[str] = None,
+    ) -> CommandResult:
         to = self.command_timeout if timeout is None else timeout
-        _stdin, stdout, stderr = self.client.exec_command(command, timeout=to)
+        chan_in, stdout, stderr = self.client.exec_command(command, timeout=to)
+        # Secrets (e.g. sudo password) must go on stdin — never on remote argv.
+        if stdin is not None:
+            chan_in.write(stdin if stdin.endswith("\n") else stdin + "\n")
+            chan_in.channel.shutdown_write()
         exit_code = stdout.channel.recv_exit_status()
         return CommandResult(
             argv=command,

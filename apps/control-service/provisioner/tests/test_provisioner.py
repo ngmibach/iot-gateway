@@ -182,6 +182,8 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertFalse(any("test-sudo-secret" in c for c in ssh.commands))
         self.assertTrue(any("iot-gateway-agent" in c for c in ssh.commands))
         self.assertTrue(any("/opt/iot-gateway-agent" in c for c in ssh.commands))
+        self.assertTrue(any("iotgw-fake@" in c for c in ssh.commands))
+        self.assertTrue(any("iotgw-fake@.service" in c for c in ssh.commands))
 
     def test_sudo_run_wraps_compound_command_in_sh_c(self) -> None:
         from provisioner.agent_install import sudo_run

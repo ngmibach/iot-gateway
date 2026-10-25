@@ -606,6 +606,9 @@ def _upload_agent_tree(
     unit = agent_src / "iot-gateway-agent.service"
     if unit.is_file():
         ssh.upload_file(unit, f"{remote_root}/iot-gateway-agent.service")
+    fake_unit = agent_src / "iotgw-fake@.service"
+    if fake_unit.is_file():
+        ssh.upload_file(fake_unit, f"{remote_root}/iotgw-fake@.service")
 
 
 def _ensure_venv(ssh: SSHSession, remote_root: str) -> None:
@@ -685,13 +688,21 @@ def _install_systemd(
     ssh: SSHSession, remote_root: str, *, sudo_password: str
 ) -> None:
     unit_src = f"{remote_root}/iot-gateway-agent.service"
-    result = sudo_run(
-        ssh,
+    fake_unit_src = f"{remote_root}/iotgw-fake@.service"
+    # Install agent unit + optional fake-sensor template (netns simulators).
+    install_cmd = (
         f"cp {shlex.quote(unit_src)} /etc/systemd/system/iot-gateway-agent.service && "
+        f"if [ -f {shlex.quote(fake_unit_src)} ]; then "
+        f"cp {shlex.quote(fake_unit_src)} /etc/systemd/system/iotgw-fake@.service; "
+        f"fi && "
         "systemctl daemon-reload && "
         "systemctl enable iot-gateway-agent && "
         # enable --now does not restart an already-active unit with a new ExecStart.
-        "systemctl restart iot-gateway-agent",
+        "systemctl restart iot-gateway-agent"
+    )
+    result = sudo_run(
+        ssh,
+        install_cmd,
         sudo_password=sudo_password,
         timeout=60.0,
     )
@@ -812,8 +823,13 @@ def uninstall_monolithic_agent(
         "systemctl disable iot-gateway-agent 2>/dev/null || true; "
         "systemctl stop iotgw-kafka 2>/dev/null || true; "
         "systemctl disable iotgw-kafka 2>/dev/null || true; "
+        # Tear down any fake-sensor template instances + bridge leftovers.
+        "systemctl stop 'iotgw-fake@*' 2>/dev/null || true; "
+        "systemctl disable 'iotgw-fake@*' 2>/dev/null || true; "
+        "ip link del iotgw-fake 2>/dev/null || true; "
         "rm -f /etc/systemd/system/iot-gateway-agent.service "
-        "/etc/systemd/system/iotgw-kafka.service; "
+        "/etc/systemd/system/iotgw-kafka.service "
+        "/etc/systemd/system/iotgw-fake@.service; "
         "systemctl daemon-reload 2>/dev/null || true",
         sudo_password=sudo_password,
         timeout=60.0,
