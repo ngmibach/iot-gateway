@@ -282,6 +282,25 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertIn("/etc/mosquitto/conf.d", sudo_cmds[0])
         self.assertFalse(any("secret" in c for c in ssh.commands))
 
+    def test_ensure_kafka_layout_seeds_catalog(self) -> None:
+        from provisioner.agent_install import (
+            DEFAULT_AGENT_DATA,
+            ensure_kafka_layout,
+        )
+
+        ssh = FakeSSH()
+        ssh.when("sudo -S", CommandResult(0, "", ""))
+        ssh.when("rm -f", CommandResult(0, "", ""))
+        note = ensure_kafka_layout(ssh, sudo_password="secret")
+        self.assertIn("kafka topic catalog ready", note)
+        self.assertTrue(
+            any(DEFAULT_AGENT_DATA + "/kafka" in c for c in ssh.commands)
+        )
+        self.assertTrue(
+            any("topics.json" in c for c in ssh.commands)
+        )
+        self.assertFalse(any("secret" in c for c in ssh.commands))
+
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))
