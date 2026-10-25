@@ -36,6 +36,9 @@ class RegisterDeviceRequest(BaseModel):
     topic_readwrite: Optional[Union[str, list[str]]] = None
     monitor_enabled: bool = True
     ca_passphrase: Optional[str] = None
+    schema_id: Optional[str] = Field(default="default", max_length=128)
+    crypto_profile: Optional[str] = Field(default="v1-psk", max_length=32)
+    message_schema: Optional[dict[str, Any]] = None
 
     @field_validator("user_id")
     @classmethod
@@ -75,6 +78,18 @@ class FakeBehaviors(BaseModel):
     bad_encryption: bool = False
     wrong_password: bool = False
     wrong_topic: bool = False
+    key_only: bool = False
+    data_only: bool = False
+    stamp_mismatch_key: bool = False
+    stamp_mismatch_data: bool = False
+    swapped_msg_id: bool = False
+    wrong_day_id: bool = False
+    missing_day_material: bool = False
+    schema_missing_field: bool = False
+    schema_wrong_type: bool = False
+    schema_extra_field: bool = False
+    wrong_schema_id: bool = False
+    legacy_fernet_wrapper: bool = False
 
 
 class FakeDeviceOut(BaseModel):
@@ -106,6 +121,9 @@ class CreateFakeDeviceRequest(BaseModel):
     topic: Optional[str] = None  # MQTT publish topic (defaults from ACL / user_id)
     ca_passphrase: Optional[str] = None
     sudo_password: Optional[str] = None
+    schema_id: Optional[str] = Field(default="default", max_length=128)
+    crypto_profile: Optional[str] = Field(default="v1-psk", max_length=32)
+    message_schema: Optional[dict[str, Any]] = None
 
     @field_validator("user_id")
     @classmethod

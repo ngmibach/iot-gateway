@@ -77,3 +77,17 @@ def corrupt_wrapper_payload(payload: Any) -> str:
         flip = "A" if enc[mid] != "A" else "B"
         wrapper["encrypted"] = enc[:mid] + flip + enc[mid + 1 :]
     return json.dumps(wrapper, ensure_ascii=False)
+
+
+def encrypt_envelope_parts(
+    payload: Any,
+    *,
+    secrets: Any,
+    day_id: str | None = None,
+    day_public_key: Any = None,
+) -> tuple[dict, dict]:
+    """Seal with envelope v1; return ``(key_part, data_part)``."""
+    from .envelope_v1 import seal
+
+    result = seal(payload, secrets, day_id=day_id, day_public_key=day_public_key)
+    return result.key_part, result.data_part

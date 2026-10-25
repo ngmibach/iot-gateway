@@ -44,8 +44,10 @@ def merge_device_meta(
     is_fake: Optional[bool] = None,
     fake: Optional[dict[str, Any]] = None,
     clear_fake: bool = False,
+    schema_id: Optional[str] = None,
+    crypto_profile: Optional[str] = None,
 ) -> dict[str, Any]:
-    """Merge kafka / fake fields into device meta.
+    """Merge kafka / fake / crypto fields into device meta.
 
     ``clear_fake=True`` drops ``is_fake`` / ``fake`` (real-sensor register path).
     Passing ``is_fake`` / ``fake`` updates those keys. Nested ``fake`` is shallow-merged.
@@ -55,6 +57,10 @@ def merge_device_meta(
         meta["kafka_topic"] = kafka_topic
     if kafka_retention_bytes is not None:
         meta["kafka_retention_bytes"] = kafka_retention_bytes
+    if schema_id is not None:
+        meta["schema_id"] = schema_id
+    if crypto_profile is not None:
+        meta["crypto_profile"] = crypto_profile
     if clear_fake:
         meta.pop("is_fake", None)
         meta.pop("fake", None)

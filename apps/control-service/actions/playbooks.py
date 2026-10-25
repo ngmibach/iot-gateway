@@ -9,9 +9,13 @@ from . import files as fileops
 from .csr import (
     ClientKeyMaterial,
     SignedClientCert,
-    assemble_cert_bundle,
     generate_client_key_and_csr,
     sign_csr_on_gateway,
+)
+from .device_crypto import (
+    DEFAULT_SCHEMA,
+    assemble_cert_bundle,
+    provision_device_crypto,
 )
 from .kafka_capacity import (
     DEFAULT_TOPIC_RETENTION_BYTES,
@@ -200,6 +204,9 @@ def _restore_backups(
 def _cert_fields(
     material: ClientKeyMaterial,
     signed: SignedClientCert | None,
+    *,
+    crypto_json: dict[str, Any] | None = None,
+    schema_json: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if signed is None:
         return {
@@ -222,6 +229,8 @@ def _cert_fields(
             ca_crt_pem=signed.ca_crt_pem,
             client_crt_pem=signed.client_crt_pem,
             client_key_pem=material.private_key_pem,
+            crypto_json=crypto_json,
+            schema_json=schema_json,
         ),
     }
 
@@ -242,6 +251,11 @@ def register_device(
     key_material: ClientKeyMaterial | None = None,
     topic_retention_bytes: int | None = None,
     total_storage_bytes: int | None = None,
+    crypto_profile: str = "v1-psk",
+    schema_id: str = "default",
+    schema: dict[str, Any] | None = None,
+    provision_crypto: bool = True,
+    also_fake_crypto_copy: bool = False,
 ) -> RegisterResult:
     """Register MQTT user + Kafka topic: ACL upsert + hashed passwd + CSR/sign.
 
@@ -349,7 +363,36 @@ def register_device(
             raise
 
         _chmod_mosquitto_secrets(ssh, paths)
-        cert_kw = _cert_fields(material, signed)
+
+        crypto_meta: dict[str, Any] = {}
+        crypto_json: dict[str, Any] | None = None
+        schema_json: dict[str, Any] | None = None
+        if provision_crypto:
+            try:
+                provisioned = provision_device_crypto(
+                    ssh,
+                    user_id,
+                    profile=crypto_profile,
+                    schema_id=schema_id or "default",
+                    schema=schema,
+                    install_root=install_root,
+                    data_dir=paths.data_dir,
+                    also_fake_copy=also_fake_crypto_copy,
+                )
+                crypto_json = provisioned.get("secrets")
+                schema_json = dict(schema) if isinstance(schema, dict) else dict(DEFAULT_SCHEMA)
+                schema_json["schema_id"] = provisioned.get("schema_id") or schema_id or "default"
+                crypto_meta = {
+                    "crypto_profile": provisioned.get("profile"),
+                    "schema_id": provisioned.get("schema_id"),
+                    "crypto_path": provisioned.get("crypto_path"),
+                }
+            except Exception as exc:  # noqa: BLE001
+                crypto_meta = {"crypto_error": str(exc)}
+
+        cert_kw = _cert_fields(
+            material, signed, crypto_json=crypto_json, schema_json=schema_json
+        )
         backups = {"acl": bak_acl, "passwords": bak_pw, "kafka": bak_kafka}
 
         # 5 Reload mosquitto — files stay; do not roll back on failure.
@@ -365,6 +408,7 @@ def register_device(
                     "ip": ip,
                     "backups": backups,
                     **kafka_meta,
+                    **crypto_meta,
                 },
                 **cert_kw,
             )
@@ -379,6 +423,7 @@ def register_device(
                 "mosquitto": mosq_mode,
                 "backups": backups,
                 **kafka_meta,
+                **crypto_meta,
             },
             **cert_kw,
         )

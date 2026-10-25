@@ -428,6 +428,8 @@ def post_create_fake_device(
                 bridge=str(alloc_raw.get("bridge") or "iotgw-fake"),
             )
 
+            from actions.device_crypto import FAKE_DEFAULT_SCHEMA
+
             result = register_device(
                 ssh,
                 user_id=user_id,
@@ -437,6 +439,12 @@ def post_create_fake_device(
                 topic_r=topic_r,
                 install_root=install_root,
                 ca_passphrase=ca_pass,
+                crypto_profile=body.crypto_profile or "v1-psk",
+                schema_id=body.schema_id or "default",
+                schema=body.message_schema
+                if body.message_schema is not None
+                else FAKE_DEFAULT_SCHEMA,
+                also_fake_crypto_copy=True,
             )
             if not result.ok:
                 teardown_fake(
@@ -469,6 +477,9 @@ def post_create_fake_device(
                     "topic": publish_topic,
                     "send_interval_ms": int(body.send_interval_ms),
                     "behaviors": dict(DEFAULT_BEHAVIORS),
+                    "crypto_mode": "envelope",
+                    "schema_id": body.schema_id or "default",
+                    "crypto_profile": body.crypto_profile or "v1-psk",
                 },
                 payload=body.payload,
                 ca_pem=_pem_text(result.ca_crt_pem),
@@ -536,6 +547,12 @@ def post_create_fake_device(
         kafka_retention_bytes=kafka_retention,
         is_fake=True,
         fake=fake_meta,
+        schema_id=(result.details or {}).get("schema_id")
+        or body.schema_id
+        or "default",
+        crypto_profile=(result.details or {}).get("crypto_profile")
+        or body.crypto_profile
+        or "v1-psk",
     )
     topics_rw = body.topics_rw() or [topic_rw]
     topics_r = body.topics_r() or None
@@ -1009,6 +1026,9 @@ def post_register_device(
                 topic_r=topic_r,
                 install_root=gw["install_root"],
                 ca_passphrase=ca_pass,
+                crypto_profile=body.crypto_profile or "v1-psk",
+                schema_id=body.schema_id or "default",
+                schema=body.message_schema,
             )
     except ValueError as exc:
         raise http_400(exc) from exc
@@ -1043,6 +1063,12 @@ def post_register_device(
         kafka_topic=kafka_topic,
         kafka_retention_bytes=kafka_retention,
         clear_fake=True,
+        schema_id=(result.details or {}).get("schema_id")
+        or body.schema_id
+        or "default",
+        crypto_profile=(result.details or {}).get("crypto_profile")
+        or body.crypto_profile
+        or "v1-psk",
     )
 
     topics_rw = body.topics_rw() or None
@@ -1067,6 +1093,8 @@ def post_register_device(
             "status": result.status,
             "cert_fingerprint": result.cert_fingerprint,
             "kafka_topic": kafka_topic,
+            "schema_id": meta.get("schema_id"),
+            "crypto_profile": meta.get("crypto_profile"),
         },
     )
 

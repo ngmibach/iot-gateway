@@ -73,7 +73,12 @@ activities. Gateways → Install creates the gateway CA and server certificate
 
 1. **Sensor → Mosquitto** — MQTTS :8883 with password + client cert
    (`sensors/…` topics). Decrypt worker uses the same listener with its own
-   client cert.
+   client cert. Preferred app payload is **envelope v1**: separate stamped
+   publishes on `sensors/<id>/env/key` and `sensors/<id>/env/data` (AES-GCM;
+   registration provisions device crypto + schema; daily DMEC via
+   `GET :9139/v1/crypto/day/current`). Legacy Fernet `{"key","encrypted"}`
+   remains accepted until `IOTGW_ENVELOPE_REQUIRE=1`. See
+   `docs/plan-encryption-redesign.md`.
 2. **Mosquitto → Kafka** — each registered sensor owns one Kafka topic
    (`sensor.<device_id>`) with a hard `retention.bytes` cap so retained
    segments cannot grow without bound.

@@ -35,6 +35,18 @@ DEFAULT_BEHAVIORS: dict[str, bool] = {
     "bad_encryption": False,
     "wrong_password": False,
     "wrong_topic": False,
+    "key_only": False,
+    "data_only": False,
+    "stamp_mismatch_key": False,
+    "stamp_mismatch_data": False,
+    "swapped_msg_id": False,
+    "wrong_day_id": False,
+    "missing_day_material": False,
+    "schema_missing_field": False,
+    "schema_wrong_type": False,
+    "schema_extra_field": False,
+    "wrong_schema_id": False,
+    "legacy_fernet_wrapper": False,
 }
 
 # Installed under /etc/systemd/system/iotgw-fake@.service
