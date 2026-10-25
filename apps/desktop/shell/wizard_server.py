@@ -370,8 +370,17 @@ def _handle_api(
             # Coupling: Monitoring always removes every registered gateway.
             if do_monitoring:
                 do_gateway = True
-            sudo_password = str(body.get("sudo_password") or "")
+            sudo_password = str(body.get("sudo_password") or "").strip()
             gateway_id = str(body.get("gateway_id") or "").strip() or None
+            if not sudo_password:
+                # Prefer the targeted gateway; else default / first registered.
+                settings = load_settings()
+                lookup_id = gateway_id or str(
+                    settings.get("default_gateway_id") or "gateway"
+                ).strip()
+                sudo_password = (
+                    keyring_store.get_secret(lookup_id, kind="sudo") or ""
+                ).strip()
             try:
                 out = uninstall_mod.run_uninstall(
                     gateway=do_gateway,
@@ -549,8 +558,50 @@ def _handle_api(
                 except (TypeError, ValueError):
                     _json_response(handler, 400, {"error": "invalid ssh_port"})
                     return
+            # Optional: persist gateway sudo (same value as SSH login password).
+            sudo_pw = str(body.get("sudo_password") or body.get("password") or "").strip()
+            if sudo_pw and gid:
+                keyring_store.set_secret(gid, sudo_pw, kind="sudo")
+                sudo_pw = ""
             save_settings(settings)
             _json_response(handler, 200, {"ok": True, "settings": settings})
+            return
+
+        if method == "GET" and path == "/api/wizard/secrets/sudo-status":
+            gid = (qs.get("gateway_id") or [""])[0].strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            present = bool(keyring_store.get_secret(gid, kind="sudo"))
+            _json_response(handler, 200, {"present": present, "gateway_id": gid})
+            return
+
+        if method == "PUT" and path == "/api/wizard/secrets/sudo":
+            body = _read_json(handler)
+            gid = str(body.get("gateway_id") or "").strip()
+            sudo_pw = str(body.get("sudo_password") or body.get("password") or "").strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            if not sudo_pw:
+                _json_response(handler, 400, {"error": "sudo_password required"})
+                return
+            keyring_store.set_secret(gid, sudo_pw, kind="sudo")
+            sudo_pw = ""
+            _json_response(
+                handler, 200, {"ok": True, "gateway_id": gid, "present": True}
+            )
+            return
+
+        if method == "DELETE" and path == "/api/wizard/secrets/sudo":
+            gid = (qs.get("gateway_id") or [""])[0].strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            keyring_store.delete_secret(gid, kind="sudo")
+            _json_response(
+                handler, 200, {"ok": True, "gateway_id": gid, "present": False}
+            )
             return
 
         if method == "GET" and path == "/api/wizard/secrets/ca-status":
@@ -611,7 +662,11 @@ def _handle_api(
                     ca_pass = ca_passphrase.validate_ca_passphrase(explicit)
                     source = "explicit"
                 elif generate:
-                    sudo_password = str(body.get("sudo_password") or "")
+                    sudo_password = str(body.get("sudo_password") or "").strip()
+                    if not sudo_password:
+                        sudo_password = (
+                            keyring_store.get_secret(gid, kind="sudo") or ""
+                        ).strip()
                     device_password = str(body.get("device_password") or "")
                     ca_pass = ca_passphrase.generate_ca_passphrase(
                         sudo_password=sudo_password,
@@ -900,7 +955,7 @@ def _handle_api(
             gateway_ip = str(
                 body.get("gateway_ip") or settings.get("gateway_ip") or host
             ).strip()
-            # Never persist sudo password to settings / disk / logs.
+            # Sudo is never written to settings.json / logs; keyring only after success.
             sudo_password = str(body.get("sudo_password") or "")
             generate_ca = bool(body.get("generate_ca_passphrase"))
             ca_pass = ""
@@ -975,12 +1030,16 @@ def _handle_api(
                     )
                 finally:
                     ssh.close()
-                    sudo_password = ""  # drop local reference ASAP
-                # Persist CA after successful provision (used later for sensor certs).
+                # Persist CA + sudo after successful provision (sensor certs / fake netns).
                 try:
                     keyring_store.set_secret(gateway_id, ca_pass, kind="ca")
+                    if sudo_password.strip():
+                        keyring_store.set_secret(
+                            gateway_id, sudo_password.strip(), kind="sudo"
+                        )
                 finally:
                     ca_pass = ""
+                    sudo_password = ""  # drop local reference ASAP
                 settings["gateway_ip"] = gateway_ip or host
                 settings["ssh_host"] = host
                 settings["ssh_user"] = username
@@ -1127,8 +1186,29 @@ def _should_inject_ca(method: str, path: str) -> bool:
     return False
 
 
-def _inject_ca_passphrase(body: bytes, gateway_id: str) -> tuple[bytes, str | None]:
-    """Merge keyring CA into JSON body when ``ca_passphrase`` is absent.
+def _should_inject_sudo(method: str, path: str) -> bool:
+    """Fake-sensor privileged playbooks that accept ``sudo_password``."""
+    if method == "POST" and path.endswith("/devices/fake"):
+        return True
+    if method == "POST" and path.endswith("/fake/feed-cert"):
+        return True
+    if method == "POST" and path.endswith("/fake/start"):
+        return True
+    if method == "POST" and path.endswith("/fake/stop"):
+        return True
+    if method == "PATCH" and path.endswith("/fake"):
+        return True
+    return False
+
+
+def _inject_json_secret(
+    body: bytes,
+    gateway_id: str,
+    *,
+    field: str,
+    kind: str,
+) -> tuple[bytes, str | None]:
+    """Merge a keyring secret into JSON when ``field`` is absent.
 
     Returns (body_bytes, content_type_override). Never logs the secret.
     """
@@ -1140,15 +1220,29 @@ def _inject_ca_passphrase(body: bytes, gateway_id: str) -> tuple[bytes, str | No
         return body, None
     if not isinstance(data, dict):
         return body, None
-    existing = data.get("ca_passphrase")
+    existing = data.get(field)
     if isinstance(existing, str) and existing.strip():
         return body, None
-    secret = keyring_store.get_secret(gateway_id, kind="ca")
+    secret = keyring_store.get_secret(gateway_id, kind=kind)
     if not secret:
         return body, None
-    data["ca_passphrase"] = secret
+    data[field] = secret
     out = json.dumps(data).encode("utf-8")
     return out, "application/json"
+
+
+def _inject_ca_passphrase(body: bytes, gateway_id: str) -> tuple[bytes, str | None]:
+    """Merge keyring CA into JSON body when ``ca_passphrase`` is absent."""
+    return _inject_json_secret(
+        body, gateway_id, field="ca_passphrase", kind="ca"
+    )
+
+
+def _inject_sudo_password(body: bytes, gateway_id: str) -> tuple[bytes, str | None]:
+    """Merge keyring sudo into JSON body when ``sudo_password`` is absent."""
+    return _inject_json_secret(
+        body, gateway_id, field="sudo_password", kind="sudo"
+    )
 
 
 def _proxy_control(
@@ -1174,12 +1268,17 @@ def _proxy_control(
         length = int(handler.headers.get("Content-Length") or "0")
         if length > 0:
             body = handler.rfile.read(length)
-    if _should_inject_ca(method, path):
-        gid = _gateway_id_from_v1_path(path)
-        if gid:
-            body, ct_override = _inject_ca_passphrase(body, gid)
-            if ct_override:
-                headers["Content-Type"] = ct_override
+    gid = _gateway_id_from_v1_path(path) if (
+        _should_inject_ca(method, path) or _should_inject_sudo(method, path)
+    ) else None
+    if gid and _should_inject_ca(method, path):
+        body, ct_override = _inject_ca_passphrase(body, gid)
+        if ct_override:
+            headers["Content-Type"] = ct_override
+    if gid and _should_inject_sudo(method, path):
+        body, ct_override = _inject_sudo_password(body, gid)
+        if ct_override:
+            headers["Content-Type"] = ct_override
     req = urllib.request.Request(target, data=body or None, headers=headers, method=method)
     # Device register/update/delete SSH playbooks can exceed 30s.
     timeout = 120 if method in ("POST", "PUT", "PATCH", "DELETE") else 30

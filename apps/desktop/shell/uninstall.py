@@ -86,7 +86,7 @@ def uninstall_targets() -> dict[str, Any]:
 def clear_local_secrets(gateway_ids: list[str]) -> None:
     """Drop known keyring / fallback secrets for gateways + admin + signing."""
     for gid in gateway_ids:
-        for kind in ("ssh", "admin", "signing"):
+        for kind in ("ssh", "sudo", "ca", "admin", "signing"):
             try:
                 keyring_store.delete_secret(gid, kind=kind)
             except Exception:  # noqa: BLE001

@@ -1,4 +1,4 @@
-"""Unit tests for wizard CA passphrase inject helpers."""
+"""Unit tests for wizard CA / sudo inject helpers."""
 
 from __future__ import annotations
 
@@ -12,7 +12,9 @@ from shell import keyring_store
 from shell.wizard_server import (
     _gateway_id_from_v1_path,
     _inject_ca_passphrase,
+    _inject_sudo_password,
     _should_inject_ca,
+    _should_inject_sudo,
 )
 
 
@@ -58,6 +60,27 @@ class CaInjectHelpersTests(unittest.TestCase):
                 "POST", "/api/v1/gateways/gw1/devices/fake1/fake/start"
             )
         )
+        self.assertTrue(
+            _should_inject_sudo("POST", "/api/v1/gateways/gw1/devices/fake")
+        )
+        self.assertTrue(
+            _should_inject_sudo(
+                "POST", "/api/v1/gateways/gw1/devices/fake1/fake/start"
+            )
+        )
+        self.assertTrue(
+            _should_inject_sudo(
+                "POST", "/api/v1/gateways/gw1/devices/fake1/fake/stop"
+            )
+        )
+        self.assertTrue(
+            _should_inject_sudo(
+                "PATCH", "/api/v1/gateways/gw1/devices/fake1/fake"
+            )
+        )
+        self.assertFalse(
+            _should_inject_sudo("POST", "/api/v1/gateways/gw1/devices")
+        )
 
     def test_inject_merges_keyring(self) -> None:
         keyring_store.set_secret("gw1", "secret-ca", kind="ca")
@@ -70,6 +93,18 @@ class CaInjectHelpersTests(unittest.TestCase):
         )
         self.assertIsNone(ct2)
         self.assertEqual(body2, b'{"ca_passphrase":"already"}')
+
+    def test_inject_sudo_merges_keyring(self) -> None:
+        keyring_store.set_secret("gw1", "s3cret-sudo", kind="sudo")
+        body, ct = _inject_sudo_password(b'{"user_id":"fake1"}', "gw1")
+        self.assertEqual(ct, "application/json")
+        data = json.loads(body.decode("utf-8"))
+        self.assertEqual(data["sudo_password"], "s3cret-sudo")
+        body2, ct2 = _inject_sudo_password(
+            b'{"sudo_password":"already"}', "gw1"
+        )
+        self.assertIsNone(ct2)
+        self.assertEqual(body2, b'{"sudo_password":"already"}')
 
 
 if __name__ == "__main__":

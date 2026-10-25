@@ -104,7 +104,7 @@
             <label for="reg-ca-auto" style="min-width:auto">
               Generate CA passphrase
               <span class="field-help" tabindex="0" aria-label="What is Generate CA passphrase?">?
-                <span class="field-help-tip">Creates a signing password from the sensor password and gateway sudo password when none is saved yet. Skip this if Install already saved one.</span>
+                <span class="field-help-tip">Creates a signing password when none is saved yet. Uses the sudo password saved at Install when available.</span>
               </span>
             </label>
           </div>
@@ -112,7 +112,7 @@
             <label for="reg-ca-sudo">
               Sudo password
               <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
-                <span class="field-help-tip">Gateway sudo password used only to generate the CA signing secret.</span>
+                <span class="field-help-tip">Only needed if Install did not save the gateway sudo password yet. Same as the gateway login password.</span>
               </span>
             </label>
             <input id="reg-ca-sudo" type="password" autocomplete="off" />
@@ -179,7 +179,7 @@
             <label for="fake-ca-auto" style="min-width:auto">
               Generate CA passphrase
               <span class="field-help" tabindex="0" aria-label="What is Generate CA passphrase?">?
-                <span class="field-help-tip">Creates a signing password from the fake sensor password and gateway sudo password when none is saved yet. You can leave this on and skip typing a CA passphrase.</span>
+                <span class="field-help-tip">Creates a signing password when none is saved yet. Uses the sudo password saved at Install when available.</span>
               </span>
             </label>
           </div>
@@ -187,7 +187,7 @@
             <label for="fake-ca-sudo">
               Sudo password
               <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
-                <span class="field-help-tip">Gateway sudo password used only to generate the CA signing secret.</span>
+                <span class="field-help-tip">Only needed if Install did not save the gateway sudo password yet. Same as the gateway login password.</span>
               </span>
             </label>
             <input id="fake-ca-sudo" type="password" autocomplete="off" />

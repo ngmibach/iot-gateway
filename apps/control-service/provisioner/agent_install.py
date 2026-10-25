@@ -741,8 +741,8 @@ def provision_monolithic_agent(
 ) -> list[str]:
     """Install packages (sudo) + agent venv + systemd. Returns notes.
 
-    ``sudo_password`` comes from the Setup Wizard UI and is never written to disk
-    or placed on remote argv (only ``sudo -S`` stdin).
+    ``sudo_password`` comes from the Setup Wizard UI / keyring and is never
+    written to the gateway disk or placed on remote argv (only ``sudo -S`` stdin).
 
     ``ca_passphrase`` bootstraps the gateway CA + MQTTS server cert and decrypt
     worker client identity. Required for MQTTS-only installs.

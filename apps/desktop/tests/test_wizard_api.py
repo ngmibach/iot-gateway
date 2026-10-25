@@ -154,6 +154,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("/api/wizard/secrets/ca-status", ajs)
         self.assertIn("/api/wizard/secrets/ca", ajs)
         self.assertIn("/api/wizard/secrets/ca-ensure", ajs)
+        self.assertIn("/api/wizard/secrets/sudo-status", ajs)
+        self.assertIn("sudoStatusPresent", ajs)
         self.assertIn("ensureCaFromRegistration", ajs)
         self.assertIn("btn-find-sensor", ajs)
         self.assertIn("btn-create-fake", ajs)
@@ -381,6 +383,83 @@ class WizardApiTests(unittest.TestCase):
                 again = json.loads(resp.read().decode("utf-8"))
             self.assertFalse(again.get("created"))
             self.assertEqual(again.get("source"), "keyring")
+
+    def test_sudo_secret_status_put_delete_and_ca_ensure_fallback(self) -> None:
+        from shell import keyring_store
+
+        with mock.patch.object(keyring_store, "_keyring_usable", return_value=False):
+            missing = self._get("/api/wizard/secrets/sudo-status?gateway_id=gw1")
+            self.assertFalse(missing.get("present"))
+
+            put_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/sudo",
+                data=json.dumps(
+                    {"gateway_id": "gw1", "sudo_password": "login-same-as-sudo"}
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="PUT",
+            )
+            with urllib.request.urlopen(put_req, timeout=10) as resp:
+                put_body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(put_body.get("ok"))
+            self.assertTrue(put_body.get("present"))
+            self.assertNotIn("login-same-as-sudo", json.dumps(put_body))
+
+            present = self._get("/api/wizard/secrets/sudo-status?gateway_id=gw1")
+            self.assertTrue(present.get("present"))
+            self.assertNotIn("sudo_password", present)
+
+            # ca-ensure generate with no body sudo uses keyring sudo.
+            keyring_store.delete_secret("gw1", kind="ca")
+            ensure_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca-ensure",
+                data=json.dumps(
+                    {
+                        "gateway_id": "gw1",
+                        "generate": True,
+                        "device_password": "sensor-pass-1",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(ensure_req, timeout=10) as resp:
+                ensured = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(ensured.get("created"))
+            self.assertEqual(ensured.get("source"), "generated")
+            self.assertTrue(keyring_store.get_secret("gw1", kind="ca"))
+
+            # settings/gateway password also stores sudo.
+            keyring_store.delete_secret("gw1", kind="sudo")
+            settings_req = urllib.request.Request(
+                self.base + "/api/wizard/settings/gateway",
+                data=json.dumps(
+                    {
+                        "gateway_id": "gw1",
+                        "ssh_host": "192.168.1.50",
+                        "ssh_user": "admin",
+                        "password": "settings-sudo-pw",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(settings_req, timeout=10) as resp:
+                settings_body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(settings_body.get("ok"))
+            self.assertEqual(
+                keyring_store.get_secret("gw1", kind="sudo"), "settings-sudo-pw"
+            )
+            self.assertNotIn("settings-sudo-pw", json.dumps(settings_body))
+
+            del_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/sudo?gateway_id=gw1",
+                method="DELETE",
+            )
+            with urllib.request.urlopen(del_req, timeout=10) as resp:
+                del_body = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(del_body.get("ok"))
+            self.assertFalse(del_body.get("present"))
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")

@@ -25,7 +25,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 ### First-run Wizard (all in the UI)
 
 1. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open app**.
-2. Under **Gateways → Registration** — pick MONITORING_IP (LAN), Find gateway (SSH), enter credentials, **Install gateway** (apt packages + agent over SSH; sudo password is not saved on the PC).
+2. Under **Gateways → Registration** — pick MONITORING_IP (LAN), Find gateway (SSH), enter credentials, **Install gateway** (apt packages + agent over SSH; sudo password is saved in the app keyring for later fake-sensor / cleanup use).
 
 App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGatewayMonitor\`.
 
@@ -150,7 +150,7 @@ Activities testing without extra LAN hardware.
 
 | Step | What happens |
 |------|----------------|
-| **Registration → Create fake sensor** | Device ID, password, topics — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>`. If no CA signing password is saved yet, the form can **Generate CA passphrase** from the sensor password + gateway sudo password (no separate modal) |
+| **Registration → Create fake sensor** | Device ID, password, topics — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>`. Uses the gateway sudo password saved at Install (injected by the wizard proxy). If no CA signing password is saved yet, **Generate CA passphrase** reuses that saved sudo (or asks once) |
 | **View** | Shows a **Fake** / **Real** badge; fakes show auto-renew status and **Open Simulate** |
 | **Simulate** | Fake devices only (after create): Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line. Sample manufacturing payload: [`docs/samples/fake-sensor-payload.json`](docs/samples/fake-sensor-payload.json) |
 | **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only (real sensors still download a cert zip for the operator). TLS attack toggles pause auto-feed until cleared |
