@@ -150,7 +150,7 @@ Activities testing without extra LAN hardware.
 
 | Step | What happens |
 |------|----------------|
-| **Registration → Create fake sensor** | Device ID, password, topics only — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>` |
+| **Registration → Create fake sensor** | Device ID, password, topics — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>`. If no CA signing password is saved yet, the form can **Generate CA passphrase** from the sensor password + gateway sudo password (no separate modal) |
 | **View** | Shows a **Fake** / **Real** badge; fakes show auto-renew status and **Open Simulate** |
 | **Simulate** | Fake devices only (after create): Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line. Sample manufacturing payload: [`docs/samples/fake-sensor-payload.json`](docs/samples/fake-sensor-payload.json) |
 | **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only (real sensors still download a cert zip for the operator). TLS attack toggles pause auto-feed until cleared |

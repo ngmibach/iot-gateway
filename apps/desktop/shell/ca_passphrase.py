@@ -22,13 +22,15 @@ def generate_ca_passphrase(
     *,
     sudo_password: str,
     gateway_id: str,
+    device_password: str = "",
     utc_ns: int | None = None,
     extra_salt: bytes | None = None,
 ) -> str:
     """Build a strong one-shot CA passphrase and return it (caller stores it).
 
-    Inputs are entropy only. Losing the keyring means the passphrase cannot be
-    recovered from sudo alone.
+    Inputs are entropy only (sudo password, optional device/sensor password,
+    gateway id). Losing the keyring means the passphrase cannot be recovered
+    from those inputs alone.
     """
     if not (sudo_password or "").strip():
         raise ValueError("sudo password required to generate CA passphrase")
@@ -38,6 +40,7 @@ def generate_ca_passphrase(
     material = b"|".join(
         [
             sudo_password.encode("utf-8"),
+            (device_password or "").encode("utf-8"),
             gid.encode("utf-8"),
             str(stamp).encode("ascii"),
             salt,

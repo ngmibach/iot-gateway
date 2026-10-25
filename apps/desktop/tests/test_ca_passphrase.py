@@ -35,6 +35,23 @@ class CaPassphraseTests(unittest.TestCase):
         )
         self.assertNotEqual(a, b)
 
+    def test_generate_includes_device_password_entropy(self) -> None:
+        a = ca_passphrase.generate_ca_passphrase(
+            sudo_password="s3cret-sudo",
+            gateway_id="gw1",
+            device_password="sensor-a",
+            utc_ns=1,
+            extra_salt=b"fixed-salt-16b!!",
+        )
+        b = ca_passphrase.generate_ca_passphrase(
+            sudo_password="s3cret-sudo",
+            gateway_id="gw1",
+            device_password="sensor-b",
+            utc_ns=1,
+            extra_salt=b"fixed-salt-16b!!",
+        )
+        self.assertNotEqual(a, b)
+
     def test_generate_requires_sudo(self) -> None:
         with self.assertRaises(ValueError):
             ca_passphrase.generate_ca_passphrase(sudo_password="", gateway_id="gw1")

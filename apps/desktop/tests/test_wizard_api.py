@@ -128,11 +128,17 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("Wrong topic", actions_html)
         self.assertIn('id="ca-modal"', actions_html)
         self.assertIn("Gateway CA passphrase", actions_html)
+        self.assertIn('id="fake-ca-block"', actions_html)
+        self.assertIn('id="fake-ca-auto"', actions_html)
+        self.assertIn('id="fake-ca-sudo"', actions_html)
+        self.assertIn('id="fake-ca"', actions_html)
+        self.assertIn('id="reg-ca-block"', actions_html)
+        self.assertIn('id="reg-ca-auto"', actions_html)
+        self.assertIn("Generate CA passphrase", actions_html)
         self.assertIn("I am confirming that I want to delete this", actions_html)
         self.assertIn('id="btn-view-update"', actions_html)
         self.assertIn('id="btn-view-reissue"', actions_html)
         self.assertIn("Re-issue cert", actions_html)
-        self.assertNotIn('id="reg-ca"', actions_html)
         self.assertNotIn('id="view-ca"', actions_html)
         self.assertNotIn("Rotate CA", actions_html)
         self.assertNotIn('id="ctrl-url"', actions_html)
@@ -147,6 +153,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("/reissue-cert", ajs)
         self.assertIn("/api/wizard/secrets/ca-status", ajs)
         self.assertIn("/api/wizard/secrets/ca", ajs)
+        self.assertIn("/api/wizard/secrets/ca-ensure", ajs)
+        self.assertIn("ensureCaFromRegistration", ajs)
         self.assertIn("btn-find-sensor", ajs)
         self.assertIn("btn-create-fake", ajs)
         self.assertIn("findSensors", ajs)
@@ -332,6 +340,47 @@ class WizardApiTests(unittest.TestCase):
             self.assertFalse(del_body.get("present"))
             after = self._get("/api/wizard/secrets/ca-status?gateway_id=gw1")
             self.assertFalse(after.get("present"))
+
+            # ca-ensure: generate from sudo + device password when absent.
+            ensure_req = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca-ensure",
+                data=json.dumps(
+                    {
+                        "gateway_id": "gw1",
+                        "generate": True,
+                        "sudo_password": "s3cret-sudo",
+                        "device_password": "sensor-pass-1",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(ensure_req, timeout=10) as resp:
+                ensured = json.loads(resp.read().decode("utf-8"))
+            self.assertTrue(ensured.get("ok"))
+            self.assertTrue(ensured.get("created"))
+            self.assertEqual(ensured.get("source"), "generated")
+            self.assertTrue(ensured.get("present"))
+            self.assertNotIn("ca_passphrase", ensured)
+            self.assertNotIn("s3cret-sudo", json.dumps(ensured))
+
+            # Second ensure reuses keyring (no recreate).
+            ensure2 = urllib.request.Request(
+                self.base + "/api/wizard/secrets/ca-ensure",
+                data=json.dumps(
+                    {
+                        "gateway_id": "gw1",
+                        "generate": True,
+                        "sudo_password": "other",
+                    }
+                ).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(ensure2, timeout=10) as resp:
+                again = json.loads(resp.read().decode("utf-8"))
+            self.assertFalse(again.get("created"))
+            self.assertEqual(again.get("source"), "keyring")
 
     def test_control_config(self) -> None:
         data = self._get("/api/wizard/control")
