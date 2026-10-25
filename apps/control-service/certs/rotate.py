@@ -19,8 +19,8 @@ from actions.csr import (
     generate_client_key_and_csr,
     sign_csr_on_gateway,
 )
-from actions.haproxy import reload_haproxy, restart_mosquitto
-from actions.paths import DEFAULT_INSTALL_ROOT, GatewayPaths
+from actions.mosquitto_ctl import reload_mosquitto
+from actions.paths import DEFAULT_AGENT_DATA, DEFAULT_INSTALL_ROOT, GatewayPaths
 from actions.shellutil import shell_quote
 
 if TYPE_CHECKING:
@@ -51,8 +51,11 @@ def _reject_admin(passphrase: str, *, reject: bool) -> None:
         raise ValueError("production profile refuses CA passphrase 'admin'")
 
 
-def _paths(install_root: str) -> GatewayPaths:
-    return GatewayPaths(install_root=install_root)
+def _paths(install_root: str, data_dir: str | None = None) -> GatewayPaths:
+    return GatewayPaths(
+        install_root=install_root,
+        data_dir=data_dir if data_dir is not None else DEFAULT_AGENT_DATA,
+    )
 
 
 def _backup_if_exists(ssh: "SSHClient", path: str) -> Optional[str]:
@@ -108,10 +111,9 @@ def _install_server_files(
     return pem
 
 
-def _restart_tls_frontends(ssh: "SSHClient", paths: GatewayPaths) -> dict[str, str]:
-    restart_mosquitto(ssh, paths)
-    mode = reload_haproxy(ssh, paths)
-    return {"mosquitto": "restart", "haproxy": mode}
+def _restart_tls_frontends(ssh: "SSHClient", _paths: GatewayPaths) -> dict[str, str]:
+    mode = reload_mosquitto(ssh)
+    return {"mosquitto": mode}
 
 
 def _resolve_device_ids(
@@ -223,8 +225,8 @@ class RotateCAResult:
 
     Contract: only ``ok=True`` means redistribute ``devices`` bundles.
     ``status="reload_failed"`` keeps new CA/server/device material on disk
-    (and registry, when provided) but TLS frontends may still serve the old
-    trust store — do **not** redistribute until mosquitto/haproxy reload.
+    (and registry, when provided) but Mosquitto may still serve the old
+    trust store — do **not** redistribute until mosquitto reload succeeds.
     """
 
     ok: bool
@@ -242,6 +244,7 @@ def rotate_server_cert(
     gateway_ip: str,
     ca_passphrase: str,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
     days: int = 730,
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
@@ -250,11 +253,10 @@ def rotate_server_cert(
 
     Operator generates key+CSR (OU=Broker, CN=gateway_ip); gateway signs with
     ``-extfile`` ``subjectAltName=IP:…`` and ``-passin file:``. Writes
-    ``server.crt`` / ``server.key`` / ``server.pem``, then restarts mosquitto
-    and reloads haproxy.
+    ``server.crt`` / ``server.key`` / ``server.pem``, then reloads mosquitto.
     """
     bak: dict[str, Optional[str]] = {}
-    paths = _paths(install_root)
+    paths = _paths(install_root, data_dir)
     try:
         gateway_ip = _validate_gateway_ip(gateway_ip)
         _reject_admin(ca_passphrase, reject=reject_default_admin_passphrase)
@@ -425,6 +427,7 @@ def rotate_ca(
     registry: "Registry | None" = None,
     gateway_id: str | None = None,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
     ca_days: int = 3650,
     server_days: int = 730,
     client_days: int = 730,
@@ -451,7 +454,7 @@ def rotate_ca(
     (see ``RotateCAResult``).
     """
     bak: dict[str, Optional[str]] = {}
-    paths = _paths(install_root)
+    paths = _paths(install_root, data_dir)
     registry_snapshot: dict[str, tuple[Any, Any]] = {}
     registry_committed = False
     try:
@@ -541,7 +544,7 @@ def rotate_ca(
                 status="reload_failed",
                 message=(
                     "CA/server/device certs written but TLS reload failed; "
-                    "do not redistribute bundles until mosquitto/haproxy "
+                    "do not redistribute bundles until mosquitto "
                     f"reload succeeds: {exc}"
                 ),
                 ca_crt_pem=ca_crt,

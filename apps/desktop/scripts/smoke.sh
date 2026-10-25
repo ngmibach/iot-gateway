@@ -43,7 +43,8 @@ time.sleep(0.2)
 base = f"http://127.0.0.1:{port}"
 with urllib.request.urlopen(base + "/api/wizard/env", timeout=5) as r:
     data = json.loads(r.read().decode())
-assert "docker" in data
+assert data.get("docker_required") is False
+assert "docker" not in data
 with urllib.request.urlopen(f"http://127.0.0.1:{port}/actions.html", timeout=5) as r:
     html = r.read().decode()
 assert "Rotate server" in html and "Unregister" in html
@@ -54,7 +55,7 @@ with urllib.request.urlopen(base + "/admin.html", timeout=5) as r:
 with urllib.request.urlopen(base + "/api/admin/status", timeout=5) as r:
     st = json.loads(r.read().decode())
 assert "has_pin" in st
-print("wizard+actions+admin ok on", port, "docker.present=", data["docker"]["present"])
+print("wizard+actions+admin ok on", port, "runtime=", data.get("runtime"))
 srv.shutdown()
 PY
 

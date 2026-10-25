@@ -1,4 +1,4 @@
-"""Hide console windows for Windows subprocesses (netsh, ssh-keygen, docker, …)."""
+"""Hide console windows for Windows subprocesses (netsh, ssh-keygen, …)."""
 
 from __future__ import annotations
 

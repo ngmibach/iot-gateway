@@ -10,17 +10,16 @@ from actions.playbooks import (
     register_device,
     unregister_device,
     update_acl,
-    update_allowlist_ips,
 )
 from actions.ssh import CommandResult
 from tests.cert_helpers import local_self_sign_for_tests
 from tests.fake_ssh import FakeSSH
 
-ROOT = "/opt/iot-gateway"
-ACL = f"{ROOT}/mosquitto/config/acl"
-PW = f"{ROOT}/mosquitto/config/passwords"
-IPS = f"{ROOT}/haproxy/allowed-ips.txt"
-CA = f"{ROOT}/certs/ca.crt"
+INSTALL = "/opt/iot-gateway-agent"
+DATA = "/var/lib/iot-gateway-agent"
+ACL = f"{DATA}/mosquitto/acl"
+PW = f"{DATA}/mosquitto/passwords"
+CA = f"{DATA}/certs/ca.crt"
 
 BASE_ACL = """user nodered
 topic readwrite #
@@ -37,16 +36,13 @@ BASE_PW = """nodered:$7$1000$aaa$bbb
 sensor1:$7$1000$ccc$ddd
 """
 
-BASE_IPS = "10.0.0.1\n172.22.0.0/16\n"
-
 
 def _base_files() -> dict[str, str]:
     return {
         ACL: BASE_ACL,
         PW: BASE_PW,
-        IPS: BASE_IPS,
         CA: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n",
-        f"{ROOT}/certs/ca.key": "-----BEGIN ENCRYPTED PRIVATE KEY-----\nX\n-----END ENCRYPTED PRIVATE KEY-----\n",
+        f"{DATA}/certs/ca.key": "-----BEGIN ENCRYPTED PRIVATE KEY-----\nX\n-----END ENCRYPTED PRIVATE KEY-----\n",
     }
 
 
@@ -83,14 +79,15 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertIn("user sensor9\n", ssh.read_text(ACL))
         self.assertIn("sensor9:$7$1000$", ssh.read_text(PW))
         self.assertNotIn("hunter2", ssh.read_text(PW))
-        self.assertIn("10.0.0.9", ssh.read_text(IPS))
         self.assertIsNotNone(result.cert_bundle)
         self.assertTrue(any(k.startswith(ACL + ".bak.") for k in ssh.files))
-        self.assertTrue(any("restart mosquitto" in c for c in ssh.commands))
-        self.assertTrue(any("docker kill -s HUP" in c for c in ssh.commands))
+        self.assertTrue(any("systemctl reload mosquitto" in c for c in ssh.commands))
+        self.assertFalse(any("docker" in c for c in ssh.commands))
+        self.assertFalse(any("haproxy" in c for c in ssh.commands))
         self.assertFalse(any("mosquitto_passwd" in c for c in ssh.commands))
         self.assertTrue(any("iotgw-ca-pass-" in p for p in ssh.unlinked))
         self.assertTrue(any("iotgw-csr-" in p for p in ssh.unlinked))
+        self.assertEqual(result.details.get("mosquitto"), "reload")
 
     def test_register_upserts_existing_user(self) -> None:
         ssh = FakeSSH(_base_files())
@@ -125,13 +122,13 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertIn("reserved", result.message)
 
-    def test_register_compensates_on_allowlist_failure(self) -> None:
+    def test_register_compensates_on_password_write_failure(self) -> None:
         ssh = FakeSSH(_base_files())
         original_acl = ssh.read_text(ACL)
         original_pw = ssh.read_text(PW)
 
         def boom_write(path: str, content: str, *, mode: int = 0o644) -> None:
-            if path == IPS:
+            if path == PW:
                 raise RuntimeError("disk full")
             FakeSSH.write_text(ssh, path, content, mode=mode)
 
@@ -148,7 +145,7 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertEqual(ssh.read_text(ACL), original_acl)
         self.assertEqual(ssh.read_text(PW), original_pw)
 
-    def test_register_mosquitto_restart_degraded_no_rollback(self) -> None:
+    def test_register_mosquitto_reload_degraded_no_rollback(self) -> None:
         ssh = FakeSSH(_base_files())
         mat = generate_client_key_and_csr("sensor9")
         signed = local_self_sign_for_tests(mat)
@@ -158,7 +155,9 @@ class TestRegisterDevice(unittest.TestCase):
                 out_path = cmd.split()[cmd.split().index("-out") + 1].strip("'")
                 ssh.files[out_path] = signed.client_crt_pem
                 return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
-            if "restart mosquitto" in cmd:
+            if "systemctl reload mosquitto" in cmd:
+                return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")
+            if "systemctl restart mosquitto" in cmd:
                 return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="boom")
             return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
 
@@ -176,9 +175,9 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertEqual(result.status, "degraded")
         self.assertIn("user sensor9\n", ssh.read_text(ACL))
         self.assertIn("sensor9:$7$", ssh.read_text(PW))
-        self.assertIn("10.0.0.9", ssh.read_text(IPS))
+        self.assertIn("mosquitto reload failed", result.message)
 
-    def test_register_haproxy_failure_degraded_no_mosquitto_rollback(self) -> None:
+    def test_register_reload_falls_back_to_restart(self) -> None:
         ssh = FakeSSH(_base_files())
         mat = generate_client_key_and_csr("sensor9")
         signed = local_self_sign_for_tests(mat)
@@ -188,9 +187,7 @@ class TestRegisterDevice(unittest.TestCase):
                 out_path = cmd.split()[cmd.split().index("-out") + 1].strip("'")
                 ssh.files[out_path] = signed.client_crt_pem
                 return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
-            if "docker kill -s HUP" in cmd:
-                return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")
-            if "restart haproxy" in cmd:
+            if "systemctl reload mosquitto" in cmd:
                 return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")
             return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
 
@@ -205,9 +202,9 @@ class TestRegisterDevice(unittest.TestCase):
             key_material=mat,
         )
         self.assertTrue(result.ok)
-        self.assertEqual(result.status, "degraded")
-        self.assertIn("allow-list may be stale", result.message)
-        self.assertIn("user sensor9\n", ssh.read_text(ACL))
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.details.get("mosquitto"), "restart")
+        self.assertTrue(any("systemctl restart mosquitto" in c for c in ssh.commands))
 
 
 class TestUpdateAcl(unittest.TestCase):
@@ -223,43 +220,7 @@ class TestUpdateAcl(unittest.TestCase):
         text = ssh.read_text(ACL)
         self.assertIn("topic readwrite sensors/sensor1/new\n", text)
         self.assertNotIn("topic read alerts/+\n", text)
-        self.assertTrue(any("restart mosquitto" in c for c in ssh.commands))
-
-
-class TestAllowlist(unittest.TestCase):
-    def test_add_and_remove(self) -> None:
-        ssh = FakeSSH(_base_files())
-        result = update_allowlist_ips(
-            ssh,  # type: ignore[arg-type]
-            add_ips="10.0.0.5,10.0.0.1",
-            remove_ips=["172.22.0.0/16"],
-        )
-        self.assertTrue(result.ok)
-        text = ssh.read_text(IPS)
-        self.assertIn("10.0.0.5", text)
-        self.assertIn("10.0.0.1", text)
-        self.assertNotIn("172.22.0.0/16", text)
-
-    def test_remove_all(self) -> None:
-        ssh = FakeSSH(_base_files())
-        result = update_allowlist_ips(ssh, remove_all=True)  # type: ignore[arg-type]
-        self.assertTrue(result.ok)
-        self.assertEqual(ssh.read_text(IPS), "")
-
-    def test_hup_fallback_to_restart(self) -> None:
-        ssh = FakeSSH(_base_files())
-
-        def run_handler(cmd: str) -> CommandResult:
-            if "docker kill -s HUP" in cmd:
-                return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")
-            return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
-
-        ssh._run_handler = run_handler
-        result = update_allowlist_ips(ssh, add_ips=["10.0.0.8"])  # type: ignore[arg-type]
-        self.assertTrue(result.ok)
-        self.assertEqual(result.details.get("haproxy"), "restart")
-        self.assertTrue(any("restart haproxy" in c for c in ssh.commands))
-        self.assertFalse(any("down -v" in c for c in ssh.commands))
+        self.assertTrue(any("systemctl reload mosquitto" in c for c in ssh.commands))
 
 
 class TestUnregister(unittest.TestCase):
@@ -269,9 +230,8 @@ class TestUnregister(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertNotIn("user sensor1\n", ssh.read_text(ACL))
         self.assertNotIn("sensor1:", ssh.read_text(PW))
-        self.assertIn("10.0.0.1", ssh.read_text(IPS))
 
-    def test_unregister_with_ip(self) -> None:
+    def test_unregister_with_ip_flag_is_noop_for_files(self) -> None:
         ssh = FakeSSH(_base_files())
         result = unregister_device(
             ssh,  # type: ignore[arg-type]
@@ -280,49 +240,24 @@ class TestUnregister(unittest.TestCase):
             remove_ip=True,
         )
         self.assertTrue(result.ok)
-        self.assertNotIn("10.0.0.1", ssh.read_text(IPS))
-
-    def test_unregister_haproxy_failure_no_acl_restore(self) -> None:
-        ssh = FakeSSH(_base_files())
-
-        def run_handler(cmd: str) -> CommandResult:
-            if "restart mosquitto" in cmd:
-                return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
-            if "docker kill -s HUP" in cmd or "restart haproxy" in cmd:
-                return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="fail")
-            return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
-
-        ssh._run_handler = run_handler
-        result = unregister_device(
-            ssh,  # type: ignore[arg-type]
-            user_id="sensor1",
-            ip="10.0.0.1",
-            remove_ip=True,
-        )
-        self.assertTrue(result.ok)
-        self.assertEqual(result.status, "degraded")
+        self.assertEqual(result.details.get("removed_ip"), "10.0.0.1")
         self.assertNotIn("user sensor1\n", ssh.read_text(ACL))
-        self.assertNotIn("sensor1:", ssh.read_text(PW))
-        # IP file change kept (stale allow-list vs haproxy)
-        self.assertNotIn("10.0.0.1", ssh.read_text(IPS))
+        self.assertFalse(any("haproxy" in c for c in ssh.commands))
 
 
 class TestClearLogs(unittest.TestCase):
     def test_clear_logs(self) -> None:
         files = _base_files()
         log_paths = [
-            f"{ROOT}/mosquitto/log/mosquitto.log",
-            f"{ROOT}/nodered/data/logs/sensor_data.log",
-            f"{ROOT}/haproxy/logs/haproxy.log",
-            f"{ROOT}/logs/gateway-state.log",
-            f"{ROOT}/logs/ids-alerts.log",
+            f"{DATA}/mosquitto/log/mosquitto.log",
+            f"{DATA}/logs/sensor_data.log",
         ]
         for p in log_paths:
             files[p] = "old log data\n"
         ssh = FakeSSH(files)
         result = clear_logs(ssh)  # type: ignore[arg-type]
         self.assertTrue(result.ok)
-        self.assertEqual(len(result.details["truncated"]), 5)
+        self.assertEqual(len(result.details["truncated"]), 2)
         for p in log_paths:
             self.assertEqual(ssh.read_text(p), "")
 
@@ -330,7 +265,13 @@ class TestClearLogs(unittest.TestCase):
 class TestValidation(unittest.TestCase):
     def test_bad_ip(self) -> None:
         ssh = FakeSSH(_base_files())
-        result = update_allowlist_ips(ssh, add_ips=["not-an-ip"])  # type: ignore[arg-type]
+        result = register_device(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor9",
+            password="x",
+            ip="not-an-ip",
+            ca_passphrase="secret",
+        )
         self.assertFalse(result.ok)
 
 

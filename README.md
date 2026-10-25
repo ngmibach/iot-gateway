@@ -2,7 +2,7 @@
 
 Cross-platform desktop app: **download → double-click → Setup Wizard → provision gateway agent → Monitoring + Actions**.
 
-No Docker on the operator PC. No WSL required on Windows. No Docker on the gateway. No Lab / fake-sensor panel in this build.
+No Docker on the operator PC. No WSL required on Windows. No Docker on the gateway.
 
 | Piece | Role |
 |-------|------|
@@ -24,14 +24,8 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 
 ### First-run Wizard (all in the UI)
 
-1. Choose **Monitoring only** (default) or **Full setup**.
-2. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open Monitoring** to view the UI.
-3. (Full setup) **NIC** — pick MONITORING_IP (LAN address the gateway will push logs to).
-4. (Full setup) **SSH** — pin host key, install ed25519 key (one-time password).
-5. (Full setup) **Firewall** (Windows) — optional guided checklist for Loki `:3100`.
-6. (Full setup) **Launch** — start control service, enter the **gateway sudo password**, then **Install gateway** (apt packages + agent over SSH via `sudo -S`; password is not saved on the PC; no Docker on the device).
-
-Gateway and fake-sensor steps can wait; Monitoring only is enough for the PC-side stack.
+1. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open app**.
+2. Under **Gateways → Registration** — pick MONITORING_IP (LAN), Find gateway (SSH), enter credentials, **Install gateway** (apt packages + agent over SSH; sudo password is not saved on the PC).
 
 App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGatewayMonitor\`.
 
@@ -47,27 +41,32 @@ App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGat
 
 ---
 
-## Architecture (Docker-free)
+## Architecture
 
 ```
 Operator PC                         Gateway device
 ─────────────                       ──────────────
 IoTGatewayMonitor                   iot-gateway-agent (systemd)
-  Wizard / Actions / Monitoring       ├─ mosquitto (native apt, supervised)
+  Wizard / Actions / Monitoring       ├─ mosquitto (native apt, systemd)
   Loki :3100 (native process)         ├─ decrypt → sensor_data.log
   Prometheus :9090 (native)           ├─ Loki shipper → MONITORING_IP:3100
                                       ├─ GET :9139/metrics /v1/health
                                       └─ mDNS
 ```
 
-Legacy `gateway/docker-compose.yaml` remains for power users only (`IOTGW_GATEWAY_BACKEND=compose`). The default Wizard path never asks for Docker.
+Sensor Registration updates Mosquitto ACL + password file under
+`/var/lib/iot-gateway-agent/mosquitto/` and reloads system Mosquitto. Optional
+mTLS client certs are still issued from the gateway CA for download to devices.
+
+Publish test traffic with any MQTT client to the gateway on port 1883.
 
 ---
 
-## Advanced / legacy Compose lab
+## Repository layout
 
-```shell
-cd gateway && docker compose up -d   # optional; not required for the packaged app
-```
-
-Fake sensors are not part of the packaged UI; publish with any MQTT client to the agent on port 1883.
+| Path | Purpose |
+|------|---------|
+| `apps/desktop/` | Packaged UI, wizard shell, Windows/Linux packaging |
+| `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions |
+| `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
+| `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |

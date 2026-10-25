@@ -239,7 +239,6 @@ def run_gui(
     host: str = CONTROL_HOST,
     port: int = WIZARD_PORT,
     start_control: bool = True,
-    with_streamlit: bool = False,
 ) -> int:
     """Start backend services and open the desktop app window. Blocks until exit."""
     ensure_data_dir()
@@ -257,12 +256,6 @@ def run_gui(
                 )
                 mgr.stop_all()
                 return 1
-            if with_streamlit:
-                try:
-                    st = mgr.start_streamlit(control_url=ctrl.url)
-                    wait_http(st.url, timeout=60)
-                except FileNotFoundError as exc:
-                    logger.warning("streamlit skipped: %s", exc)
 
         httpd = serve(host, port, open_browser=False)
         thread = threading.Thread(target=httpd.serve_forever, daemon=True)

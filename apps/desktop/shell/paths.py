@@ -17,7 +17,6 @@ APP_NAME_WIN = "IoTGatewayMonitor"
 
 CONTROL_HOST = "127.0.0.1"
 CONTROL_PORT = 9137
-STREAMLIT_PORT = 8501
 WIZARD_PORT = 9138
 
 
@@ -186,13 +185,6 @@ def control_service_dir() -> Path:
         # Packaged layout: control-service/ next to ui/ and gateway/.
         return bundled / "control-service"
     return repo_root() / "apps" / "control-service"
-
-
-def streamlit_app_dir() -> Path:
-    bundled = bundle_root()
-    if bundled is not None:
-        return bundled / "streamlit"
-    return repo_root() / "monitoring" / "build" / "streamlit"
 
 
 def desktop_ui_dir() -> Path:

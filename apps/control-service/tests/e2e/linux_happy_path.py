@@ -4,21 +4,19 @@ Happy path (operator PC → gateway over SSH)
 -------------------------------------------
 1. Discover / enter gateway IP (mDNS agent optional; first install uses manual IP).
 2. SSH with device password or key.
-3. Provision:
-   a. Preflight: ``docker info``, free disk ≥ 2 GiB under install root parent
-   b. Optional ``docker load`` from ``--with-images`` tarball
-   c. Backup existing ``/opt/iot-gateway`` → ``/opt/iot-gateway.bak-<epoch>``
-   d. Stage + upload gateway bundle (templated GATEWAY_IP / MONITORING_IP)
-   e. ``docker compose up -d`` (Node-RED is mandatory — K17)
-   f. Probe node-exporter :9100, cAdvisor :8080, Loki :3100/ready from gateway
-   g. Install gateway-agent last (optional until agent files present)
+3. Provision (agent-only, no Docker on the gateway):
+   a. Preflight: free disk ≥ 2 GiB under install root parent
+   b. apt mosquitto + python3-venv (sudo)
+   c. Configure system Mosquitto conf.d + agent data dirs
+   d. Upload monolithic agent to ``/opt/iot-gateway-agent``
+   e. venv + systemd unit; probe ``:9139/v1/health`` and MQTT ``:1883``
 4. Register device via control API / playbook:
-   ACL + hashed mosquitto password + HAProxy allow-list + CSR/sign mTLS cert
-5. Open Monitoring / Actions dashboard (Streamlit Phase-0 or Tauri Phase-1)
+   ACL + hashed mosquitto password + CSR/sign mTLS cert; systemctl reload mosquitto
+5. Open Monitoring / Actions dashboard (desktop app)
 
 CI: this module drives FakeSSH / mocked steps — no real Pi.
 Live (manual): see ``run_live_checklist()`` docstring; requires reachable host +
-``provisioner`` package (PR 5) on PYTHONPATH.
+``provisioner`` package on PYTHONPATH.
 """
 
 from __future__ import annotations
@@ -32,22 +30,20 @@ from actions.ssh import CommandResult
 from tests.cert_helpers import local_self_sign_for_tests
 from tests.fake_ssh import FakeSSH
 
-ROOT = "/opt/iot-gateway"
-ACL = f"{ROOT}/mosquitto/config/acl"
-PW = f"{ROOT}/mosquitto/config/passwords"
-IPS = f"{ROOT}/haproxy/allowed-ips.txt"
-CA = f"{ROOT}/certs/ca.crt"
+ROOT = "/opt/iot-gateway-agent"
+DATA = "/var/lib/iot-gateway-agent"
+ACL = f"{DATA}/mosquitto/acl"
+PW = f"{DATA}/mosquitto/passwords"
+CA = f"{DATA}/certs/ca.crt"
 
 PROVISION_STEPS = (
-    "preflight_docker",
     "preflight_disk",
-    "optional_image_load",
-    "backup_existing",
-    "stage_upload_bundle",
-    "compose_up",
-    "probe_exporters",
-    "probe_loki_from_gateway",
-    "install_agent_last",
+    "ensure_mosquitto",
+    "configure_mosquitto",
+    "upload_agent",
+    "venv_deps",
+    "systemd_enable",
+    "probe_agent_health",
 )
 
 
@@ -63,6 +59,7 @@ class MockProvisionResult:
 
 
 def _base_gateway_files() -> dict[str, str]:
+    """Seed FakeSSH with files the register playbook expects."""
     return {
         ACL: (
             "user nodered\n"
@@ -76,13 +73,11 @@ def _base_gateway_files() -> dict[str, str]:
             "topic none\n"
         ),
         PW: "nodered:$7$1000$aaa$bbb\nsensor1:$7$1000$ccc$ddd\n",
-        IPS: "10.0.0.1\n",
         CA: "-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n",
-        f"{ROOT}/certs/ca.key": (
+        f"{DATA}/certs/ca.key": (
             "-----BEGIN ENCRYPTED PRIVATE KEY-----\nX\n"
             "-----END ENCRYPTED PRIVATE KEY-----\n"
         ),
-        f"{ROOT}/docker-compose.yaml": "services:\n  nodered:\n    image: nodered\n",
     }
 
 
@@ -92,10 +87,9 @@ def mock_provision(
     gateway_ip: str,
     monitoring_ip: str,
     install_root: str = ROOT,
-    with_images: bool = False,
     fail_at: Optional[str] = None,
 ) -> MockProvisionResult:
-    """Simulate provisioner happy path against FakeSSH (no live Docker/SSH)."""
+    """Simulate agent-only provisioner happy path against FakeSSH."""
     completed: list[str] = []
     notes: list[str] = []
     probes: dict[str, str] = {}
@@ -106,82 +100,50 @@ def mock_provision(
         fn()
         completed.append(name)
 
-    def preflight_docker() -> None:
-        r = ssh.run("docker info")
-        if r.exit_code != 0:
-            raise RuntimeError("docker not available")
-
     def preflight_disk() -> None:
         ssh.run(f"df -Pk {install_root}")
 
-    def optional_image_load() -> None:
-        if with_images:
-            ssh.run("docker load -i /tmp/iotgw-images.tar")
-            notes.append("loaded images tarball")
-        else:
-            notes.append("cold pull (no --with-images)")
+    def ensure_mosquitto() -> None:
+        ssh.run("command -v mosquitto || test -x /usr/sbin/mosquitto")
+        notes.append("mosquitto present")
 
-    def backup_existing() -> None:
-        if ssh.exists(install_root) or any(
-            p.startswith(install_root + "/") for p in ssh.files
-        ):
-            bak = f"{install_root}.bak.mock"
-            # Mark backup presence without cloning whole tree
-            ssh.files[bak] = b"backup-marker"
-            notes.append(f"backup={bak}")
+    def configure_mosquitto() -> None:
+        ssh.run("systemctl enable --now mosquitto")
+        notes.append("system mosquitto configured")
 
-    def stage_upload() -> None:
-        # Ensure compose + Node-RED (K17) present after "upload"
+    def upload_agent() -> None:
         for path, content in _base_gateway_files().items():
             if path not in ssh.files:
                 ssh.write_text(path, content)
         ssh.write_text(
-            f"{install_root}/promtail/config/promtail-config.yaml",
-            f"clients:\n  - url: http://{monitoring_ip}:3100/loki/api/v1/push\n",
+            f"{install_root}/iot_gateway_agent/__init__.py",
+            "# agent\n",
         )
+        notes.append(f"uploaded agent to {install_root}")
         notes.append(f"GATEWAY_IP={gateway_ip} MONITORING_IP={monitoring_ip}")
 
-    def compose_up() -> None:
-        ssh.run(
-            f"docker compose -f {install_root}/docker-compose.yaml "
-            "up -d --remove-orphans"
-        )
-        # Node-RED mandatory — assert compose file mentions it
-        compose = ssh.read_text(f"{install_root}/docker-compose.yaml")
-        if "nodered" not in compose.lower() and "node-red" not in compose.lower():
-            raise RuntimeError("Node-RED missing from gateway compose (K17)")
+    def venv_deps() -> None:
+        ssh.run(f"python3 -m venv {install_root}/.venv")
+        notes.append("python venv + agent deps installed")
 
-    def probe_exporters() -> None:
-        for port, name in ((9100, "node_exporter"), (8080, "cadvisor")):
-            ssh.run(f"curl -sf --max-time 5 http://{gateway_ip}:{port}/metrics")
-            probes[name] = "ok"
+    def systemd_enable() -> None:
+        ssh.run("systemctl enable --now iot-gateway-agent")
+        notes.append("systemd iot-gateway-agent enabled")
 
-    def probe_loki() -> None:
-        ssh.run(
-            f"curl -sf --max-time 5 http://{monitoring_ip}:3100/ready"
-        )
-        probes["loki"] = "ok"
-
-    def install_agent() -> None:
-        agent_unit = f"{install_root}/agent/iot-gateway-agent.service"
-        if agent_unit in ssh.files or ssh.exists(
-            f"{install_root}/agent/docker-compose.agent.yaml"
-        ):
-            ssh.run("systemctl enable --now iot-gateway-agent || true")
-            notes.append("agent installed")
-            return
-        notes.append("agent skipped (files not present)")
+    def probe_agent() -> None:
+        ssh.run("curl -sf --max-time 5 http://127.0.0.1:9139/v1/health")
+        probes["agent_health"] = "ok"
+        probes["mqtt"] = f"{gateway_ip}:1883"
+        notes.append("agent installed")
 
     try:
-        step("preflight_docker", preflight_docker)
         step("preflight_disk", preflight_disk)
-        step("optional_image_load", optional_image_load)
-        step("backup_existing", backup_existing)
-        step("stage_upload_bundle", stage_upload)
-        step("compose_up", compose_up)
-        step("probe_exporters", probe_exporters)
-        step("probe_loki_from_gateway", probe_loki)
-        step("install_agent_last", install_agent)
+        step("ensure_mosquitto", ensure_mosquitto)
+        step("configure_mosquitto", configure_mosquitto)
+        step("upload_agent", upload_agent)
+        step("venv_deps", venv_deps)
+        step("systemd_enable", systemd_enable)
+        step("probe_agent_health", probe_agent)
     except Exception as exc:
         return MockProvisionResult(
             ok=False,
@@ -192,13 +154,12 @@ def mock_provision(
             message=str(exc),
         )
 
-    agent_installed = any("agent installed" in n for n in notes)
     return MockProvisionResult(
         ok=True,
         install_root=install_root,
         steps_completed=completed,
         probes=probes,
-        agent_installed=agent_installed,
+        agent_installed=True,
         notes=notes,
         message="provision ok",
     )
@@ -261,11 +222,12 @@ def run_linux_happy_path_mocked(
         "register": reg,
         "ssh_commands": list(ssh.commands),
         "acl_has_user": f"user {user_id}" in ssh.read_text(ACL),
-        "allowlist_has_ip": "10.0.0.9" in ssh.read_text(IPS),
+        "mosquitto_reloaded": any(
+            "systemctl reload mosquitto" in c or "systemctl restart mosquitto" in c
+            for c in ssh.commands
+        ),
         "password_not_plaintext": "hunter2" not in ssh.read_text(PW),
-        "nodered_in_compose": "nodered" in ssh.read_text(
-            f"{ROOT}/docker-compose.yaml"
-        ).lower(),
+        "agent_installed": prov.agent_installed,
     }
 
 
@@ -273,22 +235,23 @@ def run_live_checklist() -> str:
     """Return the manual live-Pi checklist (not executed in CI)."""
     return """
 # Live Linux E2E (manual / future CI with a Pi runner)
-# Requires: provisioner package (PR 5), SSH to gateway, Docker on device.
+# Requires: provisioner package, SSH to gateway. No Docker on the device.
 
 export GATEWAY_IP=192.168.x.y
 export MONITORING_IP=192.168.x.z
 export IOTGW_SSH_PASSWORD=...   # or IOTGW_SSH_KEY=
 export IOTGW_CA_PASSPHRASE=...
 
-# 1) Provision
+# 1) Provision (agent-only)
 PYTHONPATH=apps/control-service python -m provisioner provision \\
   --host "$GATEWAY_IP" --user ubuntu \\
-  --gateway-ip "$GATEWAY_IP" --monitoring-ip "$MONITORING_IP"
+  --gateway-ip "$GATEWAY_IP" --monitoring-ip "$MONITORING_IP" \\
+  --sudo-password "$SUDO_PASSWORD"
 
 # 2) Control API + register
 PYTHONPATH=apps/control-service python -m api
-# Then: POST /api/v1/gateways/{gid}/devices  (or Streamlit Control Plane)
+# Then: POST /api/v1/gateways/{gid}/devices
 
-# 3) Confirm Node-RED container is up (mandatory K17)
-ssh ubuntu@$GATEWAY_IP 'docker ps --format "{{.Names}}" | grep -i nodered'
+# 3) Confirm agent + system mosquitto
+ssh ubuntu@$GATEWAY_IP 'systemctl is-active iot-gateway-agent mosquitto && curl -sf http://127.0.0.1:9139/v1/health'
 """

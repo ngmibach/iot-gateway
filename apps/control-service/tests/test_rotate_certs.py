@@ -24,7 +24,9 @@ from registry.registry import Registry
 from tests.cert_helpers import local_self_sign_for_tests
 from tests.fake_ssh import FakeSSH
 
-ROOT = "/opt/iot-gateway"
+INSTALL = "/opt/iot-gateway-agent"
+DATA = "/var/lib/iot-gateway-agent"
+ROOT = DATA  # certs + mosquitto secrets live under agent data dir
 GATEWAY_IP = "192.168.40.177"
 
 
@@ -118,15 +120,14 @@ def _openssl_handler(
     """Simulate gateway openssl: genrsa / req -x509 / x509 -req (+ SAN).
 
     ``fail_x509_on``: 1-based count of ``openssl x509 -req`` calls to fail.
-    ``fail_restart``: raise on mosquitto/haproxy restart commands.
+    ``fail_restart``: raise on systemctl mosquitto reload/restart commands.
     """
     state = {"x509_count": 0}
 
     def run_handler(cmd: str) -> CommandResult:
         if fail_restart and (
-            "restart mosquitto" in cmd
-            or "restart haproxy" in cmd
-            or "docker kill -s HUP" in cmd
+            "systemctl reload mosquitto" in cmd
+            or "systemctl restart mosquitto" in cmd
         ):
             return CommandResult(
                 argv=cmd,
@@ -180,7 +181,7 @@ def _openssl_handler(
             if "-extfile" in parts:
                 ext_path = parts[parts.index("-extfile") + 1].strip("'")
                 ext = ssh.files[ext_path].decode()
-                # Must match cert-generation.sh, not SAN-less update_key.yaml.
+                # Must include IP SAN for the gateway address.
                 assert "subjectAltName=IP:" in ext, ext
                 san_ip = ext.strip().split("IP:", 1)[1].strip()
             # After rotate_ca, CA files on disk may have been replaced.
@@ -209,7 +210,7 @@ def _openssl_handler(
 
 
 class TestServerSanExtfile(unittest.TestCase):
-    def test_matches_cert_generation_sh(self) -> None:
+    def test_server_san_extfile_includes_ip(self) -> None:
         self.assertEqual(
             server_san_extfile(GATEWAY_IP),
             f"subjectAltName=IP:{GATEWAY_IP}\n",
@@ -256,8 +257,9 @@ class TestRotateServerCert(unittest.TestCase):
         pem = ssh.read_bytes(f"{ROOT}/certs/server.pem")
         self.assertIn(b"BEGIN CERTIFICATE", pem)
         self.assertIn(b"BEGIN RSA PRIVATE KEY", pem)
-        self.assertTrue(any("restart mosquitto" in c for c in runs))
-        self.assertTrue(any("docker kill -s HUP" in c for c in runs))
+        self.assertTrue(any("systemctl reload mosquitto" in c for c in runs))
+        self.assertFalse(any("docker" in c for c in runs))
+        self.assertFalse(any("haproxy" in c for c in runs))
         self.assertTrue(
             any(k.startswith(f"{ROOT}/certs/server.crt.bak.") for k in ssh.files)
         )
@@ -336,7 +338,7 @@ class TestRotateCA(unittest.TestCase):
             "gw1",
             host=GATEWAY_IP,
             ssh_user="ubuntu",
-            install_root=ROOT,
+            install_root=INSTALL,
             fingerprint="abc",
         )
         self.registry.upsert_device(

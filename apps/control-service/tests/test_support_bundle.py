@@ -106,7 +106,7 @@ class SupportBundleExportTests(unittest.TestCase):
             id="gw1",
             host="192.168.1.50",
             ssh_user="pi",
-            install_root="/opt/iot-gateway",
+            install_root="/opt/iot-gateway-agent",
             fingerprint="fp-test",
             monitoring_ip="192.168.1.20",
             password_auth_enabled=1,
