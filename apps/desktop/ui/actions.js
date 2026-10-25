@@ -207,11 +207,84 @@
     else waiters.reject(new Error("CA passphrase entry cancelled."));
   }
 
-  async function ensureCaPassphrase(gid) {
+  async function caStatusPresent(gid) {
     const status = await wizardApi("GET", "/api/wizard/secrets/ca-status", {
       query: { gateway_id: gid },
     });
-    if (status.present) return;
+    return !!status.present;
+  }
+
+  function syncCaFormVisibility(prefix) {
+    const auto = $(`${prefix}-ca-auto`);
+    const passRow = $(`${prefix}-ca-pass-row`);
+    const sudoRow = $(`${prefix}-ca-sudo-row`);
+    if (!auto || !passRow || !sudoRow) return;
+    const generate = !!auto.checked;
+    passRow.classList.toggle("hidden", generate);
+    sudoRow.classList.toggle("hidden", !generate);
+  }
+
+  async function refreshCaBlocks() {
+    const gid = selectedGateway();
+    let present = false;
+    if (gid) {
+      try {
+        present = await caStatusPresent(gid);
+      } catch {
+        present = false;
+      }
+    }
+    ["reg", "fake"].forEach((prefix) => {
+      const block = $(`${prefix}-ca-block`);
+      if (!block) return;
+      block.classList.toggle("hidden", present);
+      if (!present) {
+        const auto = $(`${prefix}-ca-auto`);
+        if (auto && auto.checked === false && auto.dataset.userTouched !== "1") {
+          auto.checked = true;
+        }
+        syncCaFormVisibility(prefix);
+      }
+    });
+    return present;
+  }
+
+  async function ensureCaFromRegistration(gid, prefix, devicePassword) {
+    if (await caStatusPresent(gid)) return { source: "keyring", created: false };
+    const autoEl = $(`${prefix}-ca-auto`);
+    const generate = !autoEl || !!autoEl.checked;
+    const explicit = (($(`${prefix}-ca`) && $(`${prefix}-ca`).value) || "").trim();
+    const sudoPassword = (
+      ($(`${prefix}-ca-sudo`) && $(`${prefix}-ca-sudo`).value) ||
+      ""
+    ).trim();
+    if (!generate && !explicit) {
+      throw new Error(
+        "Enter the gateway CA passphrase, or turn on Generate CA passphrase."
+      );
+    }
+    if (generate && !sudoPassword) {
+      throw new Error(
+        "Enter the gateway sudo password to generate the CA passphrase, or enter the CA passphrase instead."
+      );
+    }
+    if (explicit === "admin") {
+      throw new Error('CA passphrase "admin" is not allowed.');
+    }
+    return await wizardApi("POST", "/api/wizard/secrets/ca-ensure", {
+      body: {
+        gateway_id: gid,
+        generate: generate && !explicit,
+        ca_passphrase: explicit || undefined,
+        sudo_password: generate ? sudoPassword : undefined,
+        device_password: devicePassword || undefined,
+      },
+    });
+  }
+
+  async function ensureCaPassphrase(gid) {
+    // View / reissue fallback when Registration did not store a CA yet.
+    if (await caStatusPresent(gid)) return;
     const passphrase = await openCaModal();
     await wizardApi("PUT", "/api/wizard/secrets/ca", {
       body: { gateway_id: gid, ca_passphrase: passphrase },
@@ -228,13 +301,27 @@
     }
   }
 
-  async function withCaRetry(gid, fn) {
-    await ensureCaPassphrase(gid);
+  async function withCaRetry(gid, fn, registration) {
+    if (registration) {
+      await ensureCaFromRegistration(
+        gid,
+        registration.prefix,
+        registration.devicePassword
+      );
+    } else {
+      await ensureCaPassphrase(gid);
+    }
     try {
       return await fn();
     } catch (err) {
       if (!isCaFailure(err)) throw err;
       await clearStoredCa(gid);
+      if (registration) {
+        await refreshCaBlocks();
+        throw new Error(
+          "CA passphrase was rejected. Enter the signing password from Install, or generate a new one with sudo password."
+        );
+      }
       const passphrase = await openCaModal();
       await wizardApi("PUT", "/api/wizard/secrets/ca", {
         body: { gateway_id: gid, ca_passphrase: passphrase },
@@ -315,6 +402,7 @@
     $("reg-form").classList.remove("hidden");
     $("reg-download").classList.add("hidden");
     if ($("reg-msg")) $("reg-msg").innerHTML = "";
+    refreshCaBlocks().catch(() => {});
   }
 
   function clearScanMsg() {
@@ -340,6 +428,7 @@
     $("fake-form").classList.remove("hidden");
     $("fake-download").classList.add("hidden");
     if ($("fake-msg")) $("fake-msg").innerHTML = "";
+    refreshCaBlocks().catch(() => {});
     setTimeout(() => $("fake-user").focus(), 50);
   }
 
@@ -443,10 +532,13 @@
     $("reg-download").classList.add("hidden");
     $("btn-register").disabled = true;
     try {
-      const data = await withCaRetry(gid, () =>
-        control("POST", `/api/v1/gateways/${encodeURIComponent(gid)}/devices`, {
-          body,
-        })
+      const data = await withCaRetry(
+        gid,
+        () =>
+          control("POST", `/api/v1/gateways/${encodeURIComponent(gid)}/devices`, {
+            body,
+          }),
+        { prefix: "reg", devicePassword: password }
       );
       $("reg-msg").innerHTML = `<div class="okmsg">Registered <strong>${escapeHtml(
         user_id
@@ -462,6 +554,9 @@
         ]);
       }
       $("reg-pass").value = "";
+      if ($("reg-ca-sudo")) $("reg-ca-sudo").value = "";
+      if ($("reg-ca")) $("reg-ca").value = "";
+      refreshCaBlocks().catch(() => {});
     } finally {
       $("btn-register").disabled = false;
     }
@@ -501,12 +596,15 @@
     $("fake-download").classList.add("hidden");
     $("btn-fake-create").disabled = true;
     try {
-      const data = await withCaRetry(gid, () =>
-        control(
-          "POST",
-          `/api/v1/gateways/${encodeURIComponent(gid)}/devices/fake`,
-          { body }
-        )
+      const data = await withCaRetry(
+        gid,
+        () =>
+          control(
+            "POST",
+            `/api/v1/gateways/${encodeURIComponent(gid)}/devices/fake`,
+            { body }
+          ),
+        { prefix: "fake", devicePassword: password }
       );
       const status = (data.device && data.device.fake && data.device.fake.status) || "";
       const okLine =
@@ -525,6 +623,9 @@
         ]);
       }
       $("fake-pass").value = "";
+      if ($("fake-ca-sudo")) $("fake-ca-sudo").value = "";
+      if ($("fake-ca")) $("fake-ca").value = "";
+      refreshCaBlocks().catch(() => {});
     } finally {
       $("btn-fake-create").disabled = false;
     }
@@ -1022,6 +1123,7 @@
       $("host-list").innerHTML = "";
       $("scan-badge").innerHTML = "";
       clearScanMsg();
+      refreshCaBlocks().catch(() => {});
       const active = document.querySelector("#action-tabs button.active");
       const tab = active && active.dataset.action;
       if (tab === "view") {
@@ -1029,6 +1131,16 @@
       } else if (tab === "simulate") {
         refreshFakeDevices().catch(showErr);
       }
+    });
+
+    ["reg", "fake"].forEach((prefix) => {
+      const auto = $(`${prefix}-ca-auto`);
+      if (!auto) return;
+      auto.addEventListener("change", () => {
+        auto.dataset.userTouched = "1";
+        syncCaFormVisibility(prefix);
+      });
+      syncCaFormVisibility(prefix);
     });
 
     $("btn-find-sensor").addEventListener("click", () =>

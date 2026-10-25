@@ -583,6 +583,72 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True, "gateway_id": gid, "present": True})
             return
 
+        if method == "POST" and path == "/api/wizard/secrets/ca-ensure":
+            # Registration helper: reuse keyring CA, store an explicit passphrase,
+            # or auto-generate from sudo (+ optional device password) when absent.
+            body = _read_json(handler)
+            gid = str(body.get("gateway_id") or "").strip()
+            if not gid:
+                _json_response(handler, 400, {"error": "gateway_id required"})
+                return
+            if keyring_store.get_secret(gid, kind="ca"):
+                _json_response(
+                    handler,
+                    200,
+                    {
+                        "ok": True,
+                        "gateway_id": gid,
+                        "present": True,
+                        "created": False,
+                        "source": "keyring",
+                    },
+                )
+                return
+            explicit = body.get("ca_passphrase")
+            generate = bool(body.get("generate"))
+            try:
+                if isinstance(explicit, str) and explicit.strip():
+                    ca_pass = ca_passphrase.validate_ca_passphrase(explicit)
+                    source = "explicit"
+                elif generate:
+                    sudo_password = str(body.get("sudo_password") or "")
+                    device_password = str(body.get("device_password") or "")
+                    ca_pass = ca_passphrase.generate_ca_passphrase(
+                        sudo_password=sudo_password,
+                        gateway_id=gid,
+                        device_password=device_password,
+                    )
+                    source = "generated"
+                else:
+                    _json_response(
+                        handler,
+                        400,
+                        {
+                            "error": (
+                                "CA passphrase required — enter it, or enable "
+                                "Generate CA passphrase with the gateway sudo password"
+                            )
+                        },
+                    )
+                    return
+            except ValueError as e:
+                _json_response(handler, 400, {"error": str(e)})
+                return
+            keyring_store.set_secret(gid, ca_pass, kind="ca")
+            ca_pass = ""  # drop local reference
+            _json_response(
+                handler,
+                200,
+                {
+                    "ok": True,
+                    "gateway_id": gid,
+                    "present": True,
+                    "created": True,
+                    "source": source,
+                },
+            )
+            return
+
         if method == "DELETE" and path == "/api/wizard/secrets/ca":
             gid = (qs.get("gateway_id") or [""])[0].strip()
             if not gid:

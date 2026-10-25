@@ -98,6 +98,35 @@
           </label>
           <input id="reg-topic-r" placeholder="alerts/+" />
         </div>
+        <div id="reg-ca-block" class="hidden">
+          <div class="row">
+            <input type="checkbox" id="reg-ca-auto" checked />
+            <label for="reg-ca-auto" style="min-width:auto">
+              Generate CA passphrase
+              <span class="field-help" tabindex="0" aria-label="What is Generate CA passphrase?">?
+                <span class="field-help-tip">Creates a signing password from the sensor password and gateway sudo password when none is saved yet. Skip this if Install already saved one.</span>
+              </span>
+            </label>
+          </div>
+          <div class="row" id="reg-ca-sudo-row">
+            <label for="reg-ca-sudo">
+              Sudo password
+              <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
+                <span class="field-help-tip">Gateway sudo password used only to generate the CA signing secret.</span>
+              </span>
+            </label>
+            <input id="reg-ca-sudo" type="password" autocomplete="off" />
+          </div>
+          <div class="row hidden" id="reg-ca-pass-row">
+            <label for="reg-ca">
+              CA passphrase
+              <span class="field-help" tabindex="0" aria-label="What is CA passphrase?">?
+                <span class="field-help-tip">Signing password for this gateway (same as Install). Optional when Generate is on.</span>
+              </span>
+            </label>
+            <input id="reg-ca" type="password" autocomplete="off" />
+          </div>
+        </div>
         <div class="row">
           <button type="button" class="primary" id="btn-register">Register</button>
         </div>
@@ -143,6 +172,35 @@
             </span>
           </label>
           <input id="fake-topic-r" placeholder="alerts/+" />
+        </div>
+        <div id="fake-ca-block" class="hidden">
+          <div class="row">
+            <input type="checkbox" id="fake-ca-auto" checked />
+            <label for="fake-ca-auto" style="min-width:auto">
+              Generate CA passphrase
+              <span class="field-help" tabindex="0" aria-label="What is Generate CA passphrase?">?
+                <span class="field-help-tip">Creates a signing password from the fake sensor password and gateway sudo password when none is saved yet. You can leave this on and skip typing a CA passphrase.</span>
+              </span>
+            </label>
+          </div>
+          <div class="row" id="fake-ca-sudo-row">
+            <label for="fake-ca-sudo">
+              Sudo password
+              <span class="field-help" tabindex="0" aria-label="What is Sudo password?">?
+                <span class="field-help-tip">Gateway sudo password used only to generate the CA signing secret.</span>
+              </span>
+            </label>
+            <input id="fake-ca-sudo" type="password" autocomplete="off" />
+          </div>
+          <div class="row hidden" id="fake-ca-pass-row">
+            <label for="fake-ca">
+              CA passphrase
+              <span class="field-help" tabindex="0" aria-label="What is CA passphrase?">?
+                <span class="field-help-tip">Signing password for this gateway (same as Install). Optional when Generate is on.</span>
+              </span>
+            </label>
+            <input id="fake-ca" type="password" autocomplete="off" />
+          </div>
         </div>
         <div class="row">
           <button type="button" class="primary" id="btn-fake-create">Create</button>
