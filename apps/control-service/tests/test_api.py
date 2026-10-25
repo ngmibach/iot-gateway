@@ -669,6 +669,274 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         mocked.assert_not_called()
 
+    def _seed_fake(self, device_id: str = "fake1", ip: str = "10.255.0.2") -> None:
+        self.registry.upsert_device(
+            "gw1",
+            device_id,
+            ip=ip,
+            topics_rw=["sensors/fake1/#"],
+            meta_json={
+                "is_fake": True,
+                "kafka_topic": f"sensor.{device_id}",
+                "fake": {
+                    "ip": ip,
+                    "netns": f"iotgw-fake-{device_id}",
+                    "unit": f"iotgw-fake@{device_id}",
+                    "bridge": "iotgw-fake",
+                    "status": "running",
+                    "send_interval_ms": 1000,
+                    "topic": f"sensors/{device_id}/process",
+                    "behaviors": {
+                        "omit_client_cert": False,
+                        "wrong_client_cert": False,
+                        "skip_encryption": False,
+                        "bad_encryption": False,
+                        "wrong_password": False,
+                        "wrong_topic": False,
+                    },
+                },
+            },
+        )
+
+    def test_create_fake_device_happy_path(self) -> None:
+        from actions.fake_sensors import FakeAllocation, FakePlaybookResult
+
+        alloc = FakeAllocation(
+            device_id="fake1",
+            ip="10.255.0.2",
+            host_num=2,
+            host_if="vf2",
+            ns_if="vn2",
+            netns="iotgw-fake-fake1",
+            unit="iotgw-fake@fake1",
+        )
+
+        def _register(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+            out = _register_ok(_ssh, **kwargs)
+            out.client_key_pem = b"-----BEGIN PRIVATE KEY-----\nK\n-----END PRIVATE KEY-----\n"
+            out.client_crt_pem = b"-----BEGIN CERTIFICATE-----\nC\n-----END CERTIFICATE-----\n"
+            out.ca_crt_pem = b"-----BEGIN CERTIFICATE-----\nCA\n-----END CERTIFICATE-----\n"
+            return out
+
+        with (
+            patch(
+                "api.devices.ensure_fake_runtime",
+                return_value=FakePlaybookResult(ok=True, message="runtime"),
+            ),
+            patch(
+                "api.devices.create_netns",
+                return_value=FakePlaybookResult(
+                    ok=True,
+                    message="netns",
+                    details={"allocation": alloc.__dict__},
+                ),
+            ) as netns,
+            patch("api.devices.register_device", side_effect=_register) as reg,
+            patch(
+                "api.devices.install_fake_files",
+                return_value=FakePlaybookResult(ok=True, message="files"),
+            ) as inst,
+            patch(
+                "api.devices.enable_and_start_unit",
+                return_value=FakePlaybookResult(ok=True, message="started"),
+            ),
+            patch("api.devices.teardown_fake") as torn,
+        ):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices/fake",
+                json={
+                    "user_id": "fake1",
+                    "password": "hunter2xx",
+                    "send_interval_ms": 500,
+                    "payload": {"temp": 21},
+                },
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertTrue(body["device"]["is_fake"])
+        self.assertEqual(body["device"]["ip"], "10.255.0.2")
+        self.assertEqual(body["device"]["fake"]["ip"], "10.255.0.2")
+        self.assertEqual(body["device"]["fake"]["status"], "running")
+        self.assertEqual(body["device"]["fake"]["send_interval_ms"], 500)
+        self.assertEqual(body["kafka_topic"], "sensor.fake1")
+        self.assertIsNotNone(body["cert_bundle_token"])
+        reg.assert_called_once()
+        self.assertEqual(reg.call_args.kwargs["ip"], "10.255.0.2")
+        inst.assert_called_once()
+        netns.assert_called_once()
+        torn.assert_not_called()
+
+    def test_create_fake_conflicts_with_real_device(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+        r = self.client.post(
+            "/api/v1/gateways/gw1/devices/fake",
+            json={"user_id": "sensor1", "password": "hunter2xx"},
+        )
+        self.assertEqual(r.status_code, 409, r.text)
+
+    def test_get_patch_start_stop_fake(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+        g = self.client.get("/api/v1/gateways/gw1/devices/fake1/fake")
+        self.assertEqual(g.status_code, 200, g.text)
+        self.assertEqual(g.json()["ip"], "10.255.0.2")
+        self.assertEqual(g.json()["status"], "running")
+
+        with (
+            patch(
+                "api.devices.update_fake_config",
+                return_value=FakePlaybookResult(ok=True),
+            ) as upd,
+            patch(
+                "api.devices.restart_fake_unit",
+                return_value=FakePlaybookResult(ok=True),
+            ),
+        ):
+            p = self.client.patch(
+                "/api/v1/gateways/gw1/devices/fake1/fake",
+                json={
+                    "send_interval_ms": 2000,
+                    "behaviors": {"omit_client_cert": True},
+                },
+            )
+        self.assertEqual(p.status_code, 200, p.text)
+        self.assertEqual(p.json()["device"]["fake"]["send_interval_ms"], 2000)
+        self.assertTrue(p.json()["device"]["fake"]["behaviors"]["omit_client_cert"])
+        upd.assert_called_once()
+
+        with patch(
+            "api.devices.enable_and_start_unit",
+            return_value=FakePlaybookResult(ok=True),
+        ):
+            s = self.client.post(
+                "/api/v1/gateways/gw1/devices/fake1/fake/start", json={}
+            )
+        self.assertEqual(s.status_code, 200, s.text)
+        self.assertEqual(s.json()["device"]["fake"]["status"], "running")
+
+        with patch(
+            "api.devices.stop_fake_unit",
+            return_value=FakePlaybookResult(ok=True),
+        ):
+            st = self.client.post(
+                "/api/v1/gateways/gw1/devices/fake1/fake/stop", json={}
+            )
+        self.assertEqual(st.status_code, 200, st.text)
+        self.assertEqual(st.json()["device"]["fake"]["status"], "stopped")
+
+    def test_feed_cert_rejects_real_device(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+        r = self.client.post(
+            "/api/v1/gateways/gw1/devices/sensor1/fake/feed-cert",
+            json={},
+        )
+        self.assertEqual(r.status_code, 400, r.text)
+
+    def test_feed_cert_reissues_and_feeds(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+
+        def _reissue(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+            return RegisterResult(
+                ok=True,
+                status="ok",
+                message="reissued",
+                details={"user_id": kwargs.get("user_id")},
+                cert_bundle=b"PK\x03\x04fed-zip",
+                cert_fingerprint="aa" * 32,
+                cert_expires_at="2032-01-01T00:00:00+00:00",
+                ca_crt_pem=b"CA",
+                client_crt_pem=b"CRT",
+                client_key_pem=b"KEY",
+            )
+
+        with (
+            patch("api.devices.reissue_device_cert", side_effect=_reissue) as reiss,
+            patch(
+                "api.devices.feed_fake_certs",
+                return_value=FakePlaybookResult(ok=True, message="fed"),
+            ) as fed,
+        ):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices/fake1/fake/feed-cert",
+                json={"reissue": True},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        body = r.json()
+        self.assertEqual(body["device"]["cert_fingerprint"], "aa" * 32)
+        self.assertEqual(body["device"]["fake"]["cert_feed_fingerprint"], "aa" * 32)
+        self.assertIsNotNone(body["device"]["fake"]["cert_fed_at"])
+        reiss.assert_called_once()
+        fed.assert_called_once()
+
+    def test_reissue_fake_also_feeds(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+
+        def _reissue(_ssh: Any = None, **kwargs: Any) -> RegisterResult:
+            return RegisterResult(
+                ok=True,
+                status="ok",
+                message="reissued",
+                cert_bundle=b"PK\x03\x04reissue-fake",
+                cert_fingerprint="bb" * 32,
+                cert_expires_at="2032-06-01T00:00:00+00:00",
+                ca_crt_pem=b"CA",
+                client_crt_pem=b"CRT",
+                client_key_pem=b"KEY",
+            )
+
+        with (
+            patch("api.devices.reissue_device_cert", side_effect=_reissue),
+            patch(
+                "api.devices.feed_fake_certs",
+                return_value=FakePlaybookResult(ok=True),
+            ) as fed,
+        ):
+            r = self.client.post(
+                "/api/v1/gateways/gw1/devices/fake1/reissue-cert",
+                json={},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("fed", r.json()["message"].lower())
+        self.assertEqual(r.json()["device"]["fake"]["cert_feed_fingerprint"], "bb" * 32)
+        fed.assert_called_once()
+
+    def test_delete_fake_tears_down_runtime(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+        with (
+            patch(
+                "api.devices.teardown_fake",
+                return_value=FakePlaybookResult(ok=True, message="torn"),
+            ) as torn,
+            patch(
+                "api.devices.unregister_device", side_effect=_unregister_ok
+            ) as unreg,
+        ):
+            r = self.client.delete("/api/v1/gateways/gw1/devices/fake1")
+        self.assertEqual(r.status_code, 200, r.text)
+        torn.assert_called_once()
+        unreg.assert_called_once()
+        self.assertIsNone(self.registry.get_device("gw1", "fake1"))
+
+    def test_delete_real_skips_teardown(self) -> None:
+        self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
+        with (
+            patch("api.devices.teardown_fake") as torn,
+            patch(
+                "api.devices.unregister_device", side_effect=_unregister_ok
+            ),
+        ):
+            r = self.client.delete("/api/v1/gateways/gw1/devices/sensor1")
+        self.assertEqual(r.status_code, 200, r.text)
+        torn.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()
+

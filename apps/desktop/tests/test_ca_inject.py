@@ -45,6 +45,19 @@ class CaInjectHelpersTests(unittest.TestCase):
         self.assertTrue(
             _should_inject_ca("PATCH", "/api/v1/gateways/gw1/devices/s1")
         )
+        self.assertTrue(
+            _should_inject_ca("POST", "/api/v1/gateways/gw1/devices/fake")
+        )
+        self.assertTrue(
+            _should_inject_ca(
+                "POST", "/api/v1/gateways/gw1/devices/fake1/fake/feed-cert"
+            )
+        )
+        self.assertFalse(
+            _should_inject_ca(
+                "POST", "/api/v1/gateways/gw1/devices/fake1/fake/start"
+            )
+        )
 
     def test_inject_merges_keyring(self) -> None:
         keyring_store.set_secret("gw1", "secret-ca", kind="ca")
