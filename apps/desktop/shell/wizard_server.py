@@ -1044,8 +1044,15 @@ def _gateway_id_from_v1_path(path: str) -> str | None:
 
 
 def _should_inject_ca(method: str, path: str) -> bool:
-    """Device register / update / reissue-cert — not discover or cert-bundle GET."""
+    """Device register / fake create / update / reissue / feed-cert.
+
+    Skips discover and cert-bundle GET.
+    """
     if method == "POST" and path.endswith("/reissue-cert"):
+        return True
+    if method == "POST" and path.endswith("/fake/feed-cert"):
+        return True
+    if method == "POST" and path.endswith("/devices/fake"):
         return True
     if method == "PATCH" and "/devices/" in path:
         return True

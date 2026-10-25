@@ -66,6 +66,17 @@ class RegisterDeviceRequest(BaseModel):
         return _one_topic(self.topic_readwrite, "topic_readwrite")
 
 
+class FakeBehaviors(BaseModel):
+    """Simulate-tab attack / lab toggles for a fake sensor."""
+
+    omit_client_cert: bool = False
+    wrong_client_cert: bool = False
+    skip_encryption: bool = False
+    bad_encryption: bool = False
+    wrong_password: bool = False
+    wrong_topic: bool = False
+
+
 class FakeDeviceOut(BaseModel):
     """Runtime summary for gateway-side fake sensors (from ``meta_json.fake``)."""
 
@@ -73,9 +84,82 @@ class FakeDeviceOut(BaseModel):
     status: Optional[str] = None
     send_interval_ms: Optional[int] = None
     topic: Optional[str] = None
+    netns: Optional[str] = None
+    unit: Optional[str] = None
+    bridge: Optional[str] = None
+    behaviors: Optional[FakeBehaviors] = None
     cert_fed_at: Optional[int] = None
     cert_feed_fingerprint: Optional[str] = None
     last_error: Optional[str] = None
+
+
+class CreateFakeDeviceRequest(BaseModel):
+    """Spawn a gateway-side fake sensor (netns + register + feed certs + start)."""
+
+    user_id: str = Field(..., min_length=1, max_length=64)
+    password: str = Field(..., min_length=8)
+    topic_read: Optional[Union[str, list[str]]] = None
+    topic_readwrite: Optional[Union[str, list[str]]] = None
+    monitor_enabled: bool = True
+    send_interval_ms: int = Field(default=1000, ge=100, le=3_600_000)
+    payload: Optional[Any] = None
+    topic: Optional[str] = None  # MQTT publish topic (defaults from ACL / user_id)
+    ca_passphrase: Optional[str] = None
+    sudo_password: Optional[str] = None
+
+    @field_validator("user_id")
+    @classmethod
+    def _strip_user(cls, v: str) -> str:
+        return v.strip()
+
+    @field_validator("topic_read", "topic_readwrite")
+    @classmethod
+    def _single_topic(
+        cls, v: Union[str, list[str], None], info
+    ) -> Union[str, list[str], None]:
+        _one_topic(v, info.field_name)
+        return v
+
+    def topics_r(self) -> list[str]:
+        return _as_topic_list(self.topic_read)
+
+    def topics_rw(self) -> list[str]:
+        return _as_topic_list(self.topic_readwrite)
+
+    def topic_r_arg(self) -> str | None:
+        return _one_topic(self.topic_read, "topic_read")
+
+    def topic_rw_arg(self) -> str | None:
+        return _one_topic(self.topic_readwrite, "topic_readwrite")
+
+
+class PatchFakeDeviceRequest(BaseModel):
+    """Update fake simulate config (interval / topic / payload / behaviors)."""
+
+    send_interval_ms: Optional[int] = Field(default=None, ge=100, le=3_600_000)
+    topic: Optional[str] = None
+    payload: Optional[Any] = None
+    behaviors: Optional[FakeBehaviors] = None
+    sudo_password: Optional[str] = None
+
+
+class FeedFakeCertRequest(BaseModel):
+    """Re-sign (default) and/or install mTLS material into the fake runtime."""
+
+    ca_passphrase: Optional[str] = None
+    days: int = Field(default=730, ge=1, le=3650)
+    # When True (default), reissue then feed. When False, PEM fields are required.
+    reissue: bool = True
+    ca_pem: Optional[str] = None
+    client_crt_pem: Optional[str] = None
+    client_key_pem: Optional[str] = None
+    sudo_password: Optional[str] = None
+
+
+class FakeActionRequest(BaseModel):
+    """Optional sudo for start/stop of ``iotgw-fake@`` units."""
+
+    sudo_password: Optional[str] = None
 
 
 class DeviceOut(BaseModel):
@@ -93,6 +177,18 @@ class DeviceOut(BaseModel):
     # False when absent in meta_json (real sensors).
     is_fake: bool = False
     fake: Optional[FakeDeviceOut] = None
+
+
+class FakeActionResponse(BaseModel):
+    device: DeviceOut
+    status: str = "ok"
+    message: str = ""
+
+
+class PatchFakeDeviceResponse(BaseModel):
+    device: DeviceOut
+    status: str = "ok"
+    message: str = ""
 
 
 class KafkaCapacityOut(BaseModel):
