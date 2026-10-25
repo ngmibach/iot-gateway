@@ -13,6 +13,13 @@ from .csr import (
     generate_client_key_and_csr,
     sign_csr_on_gateway,
 )
+from .kafka_capacity import (
+    DEFAULT_TOPIC_RETENTION_BYTES,
+    CapacityPlan,
+    plan_capacity,
+    probe_total_storage_bytes,
+)
+from .kafka_topics import CapacityExceededError, TopicCatalog
 from .mosquitto_ctl import reload_mosquitto
 from .mosquitto_hash import hash_password_line, zeroize_str
 from .paths import DEFAULT_AGENT_DATA, DEFAULT_INSTALL_ROOT, GatewayPaths
@@ -54,6 +61,104 @@ def _paths(
         install_root=install_root,
         data_dir=data_dir if data_dir is not None else DEFAULT_AGENT_DATA,
     )
+
+
+def _read_kafka_catalog(ssh: "SSHClient", paths: GatewayPaths) -> TopicCatalog:
+    try:
+        return TopicCatalog.from_json(ssh.read_text(paths.kafka_topics_catalog))
+    except FileNotFoundError:
+        return TopicCatalog()
+
+
+def _write_kafka_catalog(
+    ssh: "SSHClient",
+    paths: GatewayPaths,
+    catalog: TopicCatalog,
+) -> None:
+    ssh.run(f"mkdir -p {shell_quote(paths.kafka_dir)}")
+    ssh.write_text(paths.kafka_topics_catalog, catalog.to_json(), mode=0o644)
+
+
+def gateway_kafka_capacity(
+    ssh: "SSHClient",
+    *,
+    install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
+    total_storage_bytes: int | None = None,
+) -> CapacityPlan:
+    """Probe gateway disk + topic catalog and return the sensor capacity plan."""
+    paths = _paths(install_root, data_dir)
+    catalog = _read_kafka_catalog(ssh, paths)
+    total = (
+        int(total_storage_bytes)
+        if total_storage_bytes is not None
+        else probe_total_storage_bytes(ssh, paths.data_dir)
+    )
+    return plan_capacity(
+        total_storage_bytes=total,
+        registered_sensors=catalog.count,
+        topic_retention_bytes=catalog.retention_bytes_default,
+        safety_ratio=catalog.safety_ratio,
+    )
+
+
+def _ensure_kafka_topic_slot(
+    ssh: "SSHClient",
+    paths: GatewayPaths,
+    *,
+    user_id: str,
+    topic_retention_bytes: int | None,
+    total_storage_bytes: int | None,
+) -> tuple[TopicCatalog, dict[str, Any]]:
+    """Reserve a Kafka topic for ``user_id`` or raise CapacityExceededError."""
+    catalog = _read_kafka_catalog(ssh, paths)
+    existing = catalog.get_by_device(user_id)
+    retention = int(
+        topic_retention_bytes
+        if topic_retention_bytes is not None
+        else catalog.retention_bytes_default or DEFAULT_TOPIC_RETENTION_BYTES
+    )
+    total = (
+        int(total_storage_bytes)
+        if total_storage_bytes is not None
+        else probe_total_storage_bytes(ssh, paths.data_dir)
+    )
+    # Re-register of an existing sensor does not consume an extra slot.
+    counted = catalog.count if existing is None else max(0, catalog.count - 1)
+    plan = plan_capacity(
+        total_storage_bytes=total,
+        registered_sensors=counted,
+        topic_retention_bytes=retention,
+        safety_ratio=catalog.safety_ratio,
+    )
+    if existing is None and plan.remaining_slots <= 0:
+        raise CapacityExceededError(
+            (
+                f"gateway Kafka capacity full: {plan.registered_sensors}/"
+                f"{plan.max_sensors} sensors "
+                f"(topic cap {retention} bytes, disk {total} bytes, "
+                f"safety {catalog.safety_ratio:.0%})"
+            ),
+            max_sensors=plan.max_sensors,
+            registered_sensors=plan.registered_sensors,
+            topic_retention_bytes=retention,
+            total_storage_bytes=total,
+        )
+    record = catalog.upsert_device(user_id, retention_bytes=retention)
+    _write_kafka_catalog(ssh, paths, catalog)
+    return catalog, {
+        "kafka_topic": record.topic,
+        "kafka_retention_bytes": record.retention_bytes,
+        "kafka_capacity": {
+            "total_storage_bytes": plan.total_storage_bytes,
+            "topic_retention_bytes": plan.topic_retention_bytes,
+            "safety_ratio": plan.safety_ratio,
+            "budget_bytes": plan.budget_bytes,
+            "max_sensors": plan.max_sensors,
+            "registered_sensors": catalog.count,
+            "remaining_slots": max(0, plan.max_sensors - catalog.count),
+        },
+    }
 
 
 def _chmod_mosquitto_secrets(ssh: "SSHClient", paths: GatewayPaths) -> None:
@@ -122,17 +227,23 @@ def register_device(
     cert_days: int = 730,
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
+    topic_retention_bytes: int | None = None,
+    total_storage_bytes: int | None = None,
 ) -> RegisterResult:
-    """Register MQTT user: ACL upsert + hashed passwd + CSR/sign.
+    """Register MQTT user + Kafka topic: ACL upsert + hashed passwd + CSR/sign.
 
+    Before Mosquitto changes, reserves a retention-capped Kafka topic for the
+    sensor when capacity remains (70% of gateway disk / per-topic cap).
     Compensating restores on failure through CSR sign. After Mosquitto reload,
     failures return ``ok=True, status="degraded"`` without rolling back live
     ACL/password files. ``ip`` is validated for registry metadata only (no
     HAProxy allow-list on the packaged agent).
     """
     bak_acl = bak_pw = None
+    bak_kafka = None
     signed: SignedClientCert | None = None
     paths = _paths(install_root, data_dir)
+    kafka_meta: dict[str, Any] = {}
 
     try:
         user_id = validate_user_id(user_id)
@@ -146,6 +257,41 @@ def register_device(
         zeroize_str(password)
 
         material = key_material or generate_client_key_and_csr(cn=user_id)
+
+        # 0 Kafka topic slot (storage-capped) — fail closed before MQTT writes.
+        catalog_before = _read_kafka_catalog(ssh, paths)
+        try:
+            if ssh.exists(paths.kafka_topics_catalog):
+                bak_kafka = ssh.backup(paths.kafka_topics_catalog)
+            _, kafka_meta = _ensure_kafka_topic_slot(
+                ssh,
+                paths,
+                user_id=user_id,
+                topic_retention_bytes=topic_retention_bytes,
+                total_storage_bytes=total_storage_bytes,
+            )
+        except CapacityExceededError as exc:
+            return RegisterResult(
+                ok=False,
+                status="failed",
+                message=str(exc),
+                details={
+                    "user_id": user_id,
+                    "ip": ip,
+                    "kafka_capacity": {
+                        "max_sensors": exc.max_sensors,
+                        "registered_sensors": exc.registered_sensors,
+                        "topic_retention_bytes": exc.topic_retention_bytes,
+                        "total_storage_bytes": exc.total_storage_bytes,
+                    },
+                },
+            )
+
+        def _restore_kafka() -> None:
+            if bak_kafka:
+                ssh.restore_backup(paths.kafka_topics_catalog, bak_kafka)
+            else:
+                _write_kafka_catalog(ssh, paths, catalog_before)
 
         # 1 Backup
         bak_acl = ssh.backup(paths.acl)
@@ -162,6 +308,7 @@ def register_device(
             ssh.write_text(paths.acl, acl, mode=0o600)
         except Exception:
             _restore_backups(ssh, bak_acl=bak_acl, paths=paths)
+            _restore_kafka()
             raise
 
         # 3 Password hash line
@@ -170,6 +317,7 @@ def register_device(
             ssh.write_text(paths.passwords, pw, mode=0o600)
         except Exception:
             _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
+            _restore_kafka()
             raise
 
         # 4 CSR sign
@@ -184,11 +332,12 @@ def register_device(
             )
         except Exception:
             _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
+            _restore_kafka()
             raise
 
         _chmod_mosquitto_secrets(ssh, paths)
         cert_kw = _cert_fields(material, signed)
-        backups = {"acl": bak_acl, "passwords": bak_pw}
+        backups = {"acl": bak_acl, "passwords": bak_pw, "kafka": bak_kafka}
 
         # 5 Reload mosquitto — files stay; do not roll back on failure.
         try:
@@ -198,7 +347,12 @@ def register_device(
                 ok=True,
                 status="degraded",
                 message=f"files written but mosquitto reload failed: {exc}",
-                details={"user_id": user_id, "ip": ip, "backups": backups},
+                details={
+                    "user_id": user_id,
+                    "ip": ip,
+                    "backups": backups,
+                    **kafka_meta,
+                },
                 **cert_kw,
             )
 
@@ -211,6 +365,7 @@ def register_device(
                 "ip": ip,
                 "mosquitto": mosq_mode,
                 "backups": backups,
+                **kafka_meta,
             },
             **cert_kw,
         )
@@ -219,7 +374,7 @@ def register_device(
             ok=False,
             status="failed",
             message=str(exc),
-            details={"user_id": user_id, "ip": ip},
+            details={"user_id": user_id, "ip": ip, **kafka_meta},
         )
 
 
@@ -323,14 +478,15 @@ def unregister_device(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> PlaybookResult:
-    """Remove ACL block + password line.
+    """Remove ACL block + password line + Kafka topic catalog entry.
 
     ``remove_ip`` is retained for API compatibility; the packaged agent has no
     HAProxy allow-list file, so IP removal is a no-op for remote files.
     """
     paths = _paths(install_root, data_dir)
-    bak_acl = bak_pw = None
+    bak_acl = bak_pw = bak_kafka = None
     mosquitto_reloaded = False
+    removed_topic: str | None = None
 
     try:
         user_id = validate_user_id(user_id)
@@ -339,12 +495,20 @@ def unregister_device(
 
         bak_acl = ssh.backup(paths.acl)
         bak_pw = ssh.backup(paths.passwords)
+        if ssh.exists(paths.kafka_topics_catalog):
+            bak_kafka = ssh.backup(paths.kafka_topics_catalog)
 
         acl = fileops.remove_user_acl(ssh.read_text(paths.acl), user_id)
         ssh.write_text(paths.acl, acl, mode=0o600)
 
         pw = fileops.remove_password_user(ssh.read_text(paths.passwords), user_id)
         ssh.write_text(paths.passwords, pw, mode=0o600)
+
+        catalog = _read_kafka_catalog(ssh, paths)
+        removed = catalog.remove_device(user_id)
+        if removed is not None:
+            removed_topic = removed.topic
+            _write_kafka_catalog(ssh, paths, catalog)
 
         _chmod_mosquitto_secrets(ssh, paths)
         mosq_mode = reload_mosquitto(ssh)
@@ -357,7 +521,12 @@ def unregister_device(
                 "user_id": user_id,
                 "removed_ip": ip if remove_ip else None,
                 "mosquitto": mosq_mode,
-                "backups": {"acl": bak_acl, "passwords": bak_pw},
+                "kafka_topic_removed": removed_topic,
+                "backups": {
+                    "acl": bak_acl,
+                    "passwords": bak_pw,
+                    "kafka": bak_kafka,
+                },
             },
         )
     except Exception as exc:
@@ -371,6 +540,11 @@ def unregister_device(
                 )
             except Exception:
                 pass
+            if bak_kafka:
+                try:
+                    ssh.restore_backup(paths.kafka_topics_catalog, bak_kafka)
+                except Exception:
+                    pass
             return PlaybookResult(ok=False, status="failed", message=str(exc))
         return PlaybookResult(
             ok=True,

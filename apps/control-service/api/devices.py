@@ -9,7 +9,13 @@ from typing import Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 
 from actions.discover_sensors import discover_sensor_hosts
-from actions.playbooks import register_device, reissue_device_cert, unregister_device
+from actions.kafka_capacity import kafka_topic_name
+from actions.playbooks import (
+    gateway_kafka_capacity,
+    register_device,
+    reissue_device_cert,
+    unregister_device,
+)
 from actions.validate import validate_ip_or_cidr, validate_topic, validate_user_id
 from registry.registry import Registry
 
@@ -28,6 +34,7 @@ from .schemas import (
     DeviceOut,
     DiscoverSensorsResponse,
     GatewayOut,
+    KafkaCapacityOut,
     RegisterDeviceRequest,
     RegisterDeviceResponse,
     ReissueCertRequest,
@@ -55,7 +62,15 @@ def _parse_json_field(value: Any) -> Any:
     return value
 
 
+def _meta_dict(row: dict[str, Any]) -> dict[str, Any]:
+    meta = _parse_json_field(row.get("meta_json"))
+    return meta if isinstance(meta, dict) else {}
+
+
 def _device_out(row: dict[str, Any]) -> DeviceOut:
+    meta = _meta_dict(row)
+    kafka_topic = meta.get("kafka_topic")
+    retention = meta.get("kafka_retention_bytes")
     return DeviceOut(
         id=row["id"],
         gateway_id=row["gateway_id"],
@@ -66,6 +81,21 @@ def _device_out(row: dict[str, Any]) -> DeviceOut:
         cert_expires_at=row.get("cert_expires_at"),
         cert_fingerprint=row.get("cert_fingerprint"),
         created_at=row.get("created_at"),
+        kafka_topic=str(kafka_topic) if kafka_topic else None,
+        kafka_retention_bytes=int(retention) if retention is not None else None,
+    )
+
+
+def _capacity_out(plan: Any) -> KafkaCapacityOut:
+    return KafkaCapacityOut(
+        total_storage_bytes=int(plan.total_storage_bytes),
+        topic_retention_bytes=int(plan.topic_retention_bytes),
+        safety_ratio=float(plan.safety_ratio),
+        budget_bytes=int(plan.budget_bytes),
+        max_sensors=int(plan.max_sensors),
+        registered_sensors=int(plan.registered_sensors),
+        remaining_slots=int(plan.remaining_slots),
+        at_capacity=bool(plan.at_capacity),
     )
 
 
@@ -134,6 +164,28 @@ def post_discover_sensors(
     )
 
 
+@router.get(
+    "/gateways/{gid}/kafka/capacity",
+    response_model=KafkaCapacityOut,
+)
+def get_kafka_capacity(
+    gid: str,
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> KafkaCapacityOut:
+    """Return how many sensors this gateway may still register (disk × 70%)."""
+    gw = require_gateway(registry, gid)
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            plan = gateway_kafka_capacity(ssh, install_root=gw["install_root"])
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"kafka capacity probe failed: {exc}",
+        ) from exc
+    return _capacity_out(plan)
+
+
 @router.post(
     "/gateways/{gid}/devices",
     response_model=RegisterDeviceResponse,
@@ -191,10 +243,27 @@ def post_register_device(
         ) from exc
 
     if not result.ok:
+        capacity = (result.details or {}).get("kafka_capacity")
+        if capacity and "capacity full" in (result.message or "").lower():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "message": result.message or "gateway Kafka capacity full",
+                    "kafka_capacity": capacity,
+                },
+            )
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=result.message or "register_device failed",
         )
+
+    kafka_topic = (result.details or {}).get("kafka_topic") or kafka_topic_name(user_id)
+    kafka_retention = (result.details or {}).get("kafka_retention_bytes")
+    kafka_capacity_raw = (result.details or {}).get("kafka_capacity")
+    meta = {
+        "kafka_topic": kafka_topic,
+        "kafka_retention_bytes": kafka_retention,
+    }
 
     topics_rw = body.topics_rw() or None
     topics_r = body.topics_r() or None
@@ -207,6 +276,7 @@ def post_register_device(
         monitor_enabled=1 if body.monitor_enabled else 0,
         cert_expires_at=_expires_unix(result.cert_expires_at),
         cert_fingerprint=result.cert_fingerprint,
+        meta_json=meta,
     )
     registry.audit(
         "register_device",
@@ -216,6 +286,7 @@ def post_register_device(
             "ip": ip,
             "status": result.status,
             "cert_fingerprint": result.cert_fingerprint,
+            "kafka_topic": kafka_topic,
         },
     )
 
@@ -223,12 +294,29 @@ def post_register_device(
     if result.cert_bundle:
         token = cert_cache.put(gid, user_id, result.cert_bundle)
 
+    capacity_out = None
+    if isinstance(kafka_capacity_raw, dict):
+        capacity_out = KafkaCapacityOut(
+            total_storage_bytes=int(kafka_capacity_raw.get("total_storage_bytes") or 0),
+            topic_retention_bytes=int(
+                kafka_capacity_raw.get("topic_retention_bytes") or 0
+            ),
+            safety_ratio=float(kafka_capacity_raw.get("safety_ratio") or 0.7),
+            budget_bytes=int(kafka_capacity_raw.get("budget_bytes") or 0),
+            max_sensors=int(kafka_capacity_raw.get("max_sensors") or 0),
+            registered_sensors=int(kafka_capacity_raw.get("registered_sensors") or 0),
+            remaining_slots=int(kafka_capacity_raw.get("remaining_slots") or 0),
+            at_capacity=int(kafka_capacity_raw.get("remaining_slots") or 0) <= 0,
+        )
+
     return RegisterDeviceResponse(
         device=_device_out(device),
         cert_bundle_token=token,
         status=result.status,
         message=result.message,
         idempotent=idempotent,
+        kafka_topic=kafka_topic,
+        kafka_capacity=capacity_out,
     )
 
 
