@@ -1,1 +1,0 @@
-FROM gitea/act_runner:latest

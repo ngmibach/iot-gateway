@@ -22,8 +22,6 @@ class AppState:
     registry: Registry
     cert_cache: CertBundleCache = field(default_factory=CertBundleCache)
     open_ssh: Optional[OpenSSH] = None
-    # Optional LabFakeSensorManager; created lazily by api.lab.
-    lab_manager: Any = None
 
 
 def get_state(request: Request) -> AppState:

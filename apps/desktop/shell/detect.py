@@ -1,22 +1,12 @@
-"""Runtime detection for the Setup Wizard (Docker optional; WSL not required)."""
+"""Runtime detection for the Setup Wizard (no Docker; WSL not required)."""
 
 from __future__ import annotations
 
 import os
 import platform
-import shutil
 import subprocess
 from dataclasses import asdict, dataclass
 from typing import Any, Literal
-
-
-@dataclass(frozen=True)
-class DockerStatus:
-    present: bool
-    healthy: bool
-    version: str = ""
-    error: str = ""
-    hint: str = ""
 
 
 @dataclass(frozen=True)
@@ -25,7 +15,7 @@ class WslStatus:
     in_wsl: bool
     distro: str = ""
     wsl_ip: str = ""
-    localhost_forwarding_note: str = ""
+    note: str = ""
 
 
 def in_wsl() -> bool:
@@ -48,63 +38,6 @@ def operator_runtime() -> Literal["windows", "wsl", "linux"]:
     return "linux"
 
 
-def detect_docker() -> DockerStatus:
-    """Run ``docker info`` — healthy only when daemon responds.
-
-    The packaged app does **not** require Docker; native Loki/Prometheus are used.
-    """
-    exe = shutil.which("docker")
-    if not exe:
-        return DockerStatus(
-            present=False,
-            healthy=False,
-            hint=(
-                "Docker is not required. The app downloads and runs Loki and "
-                "Prometheus as native processes."
-            ),
-        )
-
-    from .winproc import hidden_kwargs
-
-    quiet = hidden_kwargs()
-    try:
-        ver = subprocess.run(
-            [exe, "version", "--format", "{{.Server.Version}}"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            **quiet,
-        )
-        info = subprocess.run(
-            [exe, "info"],
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            **quiet,
-        )
-    except (OSError, subprocess.TimeoutExpired) as e:
-        return DockerStatus(
-            present=True,
-            healthy=False,
-            error=str(e),
-            hint="Docker CLI found but daemon did not respond.",
-        )
-
-    version = (ver.stdout or "").strip() if ver.returncode == 0 else ""
-    if info.returncode != 0:
-        err = (info.stderr or info.stdout or "docker info failed").strip()
-        return DockerStatus(
-            present=True,
-            healthy=False,
-            version=version,
-            error=err.splitlines()[-1] if err else "docker info failed",
-            hint="Start the Docker daemon / Docker Desktop, then retry.",
-        )
-    return DockerStatus(present=True, healthy=True, version=version or "unknown")
-
-
 def _wsl_eth0_ip() -> str:
     try:
         proc = subprocess.run(
@@ -118,7 +51,6 @@ def _wsl_eth0_ip() -> str:
         return ""
     if proc.returncode != 0 or not proc.stdout.strip():
         return ""
-    # ``2: eth0    inet 172.28.x.x/20 ...``
     parts = proc.stdout.split()
     for i, tok in enumerate(parts):
         if tok == "inet" and i + 1 < len(parts):
@@ -134,8 +66,8 @@ def detect_wsl() -> WslStatus:
     note = ""
     if inside:
         note = (
-            "Running inside WSL. The packaged Windows .exe does not need WSL — "
-            "prefer the native Windows build for a PC without WSL."
+            "Running inside WSL. Prefer the native Windows .exe — "
+            "WSL is not required for the packaged app."
         )
     elif on_windows:
         note = "WSL is not required. Loki and Prometheus run as native Windows processes."
@@ -144,12 +76,11 @@ def detect_wsl() -> WslStatus:
         in_wsl=inside,
         distro=distro,
         wsl_ip=wsl_ip,
-        localhost_forwarding_note=note,
+        note=note,
     )
 
 
 def environment_snapshot() -> dict[str, Any]:
-    docker = detect_docker()
     wsl = detect_wsl()
     runtime = operator_runtime()
     return {
@@ -158,6 +89,5 @@ def environment_snapshot() -> dict[str, Any]:
         "runtime": runtime,
         "docker_required": False,
         "wsl_required": False,
-        "docker": asdict(docker),
         "wsl": asdict(wsl),
     }

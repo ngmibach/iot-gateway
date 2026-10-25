@@ -34,11 +34,11 @@ class LinuxHappyPathMockedTests(unittest.TestCase):
             result["provision"].steps_completed, list(PROVISION_STEPS)
         )
         self.assertTrue(result["acl_has_user"])
-        self.assertTrue(result["allowlist_has_ip"])
+        self.assertTrue(result["mosquitto_reloaded"])
         self.assertTrue(result["password_not_plaintext"])
-        self.assertTrue(result["nodered_in_compose"])  # K17
-        self.assertIn("node_exporter", result["provision"].probes)
-        self.assertIn("loki", result["provision"].probes)
+        self.assertTrue(result["agent_installed"])
+        self.assertIn("agent_health", result["provision"].probes)
+        self.assertIn("mqtt", result["provision"].probes)
 
     def test_provision_failure_stops_before_register(self) -> None:
         ssh = FakeSSH()
@@ -46,17 +46,17 @@ class LinuxHappyPathMockedTests(unittest.TestCase):
             ssh,
             gateway_ip="192.168.1.50",
             monitoring_ip="192.168.1.20",
-            fail_at="compose_up",
+            fail_at="upload_agent",
         )
         self.assertFalse(prov.ok)
-        self.assertIn("compose_up", prov.message)
-        self.assertNotIn("compose_up", prov.steps_completed)
-        self.assertIn("stage_upload_bundle", prov.steps_completed)
+        self.assertIn("upload_agent", prov.message)
+        self.assertNotIn("upload_agent", prov.steps_completed)
+        self.assertIn("ensure_mosquitto", prov.steps_completed)
 
     def test_live_checklist_documents_flow(self) -> None:
         text = run_live_checklist()
         self.assertIn("provisioner", text)
-        self.assertIn("nodered", text.lower())
+        self.assertIn("mosquitto", text.lower())
         self.assertIn("GATEWAY_IP", text)
 
 
@@ -72,7 +72,7 @@ class LinuxRegisterApiIntegrationTests(unittest.TestCase):
             id="gw1",
             host="192.168.1.50",
             ssh_user="pi",
-            install_root="/opt/iot-gateway",
+            install_root="/opt/iot-gateway-agent",
             fingerprint="fp-test",
             monitoring_ip="192.168.1.20",
         )

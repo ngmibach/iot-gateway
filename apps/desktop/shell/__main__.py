@@ -18,7 +18,7 @@ import sys
 
 from . import detect
 from .launcher import ProcessManager, wait_http
-from .paths import CONTROL_HOST, CONTROL_PORT, STREAMLIT_PORT, WIZARD_PORT
+from .paths import CONTROL_HOST, CONTROL_PORT, WIZARD_PORT
 from .wizard_server import run_forever
 
 
@@ -79,14 +79,9 @@ def main(argv: list[str] | None = None) -> int:
         help="Start control-service (:9137) before wizard (native Monitoring default)",
     )
     parser.add_argument(
-        "--with-streamlit",
-        action="store_true",
-        help="Also start Streamlit (:8501); off by default in Phase-1",
-    )
-    parser.add_argument(
         "--detect-only",
         action="store_true",
-        help="Print Docker/WSL detection JSON and exit",
+        help="Print environment detection JSON and exit",
     )
     parser.add_argument(
         "--run-control-service",
@@ -114,7 +109,6 @@ def main(argv: list[str] | None = None) -> int:
             host=args.host,
             port=args.port,
             start_control=True,
-            with_streamlit=args.with_streamlit,
         )
 
     mgr: ProcessManager | None = None
@@ -126,25 +120,12 @@ def main(argv: list[str] | None = None) -> int:
             mgr.stop_all()
             return 1
         print(f"control-service ready at {ctrl.url}")
-        if args.with_streamlit:
-            try:
-                st = mgr.start_streamlit()
-                if wait_http(st.url, timeout=90):
-                    print(f"streamlit ready at {st.url}")
-                else:
-                    print(
-                        "streamlit did not become ready (wizard still usable)",
-                        file=sys.stderr,
-                    )
-            except FileNotFoundError as e:
-                print(f"streamlit skip: {e}", file=sys.stderr)
 
     print(
         f"Setup Wizard → http://{args.host}:{args.port}/wizard.html\n"
         f"Actions      → http://{args.host}:{args.port}/actions.html\n"
         f"Monitoring   → http://{args.host}:{args.port}/monitoring.html\n"
         f"Control API  → http://{CONTROL_HOST}:{CONTROL_PORT}\n"
-        f"Streamlit    → http://{CONTROL_HOST}:{STREAMLIT_PORT} (optional)\n"
         "Windows: native Loki/Prometheus (no WSL); firewall checklist for :3100 only."
     )
     try:

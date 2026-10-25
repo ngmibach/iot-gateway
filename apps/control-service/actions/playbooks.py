@@ -13,9 +13,9 @@ from .csr import (
     generate_client_key_and_csr,
     sign_csr_on_gateway,
 )
-from .haproxy import reload_haproxy, restart_mosquitto
+from .mosquitto_ctl import reload_mosquitto
 from .mosquitto_hash import hash_password_line, zeroize_str
-from .paths import DEFAULT_INSTALL_ROOT, GatewayPaths
+from .paths import DEFAULT_AGENT_DATA, DEFAULT_INSTALL_ROOT, GatewayPaths
 from .shellutil import shell_quote
 from .validate import (
     split_csv,
@@ -46,21 +46,23 @@ class RegisterResult(PlaybookResult):
     cert_expires_at: Optional[str] = None
 
 
-def _paths(install_root: str) -> GatewayPaths:
-    return GatewayPaths(install_root=install_root)
+def _paths(
+    install_root: str,
+    data_dir: str | None = None,
+) -> GatewayPaths:
+    return GatewayPaths(
+        install_root=install_root,
+        data_dir=data_dir if data_dir is not None else DEFAULT_AGENT_DATA,
+    )
 
 
 def _chmod_mosquitto_secrets(ssh: "SSHClient", paths: GatewayPaths) -> None:
-    # Host bind-mount perms; best-effort container ownership like the old workflow.
     ssh.run(
         f"chmod 0600 {shell_quote(paths.passwords)} {shell_quote(paths.acl)} || true"
     )
     ssh.run(
-        "docker compose"
-        f" -f {shell_quote(paths.compose_file)}"
-        " exec -T mosquitto sh -c "
-        "'chown mosquitto:mosquitto /mosquitto/config/passwords /mosquitto/config/acl"
-        " && chmod 0600 /mosquitto/config/passwords /mosquitto/config/acl' || true"
+        f"chown mosquitto:mosquitto {shell_quote(paths.passwords)} "
+        f"{shell_quote(paths.acl)} 2>/dev/null || true"
     )
 
 
@@ -69,11 +71,8 @@ def _restore_backups(
     *,
     bak_acl: str | None = None,
     bak_pw: str | None = None,
-    bak_ips: str | None = None,
     paths: GatewayPaths,
 ) -> None:
-    if bak_ips:
-        ssh.restore_backup(paths.allowed_ips, bak_ips)
     if bak_pw:
         ssh.restore_backup(paths.passwords, bak_pw)
     if bak_acl:
@@ -118,20 +117,22 @@ def register_device(
     topic_rw: str | None = None,
     topic_r: str | None = None,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
     ca_passphrase: str,
     cert_days: int = 730,
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
 ) -> RegisterResult:
-    """Register MQTT user: ACL upsert + hashed passwd + allow-list IP + CSR/sign.
+    """Register MQTT user: ACL upsert + hashed passwd + CSR/sign.
 
-    Compensating restores on failure through step 5. After mosquitto restart,
-    reload failures return ``ok=True, status="degraded"`` without rolling back
-    live ACL/password files.
+    Compensating restores on failure through CSR sign. After Mosquitto reload,
+    failures return ``ok=True, status="degraded"`` without rolling back live
+    ACL/password files. ``ip`` is validated for registry metadata only (no
+    HAProxy allow-list on the packaged agent).
     """
-    bak_acl = bak_pw = bak_ips = None
+    bak_acl = bak_pw = None
     signed: SignedClientCert | None = None
-    paths = _paths(install_root)
+    paths = _paths(install_root, data_dir)
 
     try:
         user_id = validate_user_id(user_id)
@@ -149,7 +150,6 @@ def register_device(
         # 1 Backup
         bak_acl = ssh.backup(paths.acl)
         bak_pw = ssh.backup(paths.passwords)
-        bak_ips = ssh.backup(paths.allowed_ips)
 
         # 2 ACL upsert (replace block if user already exists)
         try:
@@ -172,17 +172,7 @@ def register_device(
             _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
             raise
 
-        # 4 Allow-list
-        try:
-            ips = fileops.add_allowlist_ips(ssh.read_text(paths.allowed_ips), [ip])
-            ssh.write_text(paths.allowed_ips, ips, mode=0o644)
-        except Exception:
-            _restore_backups(
-                ssh, bak_acl=bak_acl, bak_pw=bak_pw, bak_ips=bak_ips, paths=paths
-            )
-            raise
-
-        # 5 CSR sign
+        # 4 CSR sign
         try:
             signed = sign_csr_on_gateway(
                 ssh,
@@ -193,44 +183,22 @@ def register_device(
                 reject_default_admin_passphrase=reject_default_admin_passphrase,
             )
         except Exception:
-            _restore_backups(
-                ssh, bak_acl=bak_acl, bak_pw=bak_pw, bak_ips=bak_ips, paths=paths
-            )
+            _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
             raise
 
         _chmod_mosquitto_secrets(ssh, paths)
         cert_kw = _cert_fields(material, signed)
-        backups = {"acl": bak_acl, "passwords": bak_pw, "allowed_ips": bak_ips}
+        backups = {"acl": bak_acl, "passwords": bak_pw}
 
-        # 6 Restart mosquitto — files stay; do not roll back on failure.
+        # 5 Reload mosquitto — files stay; do not roll back on failure.
         try:
-            restart_mosquitto(ssh, paths)
+            mosq_mode = reload_mosquitto(ssh)
         except Exception as exc:
             return RegisterResult(
                 ok=True,
                 status="degraded",
-                message=f"files written but mosquitto restart failed: {exc}",
+                message=f"files written but mosquitto reload failed: {exc}",
                 details={"user_id": user_id, "ip": ip, "backups": backups},
-                **cert_kw,
-            )
-
-        # 7 HAProxy reload — do not roll back mosquitto-live files.
-        try:
-            haproxy_mode = reload_haproxy(ssh, paths)
-        except Exception as exc:
-            return RegisterResult(
-                ok=True,
-                status="degraded",
-                message=(
-                    "ACL live, allow-list may be stale until haproxy reload: "
-                    f"{exc}"
-                ),
-                details={
-                    "user_id": user_id,
-                    "ip": ip,
-                    "haproxy": "failed",
-                    "backups": backups,
-                },
                 **cert_kw,
             )
 
@@ -241,7 +209,7 @@ def register_device(
             details={
                 "user_id": user_id,
                 "ip": ip,
-                "haproxy": haproxy_mode,
+                "mosquitto": mosq_mode,
                 "backups": backups,
             },
             **cert_kw,
@@ -261,12 +229,13 @@ def reissue_device_cert(
     user_id: str,
     ca_passphrase: str,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
     cert_days: int = 730,
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
 ) -> RegisterResult:
-    """Sign a fresh client cert for an existing device (no ACL/password/IP changes)."""
-    paths = _paths(install_root)
+    """Sign a fresh client cert for an existing device (no ACL/password changes)."""
+    paths = _paths(install_root, data_dir)
     try:
         user_id = validate_user_id(user_id)
         material = key_material or generate_client_key_and_csr(cn=user_id)
@@ -299,11 +268,12 @@ def update_acl(
     delete_rw: list[str] | str | None = None,
     delete_r: list[str] | str | None = None,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
 ) -> PlaybookResult:
-    """Port of update_acl.yaml."""
+    """Update topics for an existing Mosquitto ACL user block."""
     try:
         user_id = validate_user_id(user_id)
-        paths = _paths(install_root)
+        paths = _paths(install_root, data_dir)
 
         def _list(v: list[str] | str | None) -> list[str]:
             if v is None:
@@ -328,64 +298,15 @@ def update_acl(
             )
             ssh.write_text(paths.acl, updated, mode=0o600)
             _chmod_mosquitto_secrets(ssh, paths)
-            restart_mosquitto(ssh, paths)
+            mosq_mode = reload_mosquitto(ssh)
             return PlaybookResult(
                 ok=True,
                 message="ACL updated",
-                details={"user_id": user_id, "backup": bak},
+                details={"user_id": user_id, "backup": bak, "mosquitto": mosq_mode},
             )
         except Exception:
             try:
                 ssh.restore_backup(paths.acl, bak)
-            except Exception:
-                pass
-            raise
-    except Exception as exc:
-        return PlaybookResult(ok=False, status="failed", message=str(exc))
-
-
-def update_allowlist_ips(
-    ssh: "SSHClient",
-    *,
-    add_ips: list[str] | str | None = None,
-    remove_ips: list[str] | str | None = None,
-    remove_all: bool = False,
-    install_root: str = DEFAULT_INSTALL_ROOT,
-) -> PlaybookResult:
-    """Port of update_device_ip.yaml — HUP/restart, never down -v."""
-    paths = _paths(install_root)
-
-    def _ips(v: list[str] | str | None) -> list[str]:
-        if v is None:
-            return []
-        raw = split_csv(v) if isinstance(v, str) else list(v)
-        return [validate_ip_or_cidr(x) for x in raw]
-
-    try:
-        add_l, rem_l = _ips(add_ips), _ips(remove_ips)
-        if not remove_all and not add_l and not rem_l:
-            return PlaybookResult(ok=True, message="no allow-list changes")
-
-        bak = ssh.backup(paths.allowed_ips)
-        try:
-            content = ssh.read_text(paths.allowed_ips)
-            if remove_all:
-                content = fileops.clear_allowlist(content)
-            else:
-                if rem_l:
-                    content = fileops.remove_allowlist_ips(content, rem_l)
-                if add_l:
-                    content = fileops.add_allowlist_ips(content, add_l)
-            ssh.write_text(paths.allowed_ips, content, mode=0o644)
-            mode = reload_haproxy(ssh, paths)
-            return PlaybookResult(
-                ok=True,
-                message="allow-list updated",
-                details={"haproxy": mode, "backup": bak},
-            )
-        except Exception:
-            try:
-                ssh.restore_backup(paths.allowed_ips, bak)
             except Exception:
                 pass
             raise
@@ -400,15 +321,16 @@ def unregister_device(
     ip: str | None = None,
     remove_ip: bool = False,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
 ) -> PlaybookResult:
-    """Remove ACL block + password line; optionally remove IP.
+    """Remove ACL block + password line.
 
-    ``remove_ip=True`` is unsafe without a registry/shared-IP check — the
-    caller must confirm no other device shares ``ip``. Default is False.
+    ``remove_ip`` is retained for API compatibility; the packaged agent has no
+    HAProxy allow-list file, so IP removal is a no-op for remote files.
     """
-    paths = _paths(install_root)
-    bak_acl = bak_pw = bak_ips = None
-    mosquitto_restarted = False
+    paths = _paths(install_root, data_dir)
+    bak_acl = bak_pw = None
+    mosquitto_reloaded = False
 
     try:
         user_id = validate_user_id(user_id)
@@ -417,7 +339,6 @@ def unregister_device(
 
         bak_acl = ssh.backup(paths.acl)
         bak_pw = ssh.backup(paths.passwords)
-        bak_ips = ssh.backup(paths.allowed_ips) if remove_ip and ip else None
 
         acl = fileops.remove_user_acl(ssh.read_text(paths.acl), user_id)
         ssh.write_text(paths.acl, acl, mode=0o600)
@@ -425,38 +346,9 @@ def unregister_device(
         pw = fileops.remove_password_user(ssh.read_text(paths.passwords), user_id)
         ssh.write_text(paths.passwords, pw, mode=0o600)
 
-        if remove_ip and ip:
-            ips = fileops.remove_allowlist_ips(ssh.read_text(paths.allowed_ips), [ip])
-            ssh.write_text(paths.allowed_ips, ips, mode=0o644)
-
         _chmod_mosquitto_secrets(ssh, paths)
-        restart_mosquitto(ssh, paths)
-        mosquitto_restarted = True
-
-        haproxy_mode = None
-        if remove_ip and ip:
-            try:
-                haproxy_mode = reload_haproxy(ssh, paths)
-            except Exception as exc:
-                # Mosquitto already dropped the user — do not restore ACL/passwd.
-                return PlaybookResult(
-                    ok=True,
-                    status="degraded",
-                    message=(
-                        "user removed from mosquitto; allow-list may be stale "
-                        f"until haproxy reload: {exc}"
-                    ),
-                    details={
-                        "user_id": user_id,
-                        "removed_ip": ip,
-                        "haproxy": "failed",
-                        "backups": {
-                            "acl": bak_acl,
-                            "passwords": bak_pw,
-                            "allowed_ips": bak_ips,
-                        },
-                    },
-                )
+        mosq_mode = reload_mosquitto(ssh)
+        mosquitto_reloaded = True
 
         return PlaybookResult(
             ok=True,
@@ -464,22 +356,17 @@ def unregister_device(
             details={
                 "user_id": user_id,
                 "removed_ip": ip if remove_ip else None,
-                "haproxy": haproxy_mode,
-                "backups": {
-                    "acl": bak_acl,
-                    "passwords": bak_pw,
-                    "allowed_ips": bak_ips,
-                },
+                "mosquitto": mosq_mode,
+                "backups": {"acl": bak_acl, "passwords": bak_pw},
             },
         )
     except Exception as exc:
-        if not mosquitto_restarted:
+        if not mosquitto_reloaded:
             try:
                 _restore_backups(
                     ssh,
                     bak_acl=bak_acl,
                     bak_pw=bak_pw,
-                    bak_ips=bak_ips,
                     paths=paths,
                 )
             except Exception:
@@ -497,9 +384,10 @@ def clear_logs(
     ssh: "SSHClient",
     *,
     install_root: str = DEFAULT_INSTALL_ROOT,
+    data_dir: str | None = None,
 ) -> PlaybookResult:
-    """Truncate mosquitto, nodered, haproxy, gateway-state, ids-alerts logs."""
-    paths = _paths(install_root)
+    """Truncate agent-relevant Mosquitto and sensor data logs."""
+    paths = _paths(install_root, data_dir)
     truncated: list[str] = []
     errors: list[str] = []
     for path in paths.log_paths():

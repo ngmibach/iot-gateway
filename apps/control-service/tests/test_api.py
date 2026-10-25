@@ -52,7 +52,7 @@ class ApiDeviceTests(unittest.TestCase):
             id="gw1",
             host="192.168.1.50",
             ssh_user="pi",
-            install_root="/opt/iot-gateway",
+            install_root="/opt/iot-gateway-agent",
             fingerprint="fp-test",
         )
         self.settings = Settings(
@@ -388,7 +388,7 @@ class ApiDeviceTests(unittest.TestCase):
             id="gw-name",
             host="gateway.local",
             ssh_user="pi",
-            install_root="/opt/iot-gateway",
+            install_root="/opt/iot-gateway-agent",
             fingerprint="fp2",
         )
         with patch("api.actions.rotate_server_cert") as mocked:

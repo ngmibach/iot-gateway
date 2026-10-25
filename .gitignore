@@ -1,12 +1,5 @@
-monitoring/data/
-
-gateway/mosquitto/data/
-gateway/mosquitto/log/
-gateway/nodered/data/logs/
-gateway/nodered/data/*.backup
-gateway/nodered/data/.config.*
-gateway/haproxy/logs/haproxy.log
-gateway/logs/gateway-state.log
+# Leftover local Docker data (remove with: sudo rm -rf monitoring)
+monitoring/
 *.crt
 *.key
 *.csr

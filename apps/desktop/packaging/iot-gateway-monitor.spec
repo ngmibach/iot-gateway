@@ -4,9 +4,8 @@
 Layout inside the bundle (sys._MEIPASS):
   ui/                 Setup Wizard HTML/JS/CSS
   control-service/    Python sources + telemetry assets
-  gateway/            Compose stack uploaded by the provisioner
-  deploy/templates/   Promtail/etc templates
-  tools/              render_config.py
+  gateway/            Agent sources uploaded by the provisioner
+  deploy/templates/   Prometheus scrape templates
 
 Env:
   IOTGW_PYI_ONEFILE=1  (default) single-file .exe / binary
@@ -71,7 +70,6 @@ datas = (
     + _tree(APPS / "control-service", "control-service")
     + _tree(REPO / "gateway", "gateway")
     + _tree(REPO / "deploy", "deploy")
-    + _tree(REPO / "tools", "tools")
 )
 
 hiddenimports = [

@@ -1,24 +1,19 @@
-"""Start/stop/status for app-managed Loki + Prometheus via generated compose."""
+"""Shared telemetry backend status snapshot (used by native lifecycle)."""
 
 from __future__ import annotations
 
-import shutil
-import subprocess
 from dataclasses import dataclass
-from pathlib import Path
 
-from .compose import PROJECT_NAME, ComposeProfile, write_stack_files
-from .readiness import ProbeResult, check_loki, check_prometheus, wait_ready
-from .scrape import render_prometheus_scrape
+from .readiness import ProbeResult
 
 
 @dataclass
 class BackendStatus:
     """Backend lifecycle snapshot.
 
-    ``running`` when ``probe=True`` means both readiness probes succeeded
-    (not merely that ``compose ps`` shows Up). When ``probe=False``, ``running``
-    reflects compose ps Up/running tokens only.
+    ``running`` when probes are present means both readiness probes succeeded.
+    ``compose_ps`` is a free-form process/status blob (legacy field name kept for
+    callers; native backends fill it with a short label such as ``native``).
     """
 
     running: bool
@@ -26,149 +21,3 @@ class BackendStatus:
     loki: ProbeResult | None = None
     prometheus: ProbeResult | None = None
     detail: str = ""
-
-
-class TelemetryManager:
-    """Lifecycle manager: generate compose under ``root``, then docker compose ops."""
-
-    def __init__(
-        self,
-        root: Path | str,
-        *,
-        profile: ComposeProfile | str = ComposeProfile.LINUX_HOST,
-        project_name: str = PROJECT_NAME,
-        docker_bin: str | None = None,
-    ):
-        self.root = Path(root)
-        self.profile = ComposeProfile(profile)
-        self.project_name = project_name
-        self.docker_bin = docker_bin or shutil.which("docker") or "docker"
-        self.compose_file = self.root / "docker-compose.yaml"
-
-    def ensure_files(
-        self,
-        *,
-        gateway_ip: str,
-        prometheus_yml: str | None = None,
-    ) -> Path:
-        """Write compose + Loki config + rendered Prometheus scrape file."""
-        yml = prometheus_yml or render_prometheus_scrape(gateway_ip)
-        return write_stack_files(
-            self.root, profile=self.profile, prometheus_yml=yml
-        )
-
-    def _compose_cmd(self, *args: str) -> list[str]:
-        return [
-            self.docker_bin,
-            "compose",
-            "-p",
-            self.project_name,
-            "-f",
-            str(self.compose_file),
-            *args,
-        ]
-
-    def _run(
-        self, *args: str, check: bool = True, timeout: float | None = 120
-    ) -> subprocess.CompletedProcess[str]:
-        if not self.compose_file.is_file():
-            raise FileNotFoundError(
-                f"compose file missing — call ensure_files() first: {self.compose_file}"
-            )
-        proc = subprocess.run(
-            self._compose_cmd(*args),
-            check=False,
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-            cwd=str(self.root),
-        )
-        if check and proc.returncode != 0:
-            err = (proc.stderr or proc.stdout or "").strip()
-            raise RuntimeError(
-                f"docker compose {' '.join(args)} failed (exit {proc.returncode}): {err}"
-            )
-        return proc
-
-    def start(
-        self,
-        *,
-        gateway_ip: str | None = None,
-        wait: bool = True,
-        wait_timeout_s: float = 90.0,
-        loki_url: str = "http://127.0.0.1:3100",
-        prometheus_url: str = "http://127.0.0.1:9090",
-    ) -> BackendStatus:
-        """Generate (if gateway_ip given) and ``compose up -d`` Loki/Prometheus."""
-        if gateway_ip:
-            self.ensure_files(gateway_ip=gateway_ip)
-        elif not self.compose_file.is_file():
-            self.ensure_files(gateway_ip="127.0.0.1")
-        proc = self._run("up", "-d")
-        status = self.status(loki_url=loki_url, prometheus_url=prometheus_url)
-        status.detail = (proc.stdout or proc.stderr or "").strip()
-        if wait:
-            ready = wait_ready(
-                loki_url=loki_url,
-                prometheus_url=prometheus_url,
-                timeout_s=wait_timeout_s,
-            )
-            status.loki = ready.get("loki")
-            status.prometheus = ready.get("prometheus")
-            status.running = (
-                all(r.ok for r in ready.values()) if ready else status.running
-            )
-        return status
-
-    def stop(
-        self,
-        *,
-        timeout: float | None = 120,
-        loki_url: str = "http://127.0.0.1:3100",
-        prometheus_url: str = "http://127.0.0.1:9090",
-    ) -> BackendStatus:
-        """``compose down``; ``running`` reflects post-down status (not always False)."""
-        if not self.compose_file.is_file():
-            return BackendStatus(running=False, compose_ps="", detail="no compose file")
-        proc = self._run("down", check=False, timeout=timeout)
-        detail = (proc.stdout or proc.stderr or "").strip()
-        if proc.returncode != 0:
-            detail = f"compose down exit {proc.returncode}: {detail}"
-        # Re-check; if down failed, containers may still be up.
-        post = self.status(
-            loki_url=loki_url, prometheus_url=prometheus_url, probe=False
-        )
-        post.detail = detail
-        return post
-
-    def status(
-        self,
-        *,
-        loki_url: str = "http://127.0.0.1:3100",
-        prometheus_url: str = "http://127.0.0.1:9090",
-        probe: bool = True,
-    ) -> BackendStatus:
-        """``compose ps`` plus optional local readiness probes.
-
-        With ``probe=True``, ``running`` means both Loki and Prometheus probes OK.
-        """
-        if not self.compose_file.is_file():
-            return BackendStatus(running=False, compose_ps="", detail="no compose file")
-        proc = self._run("ps", check=False)
-        ps_out = (proc.stdout or "").strip()
-        ps_up = proc.returncode == 0 and any(
-            token in ps_out.lower() for token in ("running", "up ")
-        )
-        loki = prom = None
-        if probe:
-            loki = check_loki(loki_url)
-            prom = check_prometheus(prometheus_url)
-            running = bool(loki.ok and prom.ok)
-        else:
-            running = ps_up
-        return BackendStatus(
-            running=running,
-            compose_ps=ps_out,
-            loki=loki,
-            prometheus=prom,
-        )

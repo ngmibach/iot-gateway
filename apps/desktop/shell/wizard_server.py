@@ -31,7 +31,6 @@ from .launcher import ProcessManager, open_in_browser, wait_http
 from .paths import (
     CONTROL_HOST,
     CONTROL_PORT,
-    STREAMLIT_PORT,
     WIZARD_PORT,
     control_service_dir,
     desktop_ui_dir,
@@ -148,25 +147,6 @@ class WizardState:
 
 
 STATE = WizardState()
-_LAB_MANAGER = None
-
-
-def _lab_manager():
-    """Lazy LabFakeSensorManager under app data (optional demos)."""
-    global _LAB_MANAGER
-    if _LAB_MANAGER is None:
-        from lab.lifecycle import LabFakeSensorManager  # type: ignore[import-not-found]
-
-        from .paths import ensure_data_dir
-
-        _LAB_MANAGER = LabFakeSensorManager(ensure_data_dir() / "lab")
-    return _LAB_MANAGER
-
-
-def _lab_status_dict(st: Any) -> dict[str, Any]:
-    from dataclasses import asdict
-
-    return asdict(st)
 
 
 def _admin_token(handler: BaseHTTPRequestHandler) -> str | None:
@@ -254,7 +234,7 @@ def _handle_api(
                     "hint": "Monitoring is unavailable.",
                     "job": STATE.telemetry_job_snapshot(),
                 }
-            # Packaged path: native Loki/Prometheus. Docker and WSL are optional.
+            # Packaged path: native Loki/Prometheus (no Docker / WSL required).
             snap["docker_required"] = False
             snap["wsl_required"] = False
             # First-run vs returning operator: wizard only until setup finishes.
@@ -676,8 +656,6 @@ def _handle_api(
             from telemetry.checklist import (  # type: ignore[import-not-found]
                 format_checklist_for_display,
                 generate_windows_native_checklist,
-                generate_wsl2_nat_checklist,
-                refresh_checklist_on_wsl_ip_change,
             )
 
             settings = load_settings()
@@ -687,7 +665,6 @@ def _handle_api(
             fw = firewall_apply.firewall_status()
 
             # Packaged Windows .exe: native Loki on 0.0.0.0:3100 — firewall only.
-            # Prefer in-app apply when elevated; keep commands as fallback detail.
             if runtime == "windows":
                 items = generate_windows_native_checklist(monitoring_ip=monitoring_ip)
                 payload_items = [
@@ -716,68 +693,25 @@ def _handle_api(
                             "The app applies the Windows Firewall rule when run as "
                             "Administrator (inbound TCP 3100). WSL is not required."
                         ),
-                        "localhost_forwarding_note": wsl.localhost_forwarding_note,
+                        "wsl_note": wsl.note,
                         "confirmed": confirmed,
                     },
                 )
                 return
 
-            # Legacy: app running inside WSL2 still uses portproxy guidance.
-            wsl_ip = str(settings.get("wsl2_ip") or wsl.wsl_ip or "").strip()
-            if runtime != "wsl" or not wsl_ip:
-                _json_response(
-                    handler,
-                    200,
-                    {
-                        "applicable": False,
-                        "path": runtime,
-                        "reason": (
-                            "Firewall checklist is for Windows. On Linux, allow "
-                            "TCP 3100 on MONITORING_IP if the gateway is remote."
-                        ),
-                        "items": [],
-                        "display": "",
-                        "localhost_forwarding_note": wsl.localhost_forwarding_note,
-                    },
-                )
-                return
-            prev = str(settings.get("wsl2_ip_prev") or "")
-            if prev and prev != wsl_ip:
-                items = refresh_checklist_on_wsl_ip_change(
-                    prev, wsl_ip, monitoring_ip=monitoring_ip
-                )
-            else:
-                items = generate_wsl2_nat_checklist(
-                    wsl2_ip=wsl_ip, monitoring_ip=monitoring_ip
-                )
-            settings["wsl2_ip"] = wsl_ip
-            save_settings(settings)
-            payload_items = [
-                {
-                    "id": i.id,
-                    "title": i.title,
-                    "command": i.command,
-                    "notes": i.notes,
-                }
-                for i in items
-            ]
             _json_response(
                 handler,
                 200,
                 {
-                    "applicable": True,
-                    "path": "wsl2_nat",
-                    "wsl2_ip": wsl_ip,
-                    "monitoring_ip": monitoring_ip,
-                    "items": payload_items,
-                    "display": format_checklist_for_display(items),
-                    "auto_apply": False,
-                    "note": (
-                        "Display only — run elevated yourself; the app will not "
-                        "apply firewall/portproxy rules (K18)."
+                    "applicable": False,
+                    "path": runtime,
+                    "reason": (
+                        "Firewall checklist is for Windows. On Linux, allow "
+                        "TCP 3100 on MONITORING_IP if the gateway is remote."
                     ),
-                    "localhost_forwarding_note": wsl.localhost_forwarding_note,
-                    "confirmed": STATE.firewall_confirmed,
+                    "items": [],
+                    "display": "",
+                    "wsl_note": wsl.note,
                 },
             )
             return
@@ -786,12 +720,6 @@ def _handle_api(
             STATE.firewall_confirmed = True
             settings = load_settings()
             settings["firewall_checklist_confirmed"] = True
-            # Legacy WSL path only: remember WSL IP so a later change re-shows.
-            if detect.operator_runtime() == "wsl":
-                wsl = detect.detect_wsl()
-                if wsl.wsl_ip:
-                    settings["wsl2_ip_prev"] = settings.get("wsl2_ip") or wsl.wsl_ip
-                    settings["wsl2_ip"] = wsl.wsl_ip
             save_settings(settings)
             _json_response(handler, 200, {"ok": True, "confirmed": True})
             return
@@ -862,23 +790,9 @@ def _handle_api(
             return
 
         if method == "POST" and path == "/api/wizard/services/start":
-            body = _read_json(handler)
-            # Omit streamlit → False so API clients match the native-Monitoring default.
-            start_st = bool(body.get("streamlit", False))
             with STATE.lock:
                 ctrl = STATE.manager.start_control_service()
                 ok_ctrl = wait_http(ctrl.url, timeout=45, path="/health")
-                st_ok = None
-                st_url = None
-                st_error = None
-                if start_st:
-                    try:
-                        st = STATE.manager.start_streamlit(control_url=ctrl.url)
-                        st_url = st.url
-                        st_ok = wait_http(st.url, timeout=90)
-                    except FileNotFoundError as e:
-                        st_error = str(e)
-                        st_ok = False
             _json_response(
                 handler,
                 200,
@@ -887,12 +801,6 @@ def _handle_api(
                         "url": ctrl.url,
                         "healthy": ok_ctrl,
                         "status": STATE.manager.status()["control"],
-                    },
-                    "streamlit": {
-                        "url": st_url,
-                        "healthy": st_ok,
-                        "error": st_error,
-                        "status": STATE.manager.status()["streamlit"],
                     },
                 },
             )
@@ -907,26 +815,8 @@ def _handle_api(
             _json_response(handler, 200, {"ok": True})
             return
 
-        if method == "POST" and path == "/api/wizard/open-streamlit":
-            body = _read_json(handler)
-            st_status = STATE.manager.status().get("streamlit") or {}
-            if not st_status.get("running"):
-                _json_response(
-                    handler,
-                    400,
-                    {
-                        "error": "Streamlit is not running — start services with streamlit:true first",
-                        "status": st_status,
-                    },
-                )
-                return
-            url = str(body.get("url") or f"http://{CONTROL_HOST}:{STREAMLIT_PORT}")
-            open_in_browser(url)
-            _json_response(handler, 200, {"ok": True, "url": url})
-            return
-
         if method == "POST" and path == "/api/wizard/provision":
-            # Docker-free monolithic agent install over SSH (uses pinned key from step 3).
+            # Monolithic agent install over SSH (uses pinned key from Gateways flow).
             body = _read_json(handler)
             settings = load_settings()
             host = str(body.get("host") or settings.get("ssh_host") or "").strip()
@@ -993,7 +883,6 @@ def _handle_api(
                         ProvisionConfig(
                             gateway_ip=gateway_ip or host,
                             monitoring_ip=monitoring_ip,
-                            backend="agent",
                             sudo_password=sudo_password,
                         ),
                     )
@@ -1055,67 +944,6 @@ def _handle_api(
                 _json_response(handler, 500, {"error": str(e), "ok": False})
             return
 
-        # --- Lab (optional fake_sensor; not production) — UI hidden this build ---
-        if method == "GET" and path == "/api/lab/defaults":
-            settings = load_settings()
-            from lab.lifecycle import (  # type: ignore[import-not-found]
-                DEFAULT_DURATION_MINUTES,
-                STORAGE_OVERFLOW_WARNING,
-            )
-
-            _json_response(
-                handler,
-                200,
-                {
-                    "gateway_ip": settings.get("gateway_ip") or "",
-                    "duration_minutes": DEFAULT_DURATION_MINUTES,
-                    "warning": STORAGE_OVERFLOW_WARNING,
-                },
-            )
-            return
-
-        if method == "GET" and path == "/api/lab/fake-sensors/status":
-            _json_response(handler, 200, _lab_status_dict(_lab_manager().status()))
-            return
-
-        if method == "POST" and path == "/api/lab/fake-sensors/start":
-            body = _read_json(handler)
-            gw = str(body.get("gateway_ip") or "").strip()
-            if not gw:
-                _json_response(handler, 400, {"error": "gateway_ip required"})
-                return
-            sensors = body.get("sensors")
-            if isinstance(sensors, str):
-                sensors = [s.strip() for s in sensors.split(",") if s.strip()]
-            raw_dur = body.get("duration_minutes", 10)
-            if raw_dur is None or raw_dur == "":
-                duration_minutes = 10
-            else:
-                try:
-                    duration_minutes = int(raw_dur)
-                except (TypeError, ValueError):
-                    _json_response(handler, 400, {"error": "duration_minutes must be an integer"})
-                    return
-            try:
-                st = _lab_manager().start(
-                    gateway_ip=gw,
-                    duration_minutes=duration_minutes,
-                    sensors=sensors,
-                )
-            except ValueError as e:
-                _json_response(handler, 400, {"error": str(e)})
-                return
-            except (FileNotFoundError, RuntimeError) as e:
-                _json_response(handler, 502, {"error": str(e)})
-                return
-            settings = load_settings()
-            settings["gateway_ip"] = gw
-            save_settings(settings)
-            _json_response(handler, 200, _lab_status_dict(st))
-            return
-
-        if method == "POST" and path == "/api/lab/fake-sensors/stop":
-            _json_response(handler, 200, _lab_status_dict(_lab_manager().stop()))
         # --- Admin unlock + Code Signing (K16) ---
         if method == "GET" and path == "/api/admin/status":
             _json_response(handler, 200, STATE.admin.status(_admin_token(handler)))

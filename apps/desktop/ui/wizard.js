@@ -126,7 +126,7 @@
   async function startServices() {
     await api("/api/wizard/services/start", {
       method: "POST",
-      body: JSON.stringify({ streamlit: false }),
+      body: "{}",
     });
   }
 

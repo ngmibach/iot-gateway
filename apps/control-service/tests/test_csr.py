@@ -76,7 +76,7 @@ class TestCsr(unittest.TestCase):
         ssh.run.side_effect = run
         ssh.unlink.side_effect = lambda p: unlinked.append(p)
 
-        paths = GatewayPaths("/opt/iot-gateway")
+        paths = GatewayPaths("/opt/iot-gateway-agent")
         result = sign_csr_on_gateway(
             ssh,
             paths,

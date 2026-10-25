@@ -12,7 +12,6 @@ __all__ = [
     "register_device",
     "unregister_device",
     "update_acl",
-    "update_allowlist_ips",
     "zeroize_str",
 ]
 
@@ -27,7 +26,6 @@ def __getattr__(name: str):
         "register_device",
         "unregister_device",
         "update_acl",
-        "update_allowlist_ips",
     ):
         from . import playbooks
 

@@ -1,12 +1,12 @@
 # IoT Gateway Monitor
 
-Cross-platform desktop app: **download → double-click → Setup Wizard → provision gateway agent → Monitoring + Gateways + Settings**.
+Cross-platform desktop app: **download → double-click → Setup Wizard → provision gateway agent → Monitoring + Actions**.
 
-No Docker on the operator PC. No WSL required on Windows. No Docker on the gateway. No Lab / fake-sensor panel in this build.
+No Docker on the operator PC. No WSL required on Windows. No Docker on the gateway.
 
 | Piece | Role |
 |-------|------|
-| **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, left-rail Monitoring / Gateways / Settings, Actions, Admin |
+| **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, Actions, Monitoring, Admin |
 | **Local Loki + Prometheus** | App-managed native processes (downloaded once in-UI) |
 | **Gateway agent** | One systemd service: Mosquitto (native) + decrypt → log + metrics + Loki shipper + mDNS |
 | **Communication** | SSH for control/provision; MQTT + HTTP for data |
@@ -24,13 +24,8 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 
 ### First-run Wizard (all in the UI)
 
-1. First launch is Setup Wizard only — install Loki/Prometheus and pick the LAN address.
-2. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open Monitoring**.
-3. Later launches open the left-rail app shell: **Monitoring** (Metric · Activities · Control Plane), **Gateways** (Registration · Settings · Clean up), **Settings** (Remove · Admin).
-4. Register gateways under **Gateways → Registration** (LAN scan, SSH pin/key, firewall on Windows or manual TCP 3100 on Linux, install agent).
-5. **Settings → Remove** uninstalls the monitoring panel on this PC (and registered gateways).
-
-Gateway and fake-sensor steps can wait; Monitoring install is enough for the PC-side stack.
+1. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open app**.
+2. Under **Gateways → Registration** — pick MONITORING_IP (LAN), Find gateway (SSH), enter credentials, **Install gateway** (apt packages + agent over SSH; sudo password is not saved on the PC).
 
 App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGatewayMonitor\`.
 
@@ -46,27 +41,32 @@ App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGat
 
 ---
 
-## Architecture (Docker-free)
+## Architecture
 
 ```
 Operator PC                         Gateway device
 ─────────────                       ──────────────
 IoTGatewayMonitor                   iot-gateway-agent (systemd)
-  Wizard / Actions / Monitoring       ├─ mosquitto (native apt, supervised)
+  Wizard / Actions / Monitoring       ├─ mosquitto (native apt, systemd)
   Loki :3100 (native process)         ├─ decrypt → sensor_data.log
   Prometheus :9090 (native)           ├─ Loki shipper → MONITORING_IP:3100
                                       ├─ GET :9139/metrics /v1/health
                                       └─ mDNS
 ```
 
-Legacy `gateway/docker-compose.yaml` remains for power users only (`IOTGW_GATEWAY_BACKEND=compose`). The default Wizard path never asks for Docker.
+Sensor Registration updates Mosquitto ACL + password file under
+`/var/lib/iot-gateway-agent/mosquitto/` and reloads system Mosquitto. Optional
+mTLS client certs are still issued from the gateway CA for download to devices.
+
+Publish test traffic with any MQTT client to the gateway on port 1883.
 
 ---
 
-## Advanced / legacy Compose lab
+## Repository layout
 
-```shell
-cd gateway && docker compose up -d   # optional; not required for the packaged app
-```
-
-Fake sensors are not part of the packaged UI; publish with any MQTT client to the agent on port 1883.
+| Path | Purpose |
+|------|---------|
+| `apps/desktop/` | Packaged UI, wizard shell, Windows/Linux packaging |
+| `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions |
+| `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
+| `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |

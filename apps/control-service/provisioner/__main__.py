@@ -8,9 +8,6 @@ from pathlib import Path
 
 from .provision import (
     DEFAULT_INSTALL_ROOT,
-    DEFAULT_LOKI_PROBE_RETRIES,
-    DEFAULT_PROBE_INTERVAL_S,
-    DEFAULT_PROBE_RETRIES,
     ProvisionConfig,
     ProvisionError,
     provision,
@@ -30,50 +27,33 @@ def _add_ssh_args(p: argparse.ArgumentParser) -> None:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         description=(
-            "Gateway SSH provisioner. Optional --with-images loads a docker image "
-            "tarball before compose (field kits); otherwise cold pull."
+            "Gateway SSH provisioner (agent-only). Installs native mosquitto + "
+            "the monolithic iot-gateway-agent systemd unit. No Docker on the gateway."
         )
     )
     sub = p.add_subparsers(dest="command", required=True)
 
     prov = sub.add_parser(
         "provision",
-        help="Upload bundle, compose up, probe, install agent last",
+        help="Install mosquitto + monolithic agent over SSH",
     )
     _add_ssh_args(prov)
     prov.add_argument("--gateway-ip", required=True)
     prov.add_argument("--monitoring-ip", required=True)
     prov.add_argument("--install-root", default=DEFAULT_INSTALL_ROOT)
-    prov.add_argument("--gateway-src", type=Path, help="Local gateway/ tree (default: repo)")
     prov.add_argument(
-        "--with-images",
+        "--gateway-src",
         type=Path,
-        metavar="TAR",
-        help="Optional docker image tarball; SFTP + docker load before compose up",
+        help="Local gateway/ tree (default: repo); uses gateway/agent/",
     )
     prov.add_argument(
-        "--agent-mode",
-        choices=("auto", "compose", "skip"),
-        default="auto",
-        help="Compose overlay only in v1 (systemd deferred)",
-    )
-    prov.add_argument(
-        "--keep-failed",
-        action="store_true",
-        help="Do not auto-rollback to .bak-* after compose/probe failure",
-    )
-    prov.add_argument("--probe-retries", type=int, default=DEFAULT_PROBE_RETRIES)
-    prov.add_argument("--probe-interval", type=float, default=DEFAULT_PROBE_INTERVAL_S)
-    prov.add_argument(
-        "--loki-probe-retries",
-        type=int,
-        default=DEFAULT_LOKI_PROBE_RETRIES,
-        help="SSH-from-gateway Loki ready retries (default longer than exporter probes)",
+        "--sudo-password",
+        help="Gateway sudo password for apt/systemd (prefer wizard UI; never persisted)",
     )
 
     rb = sub.add_parser(
         "rollback",
-        help="compose down + restore INSTALL_ROOT.bak-<epoch> (newest if --backup omitted)",
+        help="Restore INSTALL_ROOT.bak-<epoch> (newest if --backup omitted)",
     )
     _add_ssh_args(rb)
     rb.add_argument("--install-root", default=DEFAULT_INSTALL_ROOT)
@@ -101,7 +81,7 @@ def main(argv: list[str] | None = None) -> int:
             if args.command == "rollback":
                 restored = rollback_install(ssh, args.install_root, args.backup)
                 print(f"restored {args.install_root} from {restored}")
-                print("note: run compose up / re-provision if services should be running")
+                print("note: re-run provision if the agent should be running")
                 return 0
 
             config = ProvisionConfig(
@@ -109,12 +89,7 @@ def main(argv: list[str] | None = None) -> int:
                 monitoring_ip=args.monitoring_ip,
                 install_root=args.install_root,
                 gateway_src=args.gateway_src,
-                images_tar=args.with_images,
-                agent_mode=args.agent_mode,
-                keep_failed=args.keep_failed,
-                probe_retries=args.probe_retries,
-                probe_interval_s=args.probe_interval,
-                loki_probe_retries=args.loki_probe_retries,
+                sudo_password=args.sudo_password,
             )
             result = provision(ssh, config)
     except (ProvisionError, SSHError, OSError, KeyError, ValueError) as e:

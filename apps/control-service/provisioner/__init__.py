@@ -1,4 +1,4 @@
-"""SSH provisioner: upload gateway bundle, compose up, probes, install agent last."""
+"""SSH provisioner: install monolithic gateway agent (no Docker)."""
 
 from .provision import (
     DEFAULT_INSTALL_ROOT,
@@ -9,6 +9,7 @@ from .provision import (
     latest_backup_path,
     list_remote_backups,
     provision,
+    repo_root_from_here,
     rollback_install,
 )
 
@@ -21,5 +22,6 @@ __all__ = [
     "latest_backup_path",
     "list_remote_backups",
     "provision",
+    "repo_root_from_here",
     "rollback_install",
 ]

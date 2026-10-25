@@ -31,7 +31,7 @@ class QueryApiTests(unittest.TestCase):
             id="gw1",
             host="192.168.1.50",
             ssh_user="pi",
-            install_root="/opt/iot-gateway",
+            install_root="/opt/iot-gateway-agent",
             fingerprint="fp-test",
         )
         self.registry.upsert_device(

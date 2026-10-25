@@ -125,6 +125,84 @@ def ensure_mosquitto(ssh: SSHSession, *, sudo_password: str) -> str:
     return f"installed via apt: {pkgs}"
 
 
+_BASIC_ACL = """# Managed by iot-gateway-agent / control-service playbooks
+user anonymous
+topic none
+"""
+
+_MOSQUITTO_CONF_D = "/etc/mosquitto/conf.d/iot-gateway-agent.conf"
+
+
+def configure_system_mosquitto(
+    ssh: SSHSession,
+    *,
+    sudo_password: str,
+    data_dir: str = DEFAULT_AGENT_DATA,
+) -> str:
+    """Create agent mosquitto dirs + conf.d so system Mosquitto reads ACL/passwords.
+
+    Idempotent: empty ``passwords`` and a basic ``acl`` are created only when missing.
+    """
+    mosq_dir = f"{data_dir}/mosquitto"
+    certs_dir = f"{data_dir}/certs"
+    passwords = f"{mosq_dir}/passwords"
+    acl = f"{mosq_dir}/acl"
+    conf_body = (
+        "listener 1883 0.0.0.0\n"
+        "allow_anonymous false\n"
+        f"password_file {passwords}\n"
+        f"acl_file {acl}\n"
+    )
+
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".conf", delete=False, encoding="utf-8"
+    ) as tmp_conf:
+        tmp_conf.write(conf_body)
+        local_conf = Path(tmp_conf.name)
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".acl", delete=False, encoding="utf-8"
+    ) as tmp_acl:
+        tmp_acl.write(_BASIC_ACL)
+        local_acl = Path(tmp_acl.name)
+
+    remote_conf = "/tmp/iotgw-mosquitto-agent.conf"
+    remote_acl = "/tmp/iotgw-mosquitto-acl"
+    try:
+        ssh.upload_file(local_conf, remote_conf, mode=0o644)
+        ssh.upload_file(local_acl, remote_acl, mode=0o600)
+        result = sudo_run(
+            ssh,
+            f"mkdir -p {shlex.quote(mosq_dir)}/log "
+            f"{shlex.quote(certs_dir)} {shlex.quote(data_dir)}/logs "
+            f"/etc/mosquitto/conf.d && "
+            f"if [ ! -f {shlex.quote(passwords)} ]; then "
+            f": > {shlex.quote(passwords)}; fi && "
+            f"if [ ! -f {shlex.quote(acl)} ]; then "
+            f"mv {shlex.quote(remote_acl)} {shlex.quote(acl)}; "
+            f"else rm -f {shlex.quote(remote_acl)}; fi && "
+            f"mv {shlex.quote(remote_conf)} {_MOSQUITTO_CONF_D} && "
+            f"chmod 600 {shlex.quote(passwords)} {shlex.quote(acl)} && "
+            f"chmod 644 {_MOSQUITTO_CONF_D} && "
+            f"(chown -R mosquitto:mosquitto {shlex.quote(mosq_dir)} 2>/dev/null || true) && "
+            "systemctl enable --now mosquitto && "
+            "(systemctl reload mosquitto || systemctl restart mosquitto)",
+            sudo_password=sudo_password,
+            timeout=90.0,
+        )
+        if not result.ok:
+            raise AgentInstallError(
+                "configuring system mosquitto failed: "
+                f"{(result.stderr or result.stdout).strip()[:400]}"
+            )
+    finally:
+        local_conf.unlink(missing_ok=True)
+        local_acl.unlink(missing_ok=True)
+        # Best-effort cleanup if sudo mv did not consume the temps.
+        ssh.run(f"rm -f {shlex.quote(remote_conf)} {shlex.quote(remote_acl)}", timeout=15.0)
+
+    return f"system mosquitto configured ({_MOSQUITTO_CONF_D})"
+
+
 def _remote_login_owner(ssh: SSHSession) -> str:
     """Return ``user:group`` for the SSH login (never expand id under sudo sh -c)."""
     who = ssh.run("printf '%s:%s\\n' \"$(id -un)\" \"$(id -gn)\"", timeout=15.0)
@@ -298,6 +376,11 @@ def provision_monolithic_agent(
         )
     notes: list[str] = []
     notes.append(ensure_mosquitto(ssh, sudo_password=sudo_password))
+    notes.append(
+        configure_system_mosquitto(
+            ssh, sudo_password=sudo_password, data_dir=data_dir
+        )
+    )
     _upload_agent_tree(ssh, agent_src, remote_root, sudo_password=sudo_password)
     notes.append(f"uploaded agent to {remote_root}")
     _ensure_venv(ssh, remote_root)
