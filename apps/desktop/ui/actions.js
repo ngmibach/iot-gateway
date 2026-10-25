@@ -8,6 +8,7 @@
   let selectedSensorIp = "";
   let caWaiters = null;
   let pendingSimDeviceId = "";
+  let sudoPresentCached = false;
 
   const SIM_BEHAVIOR_IDS = {
     omit_client_cert: "sim-omit-cert",
@@ -214,6 +215,13 @@
     return !!status.present;
   }
 
+  async function sudoStatusPresent(gid) {
+    const status = await wizardApi("GET", "/api/wizard/secrets/sudo-status", {
+      query: { gateway_id: gid },
+    });
+    return !!status.present;
+  }
+
   function syncCaFormVisibility(prefix) {
     const auto = $(`${prefix}-ca-auto`);
     const passRow = $(`${prefix}-ca-pass-row`);
@@ -221,17 +229,24 @@
     if (!auto || !passRow || !sudoRow) return;
     const generate = !!auto.checked;
     passRow.classList.toggle("hidden", generate);
-    sudoRow.classList.toggle("hidden", !generate);
+    // Saved Install sudo is reused; only ask when generate is on and none saved.
+    sudoRow.classList.toggle("hidden", !generate || !!sudoPresentCached);
   }
 
   async function refreshCaBlocks() {
     const gid = selectedGateway();
     let present = false;
+    sudoPresentCached = false;
     if (gid) {
       try {
         present = await caStatusPresent(gid);
       } catch {
         present = false;
+      }
+      try {
+        sudoPresentCached = await sudoStatusPresent(gid);
+      } catch {
+        sudoPresentCached = false;
       }
     }
     ["reg", "fake"].forEach((prefix) => {
@@ -258,14 +273,20 @@
       ($(`${prefix}-ca-sudo`) && $(`${prefix}-ca-sudo`).value) ||
       ""
     ).trim();
+    let sudoSaved = false;
+    try {
+      sudoSaved = await sudoStatusPresent(gid);
+    } catch {
+      sudoSaved = false;
+    }
     if (!generate && !explicit) {
       throw new Error(
         "Enter the gateway CA passphrase, or turn on Generate CA passphrase."
       );
     }
-    if (generate && !sudoPassword) {
+    if (generate && !sudoPassword && !sudoSaved) {
       throw new Error(
-        "Enter the gateway sudo password to generate the CA passphrase, or enter the CA passphrase instead."
+        "Enter the gateway sudo password to generate the CA passphrase, or enter the CA passphrase instead. Or save Password under Gateways → Settings first."
       );
     }
     if (explicit === "admin") {
@@ -276,7 +297,7 @@
         gateway_id: gid,
         generate: generate && !explicit,
         ca_passphrase: explicit || undefined,
-        sudo_password: generate ? sudoPassword : undefined,
+        sudo_password: generate && sudoPassword ? sudoPassword : undefined,
         device_password: devicePassword || undefined,
       },
     });

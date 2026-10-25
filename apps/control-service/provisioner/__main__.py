@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     prov.add_argument(
         "--sudo-password",
-        help="Gateway sudo password for apt/systemd (prefer wizard UI; never persisted)",
+        help="Gateway sudo password for apt/systemd (prefer wizard UI / keyring)",
     )
 
     rb = sub.add_parser(

@@ -41,7 +41,8 @@ class ProvisionConfig:
     gateway_src: Optional[Path] = None
     repo_root: Optional[Path] = None
     min_free_bytes: int = MIN_FREE_BYTES
-    # UI-provided sudo password for apt/systemd on the gateway (never persisted).
+    # UI-provided sudo password for apt/systemd on the gateway (operator PC
+    # may store it in the desktop keyring after a successful Install).
     sudo_password: Optional[str] = None
     # CA passphrase for MQTTS bootstrap (stored in keyring on the operator PC).
     ca_passphrase: Optional[str] = None

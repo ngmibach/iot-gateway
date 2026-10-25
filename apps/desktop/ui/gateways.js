@@ -378,15 +378,20 @@
     if (btn) btn.disabled = true;
     try {
       msg.textContent = "Saving…";
+      const settingsBody = {
+        gateway_id: gid,
+        gateway_ip: host,
+        ssh_host: host,
+        ssh_user: username,
+        ssh_port: port,
+      };
+      // Same value as SSH login password; used for fake sensors / cleanup.
+      if (password.trim()) {
+        settingsBody.sudo_password = password.trim();
+      }
       await api("/api/wizard/settings/gateway", {
         method: "POST",
-        body: JSON.stringify({
-          gateway_id: gid,
-          gateway_ip: host,
-          ssh_host: host,
-          ssh_user: username,
-          ssh_port: port,
-        }),
+        body: JSON.stringify(settingsBody),
       });
 
       if (password.trim()) {
@@ -436,25 +441,40 @@
   async function confirmCleanup() {
     const gid = $("cu-gateway-id").value || undefined;
     const sudoPass = ($("cu-sudo").value || "").trim();
+    // Empty Password is OK when Install / Settings already saved sudo in keyring.
     if (!gid && !targets.provisioned) {
       $("cu-msg").innerHTML = `<div class="err">Select a gateway to remove.</div>`;
       throw new Error("Select a gateway to remove");
     }
     if (!sudoPass) {
-      $("cu-msg").innerHTML = `<div class="err">Password required.</div>`;
-      throw new Error("password required");
+      let sudoSaved = false;
+      if (gid) {
+        try {
+          const st = await api(
+            `/api/wizard/secrets/sudo-status?gateway_id=${encodeURIComponent(gid)}`
+          );
+          sudoSaved = !!st.present;
+        } catch {
+          sudoSaved = false;
+        }
+      }
+      if (!sudoSaved) {
+        $("cu-msg").innerHTML = `<div class="err">Password required (or save it under Gateways → Settings first).</div>`;
+        throw new Error("password required");
+      }
     }
     $("cu-msg").textContent = "Removing…";
     $("btn-cu-confirm").disabled = true;
     try {
+      const body = {
+        gateway: true,
+        monitoring: false,
+        gateway_id: gid,
+      };
+      if (sudoPass) body.sudo_password = sudoPass;
       const data = await api("/api/wizard/uninstall", {
         method: "POST",
-        body: JSON.stringify({
-          gateway: true,
-          monitoring: false,
-          gateway_id: gid,
-          sudo_password: sudoPass,
-        }),
+        body: JSON.stringify(body),
       });
       $("cu-msg").innerHTML = `<div class="okmsg">${escapeHtml(
         data.ok === false ? "Finished with some errors." : "Gateway removed."
