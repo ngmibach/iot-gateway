@@ -203,6 +203,58 @@ def configure_system_mosquitto(
     return f"system mosquitto configured ({_MOSQUITTO_CONF_D})"
 
 
+_EMPTY_KAFKA_CATALOG = """{
+  "version": 1,
+  "retention_bytes_default": 1073741824,
+  "safety_ratio": 0.7,
+  "topics": {}
+}
+"""
+
+
+def ensure_kafka_layout(
+    ssh: SSHSession,
+    *,
+    sudo_password: str,
+    data_dir: str = DEFAULT_AGENT_DATA,
+) -> str:
+    """Create Kafka topic catalog dir used for per-sensor retention caps.
+
+    Seeds an empty ``topics.json`` when missing. A Kafka-compatible broker that
+    applies ``retention.bytes`` from this catalog is installed in a follow-up;
+    registration already reserves topics against the 70% disk budget.
+    """
+    kafka_dir = f"{data_dir}/kafka"
+    catalog = f"{kafka_dir}/topics.json"
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".json", delete=False, encoding="utf-8"
+    ) as tmp:
+        tmp.write(_EMPTY_KAFKA_CATALOG)
+        local_catalog = Path(tmp.name)
+    remote_tmp = "/tmp/iotgw-kafka-topics.json"
+    try:
+        ssh.upload_file(local_catalog, remote_tmp, mode=0o644)
+        result = sudo_run(
+            ssh,
+            f"mkdir -p {shlex.quote(kafka_dir)} && "
+            f"if [ ! -f {shlex.quote(catalog)} ]; then "
+            f"mv {shlex.quote(remote_tmp)} {shlex.quote(catalog)}; "
+            f"else rm -f {shlex.quote(remote_tmp)}; fi && "
+            f"chmod 644 {shlex.quote(catalog)}",
+            sudo_password=sudo_password,
+            timeout=60.0,
+        )
+        if not result.ok:
+            raise AgentInstallError(
+                "creating kafka topic catalog failed: "
+                f"{(result.stderr or result.stdout).strip()[:400]}"
+            )
+    finally:
+        local_catalog.unlink(missing_ok=True)
+        ssh.run(f"rm -f {shlex.quote(remote_tmp)}", timeout=15.0)
+    return f"kafka topic catalog ready ({catalog})"
+
+
 def _remote_login_owner(ssh: SSHSession) -> str:
     """Return ``user:group`` for the SSH login (never expand id under sudo sh -c)."""
     who = ssh.run("printf '%s:%s\\n' \"$(id -un)\" \"$(id -gn)\"", timeout=15.0)
@@ -380,6 +432,9 @@ def provision_monolithic_agent(
         configure_system_mosquitto(
             ssh, sudo_password=sudo_password, data_dir=data_dir
         )
+    )
+    notes.append(
+        ensure_kafka_layout(ssh, sudo_password=sudo_password, data_dir=data_dir)
     )
     _upload_agent_tree(ssh, agent_src, remote_root, sudo_password=sudo_password)
     notes.append(f"uploaded agent to {remote_root}")
