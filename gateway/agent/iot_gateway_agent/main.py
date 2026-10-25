@@ -12,8 +12,10 @@ from pathlib import Path
 
 from . import AGENT_PORT, MQTT_TLS_PORT, __version__
 from .broker import MosquittoSupervisor, write_mosquitto_conf
+from .day_crypto import ensure_day_material, load_day_cert_pem
 from .decrypt_worker import DecryptWorker
 from .denied_watcher import DeniedWatcher
+from .envelope_v1 import today_day_id
 from .health import build_health, build_info
 from .kafka_producer import SensorKafkaProducer
 from .mdns import start_mdns, stop_mdns
@@ -240,6 +242,14 @@ def main(argv: list[str] | None = None) -> int:
                 "tls_cert": mqtt_cert,
                 "tls_key": mqtt_key,
             }
+        try:
+            ensure_day_material(
+                data,
+                ca_cert_path=certs_dir / "ca.crt",
+                ca_key_path=certs_dir / "ca.key",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("ensure_day_material: %s", exc)
         worker = DecryptWorker(
             host="127.0.0.1",
             port=args.mqtt_port,
@@ -247,6 +257,7 @@ def main(argv: list[str] | None = None) -> int:
             password=args.decrypt_password,
             log_path=sensor_log,
             kafka=kafka,
+            data_dir=data,
             **tls_kwargs,
         )
         worker.start()
@@ -289,6 +300,7 @@ def main(argv: list[str] | None = None) -> int:
         info["api"] = [
             "GET /v1/health",
             "GET /v1/info",
+            "GET /v1/crypto/day/current",
             "GET /metrics",
             "POST /v1/reload",
         ]
@@ -296,15 +308,42 @@ def main(argv: list[str] | None = None) -> int:
         info["mode"] = "monolithic"
         info["data_dir"] = str(data)
         info["mqtt_mode"] = "external" if args.no_broker else "child"
+        info["envelope_v1"] = True
         return info
+
+    def day_crypto_fn():
+        did = today_day_id()
+        try:
+            ensure_day_material(
+                data,
+                ca_cert_path=certs_dir / "ca.crt",
+                ca_key_path=certs_dir / "ca.key",
+                day_id=did,
+            )
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "day_id": did, "error": str(exc)}
+        pem = load_day_cert_pem(data, did)
+        return {
+            "ok": True,
+            "day_id": did,
+            "cert_pem": pem.decode("utf-8") if pem else None,
+        }
 
     def reload_fn():
         # Child mode: restart supervised mosquitto. External mode: re-probe port.
         if not args.no_broker:
             broker.stop()
             broker.start()
+        try:
+            ensure_day_material(
+                data,
+                ca_cert_path=certs_dir / "ca.crt",
+                ca_key_path=certs_dir / "ca.key",
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("reload day material: %s", exc)
         metrics.refresh_mqtt_up()
-        return {"ok": True, "mqtt_up": metrics.mqtt_up}
+        return {"ok": True, "mqtt_up": metrics.mqtt_up, "day_id": today_day_id()}
 
     server = create_server(
         args.host,
@@ -313,6 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         info_fn,
         metrics_fn=metrics.render,
         reload_fn=reload_fn,
+        day_crypto_fn=day_crypto_fn,
     )
 
     def _request_shutdown(signum: int, _frame: object) -> None:

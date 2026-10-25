@@ -450,11 +450,25 @@ class AgentMetrics:
         for name, is_up in apps.items():
             lines.append(f'iotgw_app_up{{app="{name}"}} {1 if is_up else 0}')
 
+        env_ok = getattr(self.decrypt_worker, "envelope_ok", 0) if self.decrypt_worker else 0
+        env_fail = (
+            getattr(self.decrypt_worker, "envelope_fail", 0) if self.decrypt_worker else 0
+        )
+        legacy_ok = (
+            getattr(self.decrypt_worker, "legacy_ok", 0) if self.decrypt_worker else 0
+        )
         lines += [
             "# HELP iotgw_decrypt_messages_total Decrypted messages",
             "# TYPE iotgw_decrypt_messages_total counter",
             f'iotgw_decrypt_messages_total{{result="ok"}} {ok}',
             f'iotgw_decrypt_messages_total{{result="fail"}} {fail}',
+            "# HELP iotgw_envelope_messages_total Envelope v1 decrypt results",
+            "# TYPE iotgw_envelope_messages_total counter",
+            f'iotgw_envelope_messages_total{{result="ok"}} {env_ok}',
+            f'iotgw_envelope_messages_total{{result="fail"}} {env_fail}',
+            "# HELP iotgw_legacy_fernet_messages_total Legacy Fernet wrapper accepts",
+            "# TYPE iotgw_legacy_fernet_messages_total counter",
+            f"iotgw_legacy_fernet_messages_total {legacy_ok}",
             "# HELP iotgw_loki_lines_sent_total Lines shipped to Loki",
             "# TYPE iotgw_loki_lines_sent_total counter",
             f"iotgw_loki_lines_sent_total {sent}",

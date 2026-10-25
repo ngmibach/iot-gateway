@@ -24,7 +24,13 @@
   Redpanda is not used.
 - Agent provides decrypt (mTLS client on :8883) → `sensor_data.log` → Kafka
   produce, Loki shipper, `/metrics` (incl. per-device + denied/IDS),
-  `/v1/health`, mDNS.
+  `/v1/health`, `/v1/crypto/day/current`, mDNS.
+- **Envelope v1** application crypto (see `docs/plan-encryption-redesign.md`):
+  registration provisions per-device `crypto/devices/<id>.json` + schema;
+  sensors publish stamped halves on `sensors/<id>/env/key` and `…/env/data`;
+  decrypt worker pairs by `msg_id`, validates day_id + schema, AES-GCM opens.
+  Legacy Fernet `{"key","encrypted"}` still accepted until
+  `IOTGW_ENVELOPE_REQUIRE=1`. Daily DMEC under `certs/day/`.
 - Optional **fake sensors** for Control Plane testing: private bridge
   `iotgw-fake` (`10.255.0.0/24`), per-device netns `iotgw-fake-<id>`, systemd
   `iotgw-fake@<id>`, runtime under `/var/lib/iot-gateway-agent/fake/`.

@@ -20,6 +20,7 @@ def make_handler(
     info_fn: Callable[[], dict[str, Any]],
     metrics_fn: Callable[[], str] | None = None,
     reload_fn: Callable[[], dict[str, Any]] | None = None,
+    day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class AgentHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -55,6 +56,12 @@ def make_handler(
             if path == "/v1/info":
                 self._send_json(200, info_fn())
                 return
+            if path == "/v1/crypto/day/current" and day_crypto_fn is not None:
+                try:
+                    self._send_json(200, day_crypto_fn())
+                except Exception as e:  # noqa: BLE001
+                    self._send_json(500, {"error": str(e)})
+                return
             if path == "/metrics" and metrics_fn is not None:
                 self._send_text(200, metrics_fn(), "text/plain; version=0.0.4; charset=utf-8")
                 return
@@ -62,7 +69,7 @@ def make_handler(
 
         def do_HEAD(self) -> None:  # noqa: N802
             path = urlparse(self.path).path.rstrip("/") or "/"
-            if path in ("/v1/health", "/v1/info") or (
+            if path in ("/v1/health", "/v1/info", "/v1/crypto/day/current") or (
                 path == "/metrics" and metrics_fn is not None
             ):
                 self.send_response(200)
@@ -100,6 +107,13 @@ def create_server(
     info_fn: Callable[[], dict[str, Any]],
     metrics_fn: Callable[[], str] | None = None,
     reload_fn: Callable[[], dict[str, Any]] | None = None,
+    day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
 ) -> ThreadingHTTPServer:
-    handler = make_handler(health_fn, info_fn, metrics_fn=metrics_fn, reload_fn=reload_fn)
+    handler = make_handler(
+        health_fn,
+        info_fn,
+        metrics_fn=metrics_fn,
+        reload_fn=reload_fn,
+        day_crypto_fn=day_crypto_fn,
+    )
     return ThreadingHTTPServer((host, port), handler)
