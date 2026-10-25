@@ -449,6 +449,29 @@ input[type="checkbox"] { min-width: auto; }
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
 }
+.badge.fake {
+  background: #2a2540;
+  color: #c4b5fd;
+}
+.badge.real {
+  background: #1a2834;
+  color: #93c5fd;
+}
+.sim-behaviors {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem 0.4rem;
+  margin: 0.75rem 0;
+}
+.sim-behaviors legend {
+  padding: 0 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.sim-cert-line {
+  font-size: 0.85rem;
+  margin: 0.5rem 0 0.25rem;
+}
 .mono {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.8rem;

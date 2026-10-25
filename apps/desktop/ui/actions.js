@@ -3,9 +3,20 @@
   const $ = (id) => document.getElementById(id);
 
   let devices = [];
+  let fakeDevices = [];
   let baseline = null;
   let selectedSensorIp = "";
   let caWaiters = null;
+  let pendingSimDeviceId = "";
+
+  const SIM_BEHAVIOR_IDS = {
+    omit_client_cert: "sim-omit-cert",
+    wrong_client_cert: "sim-wrong-cert",
+    skip_encryption: "sim-skip-enc",
+    bad_encryption: "sim-bad-enc",
+    wrong_password: "sim-wrong-pass",
+    wrong_topic: "sim-wrong-topic",
+  };
 
   function escapeHtml(s) {
     return String(s)
@@ -115,7 +126,28 @@
     });
     if (id === "view") {
       refreshDevices().catch(showErr);
+    } else if (id === "simulate") {
+      refreshFakeDevices().catch(showErr);
     }
+  }
+
+  function formatEpoch(ts) {
+    if (ts == null || ts === "") return "—";
+    const n = Number(ts);
+    if (!Number.isFinite(n) || n <= 0) return String(ts);
+    try {
+      return new Date(n * 1000).toLocaleString();
+    } catch {
+      return String(ts);
+    }
+  }
+
+  function statusBadgeClass(status) {
+    const s = String(status || "").toLowerCase();
+    if (s === "running") return "ok";
+    if (s === "stopped") return "warn";
+    if (s === "error") return "bad";
+    return "warn";
   }
 
   function wireTabs() {
@@ -461,8 +493,8 @@
       const status = (data.device && data.device.fake && data.device.fake.status) || "";
       const okLine =
         status === "running" || !status
-          ? "Fake sensor running."
-          : `Fake sensor created (${escapeHtml(status)}).`;
+          ? "Fake sensor running. Open Simulate to drive it."
+          : `Fake sensor created (${escapeHtml(status)}). Open Simulate to drive it.`;
       $("fake-msg").innerHTML = `<div class="okmsg">${okLine}</div>`;
       if (data.cert_bundle_token) {
         renderDownloadCards($("fake-download"), gid, [
@@ -525,6 +557,11 @@
       $("view-empty").classList.remove("hidden");
       $("view-msg").innerHTML = "";
       $("view-download").classList.add("hidden");
+      if ($("view-fake-meta")) $("view-fake-meta").classList.add("hidden");
+      if ($("view-type-badge")) {
+        $("view-type-badge").textContent = "";
+        $("view-type-badge").className = "badge";
+      }
       syncUpdateButton();
       syncDeleteButton();
       return;
@@ -538,12 +575,39 @@
     $("view-pass").value = "";
     $("view-monitor").checked = !!device.monitor_enabled;
     $("view-fp").textContent = device.cert_fingerprint || "—";
-    $("view-expires").textContent =
-      device.cert_expires_at != null ? String(device.cert_expires_at) : "—";
+    $("view-expires").textContent = formatEpoch(device.cert_expires_at);
     $("view-delete-confirm").checked = false;
     $("view-remove-ip").checked = false;
     $("view-msg").innerHTML = "";
     $("view-download").classList.add("hidden");
+
+    const badge = $("view-type-badge");
+    if (badge) {
+      if (device.is_fake) {
+        badge.textContent = "Fake";
+        badge.className = "badge fake";
+      } else {
+        badge.textContent = "Real";
+        badge.className = "badge real";
+      }
+    }
+    const fakeMeta = $("view-fake-meta");
+    if (fakeMeta) {
+      if (device.is_fake) {
+        fakeMeta.classList.remove("hidden");
+        const fake = device.fake || {};
+        const attack =
+          fake.behaviors &&
+          (fake.behaviors.omit_client_cert || fake.behaviors.wrong_client_cert);
+        $("view-auto-renew").textContent = attack
+          ? "paused (TLS behavior on)"
+          : "on";
+        $("view-cert-fed").textContent = formatEpoch(fake.cert_fed_at);
+      } else {
+        fakeMeta.classList.add("hidden");
+      }
+    }
+
     baseline = {
       id: device.id || "",
       ip: device.ip || "",
@@ -730,13 +794,181 @@
     }
   }
 
+  function readSimBehaviors() {
+    const out = {};
+    Object.keys(SIM_BEHAVIOR_IDS).forEach((key) => {
+      const el = $(SIM_BEHAVIOR_IDS[key]);
+      out[key] = !!(el && el.checked);
+    });
+    return out;
+  }
+
+  function writeSimBehaviors(behaviors) {
+    const src = behaviors || {};
+    Object.keys(SIM_BEHAVIOR_IDS).forEach((key) => {
+      const el = $(SIM_BEHAVIOR_IDS[key]);
+      if (el) el.checked = !!src[key];
+    });
+  }
+
+  function fillSimCertLine(device, fake) {
+    const line = $("sim-cert-line");
+    if (!line) return;
+    const expires = formatEpoch(device && device.cert_expires_at);
+    const fp = (device && device.cert_fingerprint) || "";
+    const fedFp = (fake && fake.cert_feed_fingerprint) || "";
+    const fedAt = formatEpoch(fake && fake.cert_fed_at);
+    let match = "—";
+    if (fp && fedFp) {
+      match = fp === fedFp ? "match" : "lag";
+    } else if (fedFp) {
+      match = "fed";
+    }
+    const attack =
+      fake &&
+      fake.behaviors &&
+      (fake.behaviors.omit_client_cert || fake.behaviors.wrong_client_cert);
+    const renew = attack ? "paused" : "on";
+    line.textContent = `Cert expires ${expires} · feed ${match} · last fed ${fedAt} · auto-renew ${renew}`;
+  }
+
+  function fillSimForm(device) {
+    if (!device) {
+      $("sim-form").classList.add("hidden");
+      $("sim-empty").classList.remove("hidden");
+      if ($("sim-msg")) $("sim-msg").innerHTML = "";
+      return;
+    }
+    $("sim-empty").classList.add("hidden");
+    $("sim-form").classList.remove("hidden");
+    const fake = device.fake || {};
+    const status = fake.status || "unknown";
+    const badge = $("sim-status-badge");
+    badge.textContent = status;
+    badge.className = `badge ${statusBadgeClass(status)}`;
+    $("sim-interval").value =
+      fake.send_interval_ms != null ? String(fake.send_interval_ms) : "1000";
+    $("sim-topic").value = fake.topic || "";
+    if (!$("sim-payload").value.trim()) {
+      $("sim-payload").value = '{\n  "hello": 1\n}';
+    }
+    writeSimBehaviors(fake.behaviors);
+    fillSimCertLine(device, fake);
+    if ($("sim-msg")) $("sim-msg").innerHTML = "";
+    const running = String(status).toLowerCase() === "running";
+    $("btn-sim-start").disabled = running;
+    $("btn-sim-stop").disabled = !running && String(status).toLowerCase() !== "error";
+  }
+
+  async function refreshFakeDevices() {
+    const gid = requireGateway();
+    fakeDevices = await control(
+      "GET",
+      `/api/v1/gateways/${encodeURIComponent(gid)}/devices`,
+      { query: { is_fake: "true" } }
+    );
+    const sel = $("sim-device");
+    const prev = pendingSimDeviceId || sel.value;
+    pendingSimDeviceId = "";
+    sel.innerHTML = "";
+    (fakeDevices || []).forEach((d) => {
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      const st = (d.fake && d.fake.status) || "";
+      opt.textContent =
+        d.id + (d.ip ? ` — ${d.ip}` : "") + (st ? ` (${st})` : "");
+      sel.appendChild(opt);
+    });
+    if (!fakeDevices || !fakeDevices.length) {
+      fillSimForm(null);
+      return;
+    }
+    if (prev && fakeDevices.some((d) => d.id === prev)) sel.value = prev;
+    const selected =
+      fakeDevices.find((d) => d.id === sel.value) || fakeDevices[0];
+    if (selected) sel.value = selected.id;
+    fillSimForm(selected);
+  }
+
+  async function simStartStop(action) {
+    const gid = requireGateway();
+    const device_id = ($("sim-device").value || "").trim();
+    if (!device_id) throw new Error("Select a fake sensor first.");
+    $("sim-msg").textContent = action === "start" ? "Starting…" : "Stopping…";
+    $("btn-sim-start").disabled = true;
+    $("btn-sim-stop").disabled = true;
+    try {
+      const data = await control(
+        "POST",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/fake/${action}`,
+        { body: {} }
+      );
+      $("sim-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || (action === "start" ? "Started." : "Stopped.")
+      )}</div>`;
+      await refreshFakeDevices();
+      if ($("sim-device")) $("sim-device").value = device_id;
+      const still = (fakeDevices || []).find((d) => d.id === device_id);
+      if (still) fillSimForm(still);
+    } finally {
+      const still = (fakeDevices || []).find((d) => d.id === device_id);
+      if (still) fillSimForm(still);
+    }
+  }
+
+  async function applySimConfig() {
+    const gid = requireGateway();
+    const device_id = ($("sim-device").value || "").trim();
+    if (!device_id) throw new Error("Select a fake sensor first.");
+    const intervalRaw = ($("sim-interval").value || "").trim();
+    const send_interval_ms = intervalRaw ? Number(intervalRaw) : 1000;
+    if (!Number.isFinite(send_interval_ms) || send_interval_ms < 100) {
+      throw new Error("Send interval must be at least 100 ms.");
+    }
+    const payload = parseFakePayload($("sim-payload").value);
+    const body = {
+      send_interval_ms: Math.floor(send_interval_ms),
+      payload,
+      behaviors: readSimBehaviors(),
+    };
+    const topic = ($("sim-topic").value || "").trim();
+    if (topic) body.topic = topic;
+
+    $("sim-msg").textContent = "Applying…";
+    $("btn-sim-apply").disabled = true;
+    try {
+      const data = await control(
+        "PATCH",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/fake`,
+        { body }
+      );
+      $("sim-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || "Applied."
+      )}</div>`;
+      await refreshFakeDevices();
+      if ($("sim-device")) $("sim-device").value = device_id;
+      const still = (fakeDevices || []).find((d) => d.id === device_id);
+      if (still) fillSimForm(still);
+    } finally {
+      $("btn-sim-apply").disabled = false;
+    }
+  }
+
+  function openSimulateForCurrentView() {
+    const id = ($("view-id").value || "").trim();
+    pendingSimDeviceId = id;
+    showTab("simulate");
+  }
+
   function showErr(e) {
     console.error(e);
     const msg = e.message || String(e);
     const panel = document.querySelector(".action-panel:not(.hidden)");
     let target = $("ctrl-msg");
     if (panel) {
-      if ($("fake-form") && !$("fake-form").classList.contains("hidden")) {
+      if (panel.dataset.action === "simulate" && $("sim-msg")) {
+        target = $("sim-msg");
+      } else if ($("fake-form") && !$("fake-form").classList.contains("hidden")) {
         target = $("fake-msg") || target;
       } else if ($("reg-form") && !$("reg-form").classList.contains("hidden")) {
         target = $("reg-msg") || target;
@@ -758,9 +990,10 @@
     $("btn-load-gw").addEventListener("click", () =>
       refreshGateways()
         .then(() => {
-          if (document.querySelector('#action-tabs button.active[data-action="view"]')) {
-            return refreshDevices();
-          }
+          const active = document.querySelector("#action-tabs button.active");
+          const tab = active && active.dataset.action;
+          if (tab === "view") return refreshDevices();
+          if (tab === "simulate") return refreshFakeDevices();
         })
         .catch(showErr)
     );
@@ -772,8 +1005,12 @@
       $("scan-badge").innerHTML = "";
       $("scan-msg").textContent =
         "Neighbor lists only show devices the gateway has recently talked to.";
-      if (document.querySelector('#action-tabs button.active[data-action="view"]')) {
+      const active = document.querySelector("#action-tabs button.active");
+      const tab = active && active.dataset.action;
+      if (tab === "view") {
         refreshDevices().catch(showErr);
+      } else if (tab === "simulate") {
+        refreshFakeDevices().catch(showErr);
       }
     });
 
@@ -829,6 +1066,15 @@
       const d = (devices || []).find((x) => x.id === $("view-device").value);
       fillViewForm(d || null);
     });
+    if ($("btn-open-simulate")) {
+      $("btn-open-simulate").addEventListener("click", () => {
+        try {
+          openSimulateForCurrentView();
+        } catch (e) {
+          showErr(e);
+        }
+      });
+    }
 
     ["view-ip", "view-topic-rw", "view-topic-r", "view-pass"].forEach((id) => {
       $(id).addEventListener("input", syncUpdateButton);
@@ -844,6 +1090,23 @@
     );
     $("btn-view-delete").addEventListener("click", () =>
       deleteDevice().catch(showErr)
+    );
+
+    $("btn-refresh-sim").addEventListener("click", () =>
+      refreshFakeDevices().catch(showErr)
+    );
+    $("sim-device").addEventListener("change", () => {
+      const d = (fakeDevices || []).find((x) => x.id === $("sim-device").value);
+      fillSimForm(d || null);
+    });
+    $("btn-sim-start").addEventListener("click", () =>
+      simStartStop("start").catch(showErr)
+    );
+    $("btn-sim-stop").addEventListener("click", () =>
+      simStartStop("stop").catch(showErr)
+    );
+    $("btn-sim-apply").addEventListener("click", () =>
+      applySimConfig().catch(showErr)
     );
 
     $("btn-ca-save").addEventListener("click", () => {
