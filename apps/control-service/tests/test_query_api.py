@@ -382,6 +382,9 @@ class QueryApiTests(unittest.TestCase):
         # Registry sensors still listed when backends are down.
         ids = {s["device_id"] for s in body["connected_sensors"]}
         self.assertEqual(ids, {"sensor_a", "sensor_b"})
+        for s in body["connected_sensors"]:
+            self.assertIn("is_fake", s)
+            self.assertFalse(s["is_fake"])
 
     def test_summary_gateway_catalog_sync_scrubs_ssh_keys(self) -> None:
         """Activities warnings must never include OpenSSH key bodies."""
@@ -497,8 +500,36 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(by_id["sensor_a"]["kafka_topic"], "sensor.sensor_a")
         self.assertEqual(by_id["sensor_a"]["kafka_retention_bytes"], 1073741824)
         self.assertEqual(by_id["sensor_a"]["client_id"], "c1")
+        self.assertFalse(by_id["sensor_a"]["is_fake"])
         self.assertEqual(body["delay_by_device"][0]["sparkline"], [0.01, 0.02])
         self.assertIn("delay", body["charts"])
+
+    def test_summary_gateway_connected_sensors_is_fake(self) -> None:
+        """Activities connected_sensors carries registry is_fake for Fake/Real UI."""
+        self.registry.upsert_device(
+            gateway_id="gw1",
+            id="fake1",
+            ip="10.255.0.2",
+            monitor_enabled=1,
+            meta_json={
+                "is_fake": True,
+                "kafka_topic": "sensor.fake1",
+                "fake": {"status": "running", "ip": "10.255.0.2"},
+            },
+        )
+
+        def empty_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {"status": "success", "data": {"result": []}}
+
+        with patch("api.query._proxy_get", side_effect=empty_proxy):
+            r = self.client.get(
+                "/api/v1/query/summaries/gateway", params={"gateway_id": "gw1"}
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        by_id = {s["device_id"]: s for s in r.json()["connected_sensors"]}
+        self.assertTrue(by_id["fake1"]["is_fake"])
+        self.assertFalse(by_id["sensor_a"]["is_fake"])
+        self.assertFalse(by_id["sensor_b"]["is_fake"])
 
     def test_summary_raspi(self) -> None:
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:

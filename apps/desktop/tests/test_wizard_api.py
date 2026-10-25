@@ -176,6 +176,10 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("renderSensorTabs", mjs)
         self.assertIn("kafka_topic", mjs)
         self.assertIn("Name only", mjs)
+        self.assertIn("is_fake", mjs)
+        self.assertIn('"Type"', mjs)
+        self.assertIn("typeBadgeHtml", mjs)
+        self.assertIn("badge fake", mjs)
         with urllib.request.urlopen(self.base + "/app-shell.js", timeout=5) as resp:
             shell = resp.read().decode("utf-8")
         self.assertIn("Monitoring", shell)

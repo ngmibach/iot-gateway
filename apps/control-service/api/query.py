@@ -13,6 +13,7 @@ from registry.registry import Registry
 
 from . import queries as Q
 from .deps import AppState, get_registry, get_state, require_token
+from .device_meta import is_fake_meta
 
 router = APIRouter(dependencies=[Depends(require_token)])
 
@@ -541,6 +542,7 @@ def summary_gateway(
                     "kafka_topic": str(topic),
                     "kafka_retention_bytes": int(retention),
                     "monitor_enabled": bool(int(row.get("monitor_enabled", 1) or 0)),
+                    "is_fake": is_fake_meta(meta),
                     "client_id": overlay.get("client_id") or "",
                     "source_ip": overlay.get("source_ip") or (row.get("ip") or ""),
                     "metrics": {
@@ -571,6 +573,7 @@ def summary_gateway(
                     "kafka_topic": kafka_topic_name(did),
                     "kafka_retention_bytes": DEFAULT_TOPIC_RETENTION_BYTES,
                     "monitor_enabled": True,
+                    "is_fake": False,
                     "client_id": overlay.get("client_id") or "",
                     "source_ip": overlay.get("source_ip") or "",
                     "metrics": {
