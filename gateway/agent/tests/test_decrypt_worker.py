@@ -57,5 +57,110 @@ class DecryptWorkerKafkaTests(unittest.TestCase):
             self.assertEqual(snap["sensor9"].last_delay_ms, 3.0)
 
 
+class DecryptWorkerTlsTests(unittest.TestCase):
+    def test_tls_set_called_when_paths_provided(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ca = root / "ca.crt"
+            cert = root / "decrypt.crt"
+            key = root / "decrypt.key"
+            for p in (ca, cert, key):
+                p.write_text("x", encoding="utf-8")
+            worker = DecryptWorker(
+                log_path=root / "sensor_data.log",
+                port=8883,
+                tls_ca=ca,
+                tls_cert=cert,
+                tls_key=key,
+            )
+            self.assertTrue(worker.tls_enabled)
+
+            fake_client = mock.MagicMock()
+            fake_mqtt = mock.MagicMock()
+            fake_mqtt.CallbackAPIVersion.VERSION2 = 2
+            fake_mqtt.Client.return_value = fake_client
+
+            def _connect(*_a, **_k):
+                worker._stop.set()
+                raise OSError("stop")
+
+            fake_client.connect.side_effect = _connect
+
+            # _run does `import paho.mqtt.client as mqtt` — seed sys.modules.
+            import sys
+            import types
+
+            paho_mod = types.ModuleType("paho")
+            mqtt_pkg = types.ModuleType("paho.mqtt")
+            with mock.patch.dict(
+                sys.modules,
+                {
+                    "paho": paho_mod,
+                    "paho.mqtt": mqtt_pkg,
+                    "paho.mqtt.client": fake_mqtt,
+                },
+            ):
+                worker._run()
+
+            fake_client.tls_set.assert_called_once()
+            kwargs = fake_client.tls_set.call_args.kwargs
+            self.assertEqual(kwargs["ca_certs"], str(ca))
+            self.assertEqual(kwargs["certfile"], str(cert))
+            self.assertEqual(kwargs["keyfile"], str(key))
+            self.assertIn("tls_version", kwargs)
+            fake_client.username_pw_set.assert_called_once()
+
+    def test_tls_disabled_without_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            worker = DecryptWorker(log_path=Path(tmp) / "log")
+            self.assertFalse(worker.tls_enabled)
+
+
+class MosquittoConfTlsTests(unittest.TestCase):
+    def test_write_plain_without_tls(self) -> None:
+        from iot_gateway_agent.broker import write_mosquitto_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            conf = write_mosquitto_conf(
+                root / "mosquitto.conf",
+                data_dir=root / "data",
+                log_dir=root / "log",
+                passwords=root / "passwords",
+                acl=root / "acl",
+                listen_port=1883,
+            )
+            text = conf.read_text(encoding="utf-8")
+            self.assertIn("listener 1883", text)
+            self.assertNotIn("require_certificate", text)
+            self.assertNotIn("cafile", text)
+
+    def test_write_tls_listener(self) -> None:
+        from iot_gateway_agent.broker import write_mosquitto_conf
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            ca = root / "ca.crt"
+            cert = root / "server.crt"
+            key = root / "server.key"
+            conf = write_mosquitto_conf(
+                root / "mosquitto.conf",
+                data_dir=root / "data",
+                log_dir=root / "log",
+                passwords=root / "passwords",
+                acl=root / "acl",
+                listen_port=8883,
+                cafile=ca,
+                certfile=cert,
+                keyfile=key,
+            )
+            text = conf.read_text(encoding="utf-8")
+            self.assertIn("listener 8883", text)
+            self.assertIn(f"cafile {ca.as_posix()}", text)
+            self.assertIn(f"certfile {cert.as_posix()}", text)
+            self.assertIn(f"keyfile {key.as_posix()}", text)
+            self.assertIn("require_certificate true", text)
+
+
 if __name__ == "__main__":
     unittest.main()

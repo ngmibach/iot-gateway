@@ -43,6 +43,8 @@ class ProvisionConfig:
     min_free_bytes: int = MIN_FREE_BYTES
     # UI-provided sudo password for apt/systemd on the gateway (never persisted).
     sudo_password: Optional[str] = None
+    # CA passphrase for MQTTS bootstrap (stored in keyring on the operator PC).
+    ca_passphrase: Optional[str] = None
 
 
 @dataclass
@@ -89,6 +91,7 @@ def _provision_agent(
                 agent_src=agent_src,
                 sudo_password=str(config.sudo_password or ""),
                 remote_root=install_root,
+                ca_passphrase=str(config.ca_passphrase or ""),
             )
         )
     except AgentInstallError as e:
@@ -97,7 +100,7 @@ def _provision_agent(
     probes = {
         "agent_health": f"http://{config.gateway_ip}:9139/v1/health",
         "agent_metrics": f"http://{config.gateway_ip}:9139/metrics",
-        "mqtt": f"{config.gateway_ip}:1883",
+        "mqtts": f"{config.gateway_ip}:8883",
     }
     notes.append("backend=agent (no Docker on gateway)")
     return ProvisionResult(

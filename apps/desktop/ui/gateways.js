@@ -196,6 +196,13 @@
     }
   }
 
+  function syncCaPassVisibility() {
+    const auto = $("ca-auto");
+    const row = $("ca-pass-row");
+    if (!auto || !row) return;
+    row.classList.toggle("hidden", !!auto.checked);
+  }
+
   async function installGateway() {
     const msg = $("provision-msg");
     const host = selectedHost || ($("reg-host") && $("reg-host").value.trim()) || "";
@@ -204,6 +211,8 @@
     const gatewayId = ($("ssh-gid").value || "").trim() || "gateway";
     const sudoPass = ($("sudo-pass") && $("sudo-pass").value) || "";
     const port = selectedPort || DEFAULT_SSH_PORT;
+    const caAuto = !$("ca-auto") || $("ca-auto").checked;
+    const caPass = ($("ca-pass") && $("ca-pass").value) || "";
 
     if (!host) {
       msg.innerHTML = `<div class="err">Select a device first.</div>`;
@@ -220,6 +229,17 @@
     if (!sudoPass.trim()) {
       msg.innerHTML = `<div class="err">Sudo password required.</div>`;
       throw new Error("sudo password required");
+    }
+    if (!caAuto) {
+      const manual = caPass.trim();
+      if (!manual) {
+        msg.innerHTML = `<div class="err">CA passphrase required.</div>`;
+        throw new Error("CA passphrase required");
+      }
+      if (manual === "admin") {
+        msg.innerHTML = `<div class="err">CA passphrase must not be 'admin'.</div>`;
+        throw new Error("CA passphrase must not be admin");
+      }
     }
 
     const btn = $("btn-provision-agent");
@@ -258,23 +278,31 @@
       }
 
       msg.textContent = "Installing…";
+      const provisionBody = {
+        host,
+        username,
+        port,
+        gateway_id: gatewayId,
+        gateway_ip: host,
+        sudo_password: sudoPass,
+      };
+      if (caAuto) {
+        provisionBody.generate_ca_passphrase = true;
+      } else {
+        provisionBody.ca_passphrase = caPass.trim();
+      }
       const data = await api("/api/wizard/provision", {
         method: "POST",
-        body: JSON.stringify({
-          host,
-          username,
-          port,
-          gateway_id: gatewayId,
-          gateway_ip: host,
-          sudo_password: sudoPass,
-        }),
+        body: JSON.stringify(provisionBody),
       });
       if ($("sudo-pass")) $("sudo-pass").value = "";
+      if ($("ca-pass")) $("ca-pass").value = "";
       msg.innerHTML = `<div class="okmsg">Gateway installed.</div>`;
       await refreshTargets();
       return data;
     } catch (e) {
       if ($("sudo-pass")) $("sudo-pass").value = "";
+      if ($("ca-pass")) $("ca-pass").value = "";
       if (!msg.querySelector(".err")) {
         msg.innerHTML = `<div class="err">${escapeHtml(String(e.message || e))}</div>`;
       }
@@ -453,6 +481,10 @@
     $("btn-scan-gw").addEventListener("click", () =>
       scanGateways().catch(showErr)
     );
+    if ($("ca-auto")) {
+      $("ca-auto").addEventListener("change", syncCaPassVisibility);
+      syncCaPassVisibility();
+    }
     $("btn-provision-agent").addEventListener("click", () =>
       installGateway().catch(() => {})
     );

@@ -50,6 +50,15 @@ class GatewayPaths:
         return f"{self.data_dir}/certs/server.pem"
 
     @property
+    def decrypt_crt(self) -> str:
+        """Client cert for the agent decrypt worker (mTLS to local Mosquitto)."""
+        return f"{self.data_dir}/certs/decrypt.crt"
+
+    @property
+    def decrypt_key(self) -> str:
+        return f"{self.data_dir}/certs/decrypt.key"
+
+    @property
     def mosquitto_log(self) -> str:
         return f"{self.data_dir}/mosquitto/log/mosquitto.log"
 

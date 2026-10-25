@@ -10,15 +10,21 @@
 ## Gateway device
 
 - `iot-gateway-agent` systemd unit under `/opt/iot-gateway-agent`.
-- System Mosquitto (`mosquitto.service`) with ACL/password files under
-  `/var/lib/iot-gateway-agent/mosquitto/`.
+- System Mosquitto (`mosquitto.service`) with **MQTTS :8883 mTLS only**
+  (`require_certificate`, CA/server under `/var/lib/iot-gateway-agent/certs/`,
+  ACL/password files under `/var/lib/iot-gateway-agent/mosquitto/`).
+  Plaintext :1883 is not used for production ingress.
+- Install bootstraps gateway CA + server cert (IP SAN). CA passphrase is
+  generated or entered on Gateways → Install and stored in the operator
+  keyring (`ca:{gateway_id}`); decrypt worker gets a `nodered` client cert.
 - Kafka topic catalog under `/var/lib/iot-gateway-agent/kafka/topics.json`
   (one retention-capped topic per registered sensor).
 - Apache Kafka KRaft single-node (`/opt/kafka`, systemd `iotgw-kafka`,
   `127.0.0.1:9092`, heap 128–256M) applies `retention.bytes` per topic.
   Redpanda is not used.
-- Agent provides decrypt → `sensor_data.log` → Kafka produce, Loki shipper,
-  `/metrics` (incl. per-device + denied/IDS), `/v1/health`, mDNS.
+- Agent provides decrypt (mTLS client on :8883) → `sensor_data.log` → Kafka
+  produce, Loki shipper, `/metrics` (incl. per-device + denied/IDS),
+  `/v1/health`, mDNS.
 - Provision and day-2 actions use SSH from the desktop app (no container engine).
 
 ## Sensor capacity (Kafka)
