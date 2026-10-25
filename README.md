@@ -147,7 +147,7 @@ Activities testing without extra LAN hardware.
 |------|----------------|
 | **Registration → Create fake sensor** | Device ID, password, topics only — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>` |
 | **View** | Shows a **Fake** / **Real** badge; fakes show auto-renew status and **Open Simulate** |
-| **Simulate** | Fake devices only (after create): Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line |
+| **Simulate** | Fake devices only (after create): Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line. Sample manufacturing payload: [`docs/samples/fake-sensor-payload.json`](docs/samples/fake-sensor-payload.json) |
 | **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only (real sensors still download a cert zip for the operator). TLS attack toggles pause auto-feed until cleared |
 | **Capacity** | Each fake consumes one Kafka capacity slot (same formula as real sensors) |
 | **Uninstall / delete** | Deleting a fake tears down its unit + netns; Gateways → Clean up / Settings → Remove tears down **all** `iotgw-fake@*` units, leftover `iotgw-fake-*` netns, and the `iotgw-fake` bridge |
@@ -191,5 +191,6 @@ Deferred Kafka broker metrics and richer per-device counters:
 | `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions (incl. Kafka capacity) |
 | `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
 | `docs/architecture.md` | Short architecture notes |
+| `docs/samples/fake-sensor-payload.json` | Sample manufacturing JSON for Simulate → Payload |
 | `docs/plan-activities-kafka-followups.md` | Deferred Activities / Kafka metrics work |
 | `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |

@@ -1,0 +1,58 @@
+{
+  "deviceId": "fake1",
+  "metadata": {
+    "name": "Sinter Line A — Chamber 1",
+    "line": "A",
+    "plant": "demo-plant",
+    "site": "Building 3",
+    "recipe": "SiC-std-v3",
+    "batch_id": "BATCH-2026-1042",
+    "operator": "lab-test",
+    "equipment_id": "SINTER-A1",
+    "firmware": "1.4.2"
+  },
+  "payload": {
+    "process_parameters": {
+      "sinteringStage": {
+        "value": "heat",
+        "unit": "enum"
+      },
+      "temperatureZone1": {
+        "value": 845.2,
+        "unit": "°C"
+      },
+      "temperatureZone2": {
+        "value": 912.7,
+        "unit": "°C"
+      },
+      "temperatureZone3": {
+        "value": 887.1,
+        "unit": "°C"
+      },
+      "temperatureChamber": {
+        "value": 901.4,
+        "unit": "°C"
+      },
+      "pressureChamber": {
+        "value": 1.02,
+        "unit": "bar"
+      },
+      "atmosphereGas": {
+        "value": "N2",
+        "unit": "gas"
+      },
+      "gasFlow": {
+        "value": 12.5,
+        "unit": "L/min"
+      },
+      "powerDraw": {
+        "value": 4.8,
+        "unit": "kW"
+      },
+      "holdTimeRemaining": {
+        "value": 320,
+        "unit": "s"
+      }
+    }
+  }
+}

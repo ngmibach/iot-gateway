@@ -72,5 +72,6 @@ Shipped follow-ups checklist: `docs/plan-activities-kafka-followups.md`.
 - View: Fake/Real badge; fakes show auto-renew + Open Simulate.
 - Simulate: fake-only start/stop, interval/topic/payload, lab behavior toggles;
   monitoring app auto-renews/feeds mTLS for `is_fake` only (TLS attack toggles
-  pause auto-feed).
+  pause auto-feed). Sample payload:
+  `docs/samples/fake-sensor-payload.json` (metadata + process_parameters with units).
 - Monitoring scrapes Prometheus job `iot-gateway-agent` (`instance=gateway`) on `:9139`.
