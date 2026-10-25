@@ -40,9 +40,7 @@
           <button type="button" class="secondary" id="btn-create-fake">Create fake sensor</button>
           <span id="scan-badge"></span>
         </div>
-        <div class="note-box" id="scan-msg">
-          Neighbor lists only show devices the gateway has recently talked to.
-        </div>
+        <div class="note-box hidden" id="scan-msg"></div>
       </div>
 
       <div id="reg-results" class="hidden">
@@ -315,6 +313,54 @@
           <div class="row">
             <input type="checkbox" id="sim-wrong-topic" />
             <label for="sim-wrong-topic" style="min-width:auto">Wrong topic</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-key-only" />
+            <label for="sim-key-only" style="min-width:auto">Key half only</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-data-only" />
+            <label for="sim-data-only" style="min-width:auto">Data half only</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-stamp-key" />
+            <label for="sim-stamp-key" style="min-width:auto">Stamp mismatch (key)</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-stamp-data" />
+            <label for="sim-stamp-data" style="min-width:auto">Stamp mismatch (data)</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-swap-msgid" />
+            <label for="sim-swap-msgid" style="min-width:auto">Swapped message id</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-wrong-day" />
+            <label for="sim-wrong-day" style="min-width:auto">Wrong day id</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-missing-day" />
+            <label for="sim-missing-day" style="min-width:auto">Missing day material</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-schema-missing" />
+            <label for="sim-schema-missing" style="min-width:auto">Schema missing field</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-schema-type" />
+            <label for="sim-schema-type" style="min-width:auto">Schema wrong type</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-schema-extra" />
+            <label for="sim-schema-extra" style="min-width:auto">Schema extra field</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-wrong-schema" />
+            <label for="sim-wrong-schema" style="min-width:auto">Wrong schema id</label>
+          </div>
+          <div class="row">
+            <input type="checkbox" id="sim-legacy-fernet" />
+            <label for="sim-legacy-fernet" style="min-width:auto">Legacy Fernet wrapper</label>
           </div>
         </fieldset>
 
