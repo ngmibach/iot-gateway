@@ -32,6 +32,24 @@ retention; 30% headroom for OS / Mosquitto / logs / agent).
 - Register returns HTTP 409 when capacity is full.
 - Topic name: `sensor.<device_id>`.
 
+## Gateway Activities (Monitoring)
+
+Operator view of gateway-wide and per-sensor activity:
+
+| Section | Content |
+|---------|---------|
+| Gateway select | Registry gateway **name only** (no IP in the dropdown) |
+| General | Total msgs, msgs/sec, denied, IDS + delay chart |
+| Connected sensors | Table from registry: device, IP, Kafka topic, retention, monitor |
+| Sensor detail | 1 sensor → panel; N sensors → horizontal name tabs |
+| Per sensor | Counters + Kafka topic chart + delay chart |
+
+API: `GET /api/v1/query/summaries/gateway?gateway_id=&range=`  
+Sources: registry device meta (`kafka_topic`), Prometheus `iotgw_decrypt_*`, Loki when labels exist.
+
+Follow-ups (broker install, topic exporters, per-device Prom counters):
+`docs/plan-activities-kafka-followups.md`.
+
 ## Control plane
 
 - Sensor Registration: upsert Mosquitto ACL + password hash, reserve Kafka
