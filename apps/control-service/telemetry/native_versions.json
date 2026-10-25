@@ -35,7 +35,6 @@
   },
   "grafana": {
     "version": "13.2.4",
-    "extract": "tree",
     "assets": {
       "linux-amd64": {
         "url": "https://dl.grafana.com/grafana/release/13.2.4/grafana_13.2.4_38252365904_linux_amd64.tar.gz",

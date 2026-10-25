@@ -89,6 +89,18 @@ def _download(url: str, dest: Path, *, progress: ProgressCb | None = None) -> No
         raise BinaryFetchError(f"download failed: {url}: {e}") from e
 
 
+def _extract_archive(archive: Path, dest_dir: Path, *, kind: str) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if kind == "tar.gz":
+        with tarfile.open(archive, "r:gz") as tf:
+            tf.extractall(dest_dir)  # noqa: S202 — trusted pinned release
+    elif kind == "zip":
+        with zipfile.ZipFile(archive, "r") as zf:
+            zf.extractall(dest_dir)
+    else:
+        raise BinaryFetchError(f"unknown archive type: {kind}")
+
+
 def _extract_binary(
     archive: Path,
     *,
@@ -99,14 +111,7 @@ def _extract_binary(
     dest_bin.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="iotgw-bin-") as tmp:
         tmp_path = Path(tmp)
-        if kind == "tar.gz":
-            with tarfile.open(archive, "r:gz") as tf:
-                tf.extractall(tmp_path)  # noqa: S202 — trusted pinned release
-        elif kind == "zip":
-            with zipfile.ZipFile(archive, "r") as zf:
-                zf.extractall(tmp_path)
-        else:
-            raise BinaryFetchError(f"unknown archive type: {kind}")
+        _extract_archive(archive, tmp_path, kind=kind)
 
         matches = [p for p in tmp_path.rglob(binary_name) if p.is_file()]
         if not matches:
@@ -122,18 +127,6 @@ def _extract_binary(
             dest_bin.chmod(dest_bin.stat().st_mode | 0o111)
         except OSError:
             pass
-
-
-def _extract_archive(archive: Path, dest_dir: Path, *, kind: str) -> None:
-    dest_dir.mkdir(parents=True, exist_ok=True)
-    if kind == "tar.gz":
-        with tarfile.open(archive, "r:gz") as tf:
-            tf.extractall(dest_dir)  # noqa: S202 — trusted pinned release
-    elif kind == "zip":
-        with zipfile.ZipFile(archive, "r") as zf:
-            zf.extractall(dest_dir)
-    else:
-        raise BinaryFetchError(f"unknown archive type: {kind}")
 
 
 def _rmtree_if_exists(path: Path) -> None:
@@ -156,19 +149,18 @@ def _ensure_free_space(probe: Path, min_free_bytes: int) -> None:
         )
 
 
-def _find_tree_root(extract_dir: Path, root_dir_glob: str | None) -> Path:
-    if root_dir_glob:
-        matches = sorted(
-            p
-            for p in extract_dir.iterdir()
-            if p.is_dir() and fnmatch.fnmatch(p.name, root_dir_glob)
+def _find_tree_root(extract_dir: Path, root_dir_glob: str) -> Path:
+    matches = sorted(
+        p
+        for p in extract_dir.iterdir()
+        if p.is_dir() and fnmatch.fnmatch(p.name, root_dir_glob)
+    )
+    if len(matches) != 1:
+        raise BinaryFetchError(
+            f"expected exactly one directory matching {root_dir_glob!r} "
+            f"in archive, found {len(matches)}"
         )
-        if matches:
-            return matches[0]
-    top_dirs = [p for p in extract_dir.iterdir() if p.is_dir()]
-    if len(top_dirs) == 1:
-        return top_dirs[0]
-    return extract_dir
+    return matches[0]
 
 
 def _grafana_layout_ok(tree: Path) -> bool:
@@ -275,13 +267,12 @@ def ensure_grafana_tree(
     platform: str | None = None,
     progress: ProgressCb | None = None,
     force: bool = False,
-    min_free_bytes: int | None = 2_500_000_000,  # 2.5 GiB; None skips check
+    min_free_bytes: int | None = int(2.5 * 1024**3),  # 2.5 GiB; None skips check
 ) -> Path:
     """Ensure a Grafana OSS directory tree is present under ``dest_dir``.
 
     Caller must ensure no process holds files under ``dest_dir`` when
-    ``force=True`` or when the version marker mismatches (manager
-    stop-before-replace is PR 3).
+    ``force=True`` or when the version marker mismatches.
     """
     dest_dir = Path(dest_dir)
     versions = versions or load_versions()
@@ -292,6 +283,9 @@ def ensure_grafana_tree(
     if plat not in meta["assets"]:
         raise BinaryFetchError(f"no grafana asset for platform {plat}")
     asset = meta["assets"][plat]
+    root_dir_glob = asset.get("root_dir_glob")
+    if not root_dir_glob:
+        raise BinaryFetchError("grafana asset missing root_dir_glob")
     version = str(meta["version"])
     marker = dest_dir / f".grafana-{version}-{plat}.ok"
 
@@ -330,18 +324,18 @@ def ensure_grafana_tree(
                 progress("Extracting grafana", 0.9)
             extract_dir = tmp_path / "extract"
             _extract_archive(archive_path, extract_dir, kind=asset["archive"])
-            root = _find_tree_root(extract_dir, asset.get("root_dir_glob"))
+            root = _find_tree_root(extract_dir, root_dir_glob)
             if not _grafana_layout_ok(root):
                 raise BinaryFetchError(
                     "grafana archive layout invalid: need public/, conf/, and "
                     "bin/grafana[-server][.exe]"
                 )
-            shutil.copytree(root, staging)
+            shutil.move(str(root), staging)
         _atomic_replace_dir(staging, dest_dir, old)
         marker.write_text(f"{version}\n{digest}\n", encoding="utf-8")
     except Exception:
         _rmtree_if_exists(staging)
-        # Drop a marker only after a successful replace; never leave marker on failure.
+        # Never leave a version marker on a tree that fails layout checks.
         if marker.is_file() and not _grafana_layout_ok(dest_dir):
             try:
                 marker.unlink()
