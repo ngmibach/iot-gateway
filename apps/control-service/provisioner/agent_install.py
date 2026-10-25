@@ -436,6 +436,16 @@ def provision_monolithic_agent(
     notes.append(
         ensure_kafka_layout(ssh, sudo_password=sudo_password, data_dir=data_dir)
     )
+    try:
+        from .kafka_install import ensure_kafka_kraft
+
+        notes.append(
+            ensure_kafka_kraft(
+                ssh, sudo_password=sudo_password, data_dir=data_dir
+            )
+        )
+    except Exception as exc:  # noqa: BLE001 — Kafka is best-effort on first install
+        notes.append(f"kafka KRaft install deferred: {exc}")
     _upload_agent_tree(ssh, agent_src, remote_root, sudo_password=sudo_password)
     notes.append(f"uploaded agent to {remote_root}")
     _ensure_venv(ssh, remote_root)
@@ -477,7 +487,10 @@ def uninstall_monolithic_agent(
         ssh,
         "systemctl stop iot-gateway-agent 2>/dev/null || true; "
         "systemctl disable iot-gateway-agent 2>/dev/null || true; "
-        "rm -f /etc/systemd/system/iot-gateway-agent.service; "
+        "systemctl stop iotgw-kafka 2>/dev/null || true; "
+        "systemctl disable iotgw-kafka 2>/dev/null || true; "
+        "rm -f /etc/systemd/system/iot-gateway-agent.service "
+        "/etc/systemd/system/iotgw-kafka.service; "
         "systemctl daemon-reload 2>/dev/null || true",
         sudo_password=sudo_password,
         timeout=60.0,
@@ -492,14 +505,16 @@ def uninstall_monolithic_agent(
     cleanup = sudo_run(
         ssh,
         f"rm -rf {shlex.quote(remote_root)} {shlex.quote(data_dir)} "
-        f"/etc/iot-gateway-agent.env",
+        f"/opt/kafka /etc/iot-gateway-agent.env",
         sudo_password=sudo_password,
-        timeout=60.0,
+        timeout=120.0,
     )
     if not cleanup.ok:
         raise AgentInstallError(
             "failed to remove agent files: "
             f"{(cleanup.stderr or cleanup.stdout).strip()[:300]}"
         )
-    notes.append(f"removed {remote_root}, {data_dir}, /etc/iot-gateway-agent.env")
+    notes.append(
+        f"removed {remote_root}, {data_dir}, /opt/kafka, /etc/iot-gateway-agent.env"
+    )
     return notes

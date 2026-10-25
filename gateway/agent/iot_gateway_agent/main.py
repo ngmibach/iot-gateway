@@ -13,7 +13,9 @@ from pathlib import Path
 from . import AGENT_PORT, __version__
 from .broker import MosquittoSupervisor, write_mosquitto_conf
 from .decrypt_worker import DecryptWorker
+from .denied_watcher import DeniedWatcher
 from .health import build_health, build_info
+from .kafka_producer import SensorKafkaProducer
 from .mdns import start_mdns, stop_mdns
 from .metrics import AgentMetrics
 from .server import create_server
@@ -84,6 +86,16 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Disable Loki shipper",
     )
+    parser.add_argument(
+        "--kafka-bootstrap",
+        default=os.environ.get("KAFKA_BOOTSTRAP", "127.0.0.1:9092"),
+        help="Local Kafka bootstrap (KRaft single-node)",
+    )
+    parser.add_argument(
+        "--no-kafka",
+        action="store_true",
+        help="Disable Kafka produce of decrypted sensor payloads",
+    )
     parser.add_argument("--no-mdns", action="store_true")
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
@@ -124,10 +136,16 @@ def main(argv: list[str] | None = None) -> int:
     broker = MosquittoSupervisor(conf)
     worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
+    kafka: SensorKafkaProducer | None = None
+    denied: DeniedWatcher | None = None
+    if not args.no_kafka:
+        kafka = SensorKafkaProducer(bootstrap=args.kafka_bootstrap)
     metrics = AgentMetrics(
         broker=broker,
         mqtt_port=args.mqtt_port,
         mqtt_host="127.0.0.1",
+        kafka_bootstrap=args.kafka_bootstrap,
+        kafka=kafka,
     )
 
     if args.no_broker:
@@ -168,9 +186,21 @@ def main(argv: list[str] | None = None) -> int:
             username=args.decrypt_user,
             password=args.decrypt_password,
             log_path=sensor_log,
+            kafka=kafka,
         )
         worker.start()
         metrics.decrypt_worker = worker
+        denied = DeniedWatcher(
+            worker=worker,
+            log_paths=[
+                data / "mosquitto" / "log" / "mosquitto.log",
+                Path("/var/log/mosquitto/mosquitto.log"),
+                Path("/var/log/mosquitto.log"),
+            ],
+            ids_log_paths=[data / "logs" / "ids_alerts.log"],
+        )
+        denied.start()
+        metrics.denied_watcher = denied
 
     loki = args.loki_url.strip() or f"http://{args.monitoring_ip}:3100"
     if not args.no_shipper:
@@ -245,8 +275,12 @@ def main(argv: list[str] | None = None) -> int:
         logger.info("KeyboardInterrupt; shutting down")
     finally:
         server.server_close()
+        if denied:
+            denied.stop()
         if worker:
             worker.stop()
+        if kafka:
+            kafka.close()
         if shipper:
             shipper.stop()
         broker.stop()

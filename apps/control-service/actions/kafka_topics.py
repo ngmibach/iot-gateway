@@ -1,8 +1,8 @@
 """Logical Kafka topic catalog stored on the gateway.
 
-The catalog records one retention-capped topic per registered sensor. A real
-Kafka/Redpanda broker will consume this catalog later; registration already
-enforces the storage budget so the gateway cannot over-commit disk.
+The catalog records one retention-capped topic per registered sensor. Apache
+Kafka (KRaft) on the gateway applies ``retention.bytes`` from this catalog;
+registration also enforces the storage budget so the gateway cannot over-commit disk.
 """
 
 from __future__ import annotations

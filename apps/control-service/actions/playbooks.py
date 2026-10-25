@@ -146,6 +146,19 @@ def _ensure_kafka_topic_slot(
         )
     record = catalog.upsert_device(user_id, retention_bytes=retention)
     _write_kafka_catalog(ssh, paths, catalog)
+    # Apply retention on the local KRaft broker when installed.
+    try:
+        from provisioner.kafka_install import create_or_update_topic, kafka_present
+
+        if kafka_present(ssh):  # type: ignore[arg-type]
+            create_or_update_topic(
+                ssh,  # type: ignore[arg-type]
+                topic=record.topic,
+                retention_bytes=record.retention_bytes,
+            )
+    except Exception:
+        # Catalog still reserved; broker sync can retry on next provision/register.
+        pass
     return catalog, {
         "kafka_topic": record.topic,
         "kafka_retention_bytes": record.retention_bytes,
@@ -509,6 +522,14 @@ def unregister_device(
         if removed is not None:
             removed_topic = removed.topic
             _write_kafka_catalog(ssh, paths, catalog)
+            try:
+                from provisioner.kafka_install import delete_topic, kafka_present
+
+                if kafka_present(ssh):  # type: ignore[arg-type]
+                    delete_topic(ssh, topic=removed_topic)  # type: ignore[arg-type]
+            except Exception:
+                # Catalog already updated; broker delete can retry on next sync.
+                pass
 
         _chmod_mosquitto_secrets(ssh, paths)
         mosq_mode = reload_mosquitto(ssh)

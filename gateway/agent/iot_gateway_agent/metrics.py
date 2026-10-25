@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING, Optional
 if TYPE_CHECKING:
     from .broker import MosquittoSupervisor
     from .decrypt_worker import DecryptWorker
+    from .denied_watcher import DeniedWatcher
+    from .kafka_producer import SensorKafkaProducer
     from .shipper import LokiShipper
 
 _MOSQUITTO_PID_FILES = (
@@ -338,9 +340,12 @@ class AgentMetrics:
     mqtt_up: bool = False
     mqtt_port: int = 1883
     mqtt_host: str = "127.0.0.1"
+    kafka_bootstrap: str = "127.0.0.1:9092"
     broker: MosquittoSupervisor | None = None
     decrypt_worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
+    kafka: SensorKafkaProducer | None = None
+    denied_watcher: DeniedWatcher | None = None
 
     def refresh_mqtt_up(self) -> bool:
         """Child broker running, or system/external broker accepting TCP."""
@@ -351,15 +356,27 @@ class AgentMetrics:
         self.mqtt_up = tcp_open(self.mqtt_host, self.mqtt_port)
         return self.mqtt_up
 
+    def refresh_kafka_up(self) -> bool:
+        if self.kafka is not None and self.kafka.up:
+            return True
+        host, _, port_s = self.kafka_bootstrap.partition(":")
+        try:
+            port = int(port_s or "9092")
+        except ValueError:
+            port = 9092
+        return tcp_open(host or "127.0.0.1", port)
+
     def _app_up(self) -> dict[str, bool]:
         decrypt_up = bool(self.decrypt_worker and self.decrypt_worker.alive)
         shipper_up = bool(self.shipper and self.shipper.alive)
         mqtt_up = self.refresh_mqtt_up()
+        kafka_up = self.refresh_kafka_up()
         return {
             "agent": True,
             "mqtt": mqtt_up,
             "decrypt": decrypt_up,
             "shipper": shipper_up,
+            "kafka": kafka_up,
         }
 
     def _app_pids(self) -> dict[str, int]:
@@ -404,6 +421,89 @@ class AgentMetrics:
             "# TYPE iotgw_loki_lines_sent_total counter",
             f"iotgw_loki_lines_sent_total {sent}",
         ]
+
+        kafka_up = 1 if apps.get("kafka") else 0
+        kafka_ok = self.kafka.produced_ok if self.kafka else 0
+        kafka_fail = self.kafka.produced_fail if self.kafka else 0
+        lines += [
+            "# HELP iotgw_kafka_up Local Kafka broker reachable",
+            "# TYPE iotgw_kafka_up gauge",
+            f"iotgw_kafka_up {kafka_up}",
+            "# HELP iotgw_kafka_produce_total Agent Kafka produce attempts",
+            "# TYPE iotgw_kafka_produce_total counter",
+            f'iotgw_kafka_produce_total{{result="ok"}} {kafka_ok}',
+            f'iotgw_kafka_produce_total{{result="fail"}} {kafka_fail}',
+        ]
+
+        denied_total = self.denied_watcher.denied_total if self.denied_watcher else 0
+        ids_total = self.denied_watcher.ids_total if self.denied_watcher else 0
+        # Prefer summed per-device counters when watcher totals are zero but worker bumped.
+        by_device = (
+            self.decrypt_worker.device_snapshot() if self.decrypt_worker else {}
+        )
+        if by_device:
+            denied_total = max(
+                denied_total, sum(c.denied for c in by_device.values())
+            )
+            ids_total = max(ids_total, sum(c.ids for c in by_device.values()))
+        lines += [
+            "# HELP iotgw_denied_publishes_total Mosquitto Denied PUBLISH events",
+            "# TYPE iotgw_denied_publishes_total counter",
+            f"iotgw_denied_publishes_total {denied_total}",
+            "# HELP iotgw_ids_detections_total IDS / anomaly detections",
+            "# TYPE iotgw_ids_detections_total counter",
+            f"iotgw_ids_detections_total {ids_total}",
+        ]
+
+        if by_device:
+            from .kafka_store import kafka_topic_name
+
+            lines += [
+                "# HELP iotgw_device_messages_total Per-device decrypted messages",
+                "# TYPE iotgw_device_messages_total counter",
+            ]
+            for did, ctr in sorted(by_device.items()):
+                topic = kafka_topic_name(did)
+                lines.append(
+                    f'iotgw_device_messages_total{{device_id="{did}",'
+                    f'kafka_topic="{topic}",result="ok"}} {ctr.messages_ok}'
+                )
+                lines.append(
+                    f'iotgw_device_messages_total{{device_id="{did}",'
+                    f'kafka_topic="{topic}",result="fail"}} {ctr.messages_fail}'
+                )
+            lines += [
+                "# HELP iotgw_device_denied_publishes_total Per-device denied publishes",
+                "# TYPE iotgw_device_denied_publishes_total counter",
+            ]
+            for did, ctr in sorted(by_device.items()):
+                topic = kafka_topic_name(did)
+                lines.append(
+                    f'iotgw_device_denied_publishes_total{{device_id="{did}",'
+                    f'kafka_topic="{topic}"}} {ctr.denied}'
+                )
+            lines += [
+                "# HELP iotgw_device_ids_detections_total Per-device IDS detections",
+                "# TYPE iotgw_device_ids_detections_total counter",
+            ]
+            for did, ctr in sorted(by_device.items()):
+                topic = kafka_topic_name(did)
+                lines.append(
+                    f'iotgw_device_ids_detections_total{{device_id="{did}",'
+                    f'kafka_topic="{topic}"}} {ctr.ids}'
+                )
+            lines += [
+                "# HELP iotgw_device_delay_ms Last observed sensor→gateway delay (ms)",
+                "# TYPE iotgw_device_delay_ms gauge",
+            ]
+            for did, ctr in sorted(by_device.items()):
+                if ctr.last_delay_ms is None:
+                    continue
+                topic = kafka_topic_name(did)
+                lines.append(
+                    f'iotgw_device_delay_ms{{device_id="{did}",'
+                    f'kafka_topic="{topic}"}} {ctr.last_delay_ms:.3f}'
+                )
 
         pids = self._app_pids()
         cpu_lines: list[str] = []

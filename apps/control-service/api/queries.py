@@ -25,6 +25,13 @@ GATEWAY_DECRYPT_MSGS_PER_SEC = (
 GATEWAY_DECRYPT_MSGS_PER_SEC_RANGE = (
     'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job",result="ok"}[1m]))'
 )
+# Prefer agent Prometheus counters (Docker-free). Loki legacy kept as fallback.
+GATEWAY_DENIED_PROM = (
+    'sum(iotgw_denied_publishes_total{instance="$node",job="$job"})'
+)
+GATEWAY_IDS_PROM = (
+    'sum(iotgw_ids_detections_total{instance="$node",job="$job"})'
+)
 GATEWAY_DENIED_NODERED = (
     'count_over_time({container="iot-nodered", event_type=~"denied_.*"}[{range}])'
 )
@@ -41,9 +48,32 @@ GATEWAY_IDS_ALERTS = (
 )
 GATEWAY_ALLOWED_IP_COUNT = "allowed_ip_count"
 GATEWAY_CONNECTED_SENSORS = "mqtt_connected_sensor"
+GATEWAY_DELAY_BY_DEVICE_PROM = (
+    'iotgw_device_delay_ms{instance="$node",job="$job"}'
+)
+GATEWAY_DELAY_AVG_PROM = (
+    'avg(iotgw_device_delay_ms{instance="$node",job="$job"})'
+)
 GATEWAY_DELAY_BY_DEVICE = (
     'avg_over_time({container="iot-nodered", event_type="sensor_data"} '
     "| json | unwrap delay [5m]) by (deviceId)"
+)
+# Per-device message counters from the agent (preferred).
+GATEWAY_MSGS_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_messages_total{instance="$node",job="$job",result="ok"})'
+)
+GATEWAY_MSGS_BY_DEVICE_RATE_PROM = (
+    'sum by (device_id) ('
+    'rate(iotgw_device_messages_total{instance="$node",job="$job",result="ok"}[1m]))'
+)
+GATEWAY_DENIED_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_denied_publishes_total{instance="$node",job="$job"})'
+)
+GATEWAY_IDS_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_ids_detections_total{instance="$node",job="$job"})'
 )
 # Per-device message rate from Loki sensor_data (when deviceId labels exist).
 GATEWAY_MSGS_BY_DEVICE = (

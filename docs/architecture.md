@@ -13,10 +13,12 @@
 - System Mosquitto (`mosquitto.service`) with ACL/password files under
   `/var/lib/iot-gateway-agent/mosquitto/`.
 - Kafka topic catalog under `/var/lib/iot-gateway-agent/kafka/topics.json`
-  (one retention-capped topic per registered sensor). Broker install that
-  enforces `retention.bytes` is a follow-up; registration already reserves
-  topics and enforces disk capacity.
-- Agent provides decrypt → `sensor_data.log`, Loki shipper, `/metrics`, `/v1/health`, mDNS.
+  (one retention-capped topic per registered sensor).
+- Apache Kafka KRaft single-node (`/opt/kafka`, systemd `iotgw-kafka`,
+  `127.0.0.1:9092`, heap 128–256M) applies `retention.bytes` per topic.
+  Redpanda is not used.
+- Agent provides decrypt → `sensor_data.log` → Kafka produce, Loki shipper,
+  `/metrics` (incl. per-device + denied/IDS), `/v1/health`, mDNS.
 - Provision and day-2 actions use SSH from the desktop app (no container engine).
 
 ## Sensor capacity (Kafka)
@@ -45,10 +47,10 @@ Operator view of gateway-wide and per-sensor activity:
 | Per sensor | Counters + Kafka topic chart + delay chart |
 
 API: `GET /api/v1/query/summaries/gateway?gateway_id=&range=`  
-Sources: registry device meta (`kafka_topic`), Prometheus `iotgw_decrypt_*`, Loki when labels exist.
+Sources: registry device meta (`kafka_topic`), live catalog SSH sync,
+Prometheus `iotgw_decrypt_*` / `iotgw_device_*` / denied / IDS, Loki fallback.
 
-Follow-ups (broker install, topic exporters, per-device Prom counters):
-`docs/plan-activities-kafka-followups.md`.
+Shipped follow-ups checklist: `docs/plan-activities-kafka-followups.md`.
 
 ## Control plane
 
