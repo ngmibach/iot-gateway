@@ -1,10 +1,11 @@
-"""Download and verify pinned Loki/Prometheus binaries into app data.
+"""Download and verify pinned Loki/Prometheus binaries and Grafana OSS trees.
 
 The desktop app performs the download — the user never opens a browser for it.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import hashlib
 import json
 import os
@@ -21,6 +22,13 @@ from urllib.request import Request, urlopen
 ProgressCb = Callable[[str, float], None]  # (message, fraction 0..1)
 
 _VERSIONS_PATH = Path(__file__).resolve().parent / "native_versions.json"
+
+_GRAFANA_SERVER_NAMES = (
+    "grafana.exe",
+    "grafana-server.exe",
+    "grafana",
+    "grafana-server",
+)
 
 
 class BinaryFetchError(RuntimeError):
@@ -116,6 +124,88 @@ def _extract_binary(
             pass
 
 
+def _extract_archive(archive: Path, dest_dir: Path, *, kind: str) -> None:
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    if kind == "tar.gz":
+        with tarfile.open(archive, "r:gz") as tf:
+            tf.extractall(dest_dir)  # noqa: S202 — trusted pinned release
+    elif kind == "zip":
+        with zipfile.ZipFile(archive, "r") as zf:
+            zf.extractall(dest_dir)
+    else:
+        raise BinaryFetchError(f"unknown archive type: {kind}")
+
+
+def _rmtree_if_exists(path: Path) -> None:
+    if path.exists():
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def _ensure_free_space(probe: Path, min_free_bytes: int) -> None:
+    """Best-effort volume free-space check; raise if usable and below threshold."""
+    try:
+        usage = shutil.disk_usage(probe)
+    except OSError:
+        return
+    if usage.free < min_free_bytes:
+        need_gib = min_free_bytes / (1024**3)
+        have_gib = usage.free / (1024**3)
+        raise BinaryFetchError(
+            f"insufficient disk space for Grafana tree at {probe}: "
+            f"{have_gib:.2f} GiB free, need at least {need_gib:.2f} GiB"
+        )
+
+
+def _find_tree_root(extract_dir: Path, root_dir_glob: str | None) -> Path:
+    if root_dir_glob:
+        matches = sorted(
+            p
+            for p in extract_dir.iterdir()
+            if p.is_dir() and fnmatch.fnmatch(p.name, root_dir_glob)
+        )
+        if matches:
+            return matches[0]
+    top_dirs = [p for p in extract_dir.iterdir() if p.is_dir()]
+    if len(top_dirs) == 1:
+        return top_dirs[0]
+    return extract_dir
+
+
+def _grafana_layout_ok(tree: Path) -> bool:
+    if not (tree / "public").is_dir():
+        return False
+    if not (tree / "conf").is_dir():
+        return False
+    bin_dir = tree / "bin"
+    if not bin_dir.is_dir():
+        return False
+    return any((bin_dir / name).is_file() for name in _GRAFANA_SERVER_NAMES)
+
+
+def _atomic_replace_dir(staging: Path, dest: Path, old: Path) -> None:
+    """Replace ``dest`` with ``staging``; roll back on rename failure."""
+    _rmtree_if_exists(old)
+    if dest.exists():
+        dest.rename(old)
+        try:
+            staging.rename(dest)
+        except OSError:
+            if old.exists() and not dest.exists():
+                try:
+                    old.rename(dest)
+                except OSError:
+                    pass
+            _rmtree_if_exists(staging)
+            raise
+        shutil.rmtree(old, ignore_errors=True)
+    else:
+        try:
+            staging.rename(dest)
+        except OSError:
+            _rmtree_if_exists(staging)
+            raise
+
+
 def ensure_component(
     name: str,
     bin_dir: Path,
@@ -176,6 +266,92 @@ def ensure_component(
     if progress:
         progress(f"{name} ready", 1.0)
     return dest
+
+
+def ensure_grafana_tree(
+    dest_dir: Path,
+    *,
+    versions: dict[str, Any] | None = None,
+    platform: str | None = None,
+    progress: ProgressCb | None = None,
+    force: bool = False,
+    min_free_bytes: int | None = 2_500_000_000,  # 2.5 GiB; None skips check
+) -> Path:
+    """Ensure a Grafana OSS directory tree is present under ``dest_dir``.
+
+    Caller must ensure no process holds files under ``dest_dir`` when
+    ``force=True`` or when the version marker mismatches (manager
+    stop-before-replace is PR 3).
+    """
+    dest_dir = Path(dest_dir)
+    versions = versions or load_versions()
+    plat = platform or platform_key()
+    if "grafana" not in versions:
+        raise BinaryFetchError("versions pin missing grafana section")
+    meta = versions["grafana"]
+    if plat not in meta["assets"]:
+        raise BinaryFetchError(f"no grafana asset for platform {plat}")
+    asset = meta["assets"][plat]
+    version = str(meta["version"])
+    marker = dest_dir / f".grafana-{version}-{plat}.ok"
+
+    if dest_dir.is_dir() and marker.is_file() and not force:
+        if _grafana_layout_ok(dest_dir):
+            if progress:
+                progress("grafana already present", 1.0)
+            return dest_dir
+
+    dest_dir.parent.mkdir(parents=True, exist_ok=True)
+    if min_free_bytes is not None:
+        probe = dest_dir if dest_dir.exists() else dest_dir.parent
+        _ensure_free_space(probe, min_free_bytes)
+
+    staging = dest_dir.with_name(dest_dir.name + ".new")
+    old = dest_dir.with_name(dest_dir.name + ".old")
+    _rmtree_if_exists(staging)
+    _rmtree_if_exists(old)
+
+    digest = ""
+    try:
+        with tempfile.TemporaryDirectory(prefix="iotgw-grafana-") as tmp:
+            tmp_path = Path(tmp)
+            archive_name = asset["url"].rsplit("/", 1)[-1]
+            archive_path = tmp_path / archive_name
+            if progress:
+                progress(f"Fetching grafana {version}", 0.05)
+            _download(asset["url"], archive_path, progress=progress)
+            digest = _sha256_file(archive_path)
+            if digest.lower() != str(asset["sha256"]).lower():
+                raise BinaryFetchError(
+                    f"SHA256 mismatch for grafana: got {digest}, "
+                    f"expected {asset['sha256']}"
+                )
+            if progress:
+                progress("Extracting grafana", 0.9)
+            extract_dir = tmp_path / "extract"
+            _extract_archive(archive_path, extract_dir, kind=asset["archive"])
+            root = _find_tree_root(extract_dir, asset.get("root_dir_glob"))
+            if not _grafana_layout_ok(root):
+                raise BinaryFetchError(
+                    "grafana archive layout invalid: need public/, conf/, and "
+                    "bin/grafana[-server][.exe]"
+                )
+            shutil.copytree(root, staging)
+        _atomic_replace_dir(staging, dest_dir, old)
+        marker.write_text(f"{version}\n{digest}\n", encoding="utf-8")
+    except Exception:
+        _rmtree_if_exists(staging)
+        # Drop a marker only after a successful replace; never leave marker on failure.
+        if marker.is_file() and not _grafana_layout_ok(dest_dir):
+            try:
+                marker.unlink()
+            except OSError:
+                pass
+        raise
+
+    if progress:
+        progress("grafana ready", 1.0)
+    return dest_dir
 
 
 def ensure_telemetry_binaries(
