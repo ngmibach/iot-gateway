@@ -311,12 +311,6 @@
     $("scan-badge").innerHTML = "";
     $("scan-msg").textContent =
       "Neighbor lists only show devices the gateway has recently talked to.";
-    if (!$("fake-payload").value.trim()) {
-      $("fake-payload").value = '{\n  "hello": 1\n}';
-    }
-    if (!$("fake-interval").value) {
-      $("fake-interval").value = "1000";
-    }
     $("fake-form").classList.remove("hidden");
     $("fake-download").classList.add("hidden");
     if ($("fake-msg")) $("fake-msg").innerHTML = "";
@@ -462,17 +456,10 @@
     if (password.length < 8) {
       throw new Error("Password must be at least 8 characters.");
     }
-    const intervalRaw = ($("fake-interval").value || "").trim();
-    const send_interval_ms = intervalRaw ? Number(intervalRaw) : 1000;
-    if (!Number.isFinite(send_interval_ms) || send_interval_ms < 100) {
-      throw new Error("Send interval must be at least 100 ms.");
-    }
-    const payload = parseFakePayload($("fake-payload").value);
+    // Rate / payload are configured later on the Simulate tab (API defaults at create).
     const body = {
       user_id,
       password,
-      send_interval_ms: Math.floor(send_interval_ms),
-      payload,
     };
     const tr = $("fake-topic-r").value.trim();
     const tw = $("fake-topic-rw").value.trim();

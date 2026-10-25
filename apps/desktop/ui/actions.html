@@ -109,7 +109,7 @@
 
       <div id="fake-form" class="hidden">
         <h3>Fake sensor</h3>
-        <p class="muted">Creates a test sensor on this gateway.</p>
+        <p class="muted">Creates a test sensor on this gateway. Set rate and payload in Simulate after create.</p>
         <div class="row">
           <label for="fake-user">
             Device ID
@@ -145,24 +145,6 @@
             </span>
           </label>
           <input id="fake-topic-r" placeholder="alerts/+" />
-        </div>
-        <div class="row">
-          <label for="fake-interval">
-            Send interval
-            <span class="field-help" tabindex="0" aria-label="What is Send interval?">?
-              <span class="field-help-tip">Milliseconds between published messages.</span>
-            </span>
-          </label>
-          <input id="fake-interval" type="number" min="100" step="100" value="1000" />
-        </div>
-        <div class="row fake-payload-row">
-          <label for="fake-payload">
-            Payload
-            <span class="field-help" tabindex="0" aria-label="What is Payload?">?
-              <span class="field-help-tip">JSON message template the test sensor publishes.</span>
-            </span>
-          </label>
-          <textarea id="fake-payload" rows="4" placeholder='{ "hello": 1 }'></textarea>
         </div>
         <div class="row">
           <button type="button" class="primary" id="btn-fake-create">Create</button>
