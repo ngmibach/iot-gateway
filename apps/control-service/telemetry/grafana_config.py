@@ -2,28 +2,80 @@
 
 from __future__ import annotations
 
+import hashlib
+import ipaddress
 import re
 import ssl
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
-from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPSHandler,
+    Request,
+    build_opener,
+)
 
 _KAFKA_PLUGIN_ID = "hamedkarbasi93-kafka-datasource"
 _UID_SAFE = re.compile(r"[^a-zA-Z0-9-]+")
+_HOSTNAME_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)"
+    r"(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*$"
+)
+_ALLOWED_GRAFANA_ORIGINS = frozenset(
+    {
+        "https://127.0.0.1:9140",
+        "https://localhost:9140",
+    }
+)
 
 
 def _sanitize_uid_part(value: str) -> str:
-    cleaned = _UID_SAFE.sub("-", (value or "").strip()).strip("-")
-    return cleaned or "gateway"
+    """Return Grafana uid segment; append hash when sanitization alters the id."""
+    raw = (value or "").strip()
+    cleaned = _UID_SAFE.sub("-", raw).strip("-") or "gateway"
+    if cleaned != raw:
+        suffix = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:8]
+        return f"{cleaned}-{suffix}"
+    return cleaned
 
 
-def _gateway_id(gw: dict[str, Any]) -> str:
-    return str(gw.get("id") or gw.get("gateway_id") or "").strip()
+def _yaml_double_quoted(value: str) -> str:
+    """Emit a YAML double-quoted scalar (no PyYAML dependency)."""
+    escaped = (
+        value.replace("\\", "\\\\")
+        .replace('"', '\\"')
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+    )
+    return f'"{escaped}"'
 
 
-def _gateway_host(gw: dict[str, Any]) -> str:
-    return str(gw.get("host") or "").strip()
+def _validate_bootstrap_host(host: str) -> str | None:
+    """Accept a single IP or DNS hostname; reject quote/control injection."""
+    h = (host or "").strip()
+    if not h or len(h) > 253:
+        return None
+    if any(ord(c) < 32 or c in ' "\'\\' for c in h):
+        return None
+    try:
+        return str(ipaddress.ip_address(h))
+    except ValueError:
+        pass
+    if _HOSTNAME_RE.fullmatch(h):
+        return h
+    return None
+
+
+def _validate_gateway_label(gid: str) -> str | None:
+    """Gateway id safe for a quoted YAML display name."""
+    g = (gid or "").strip()
+    if not g or len(g) > 128:
+        return None
+    if any(ord(c) < 32 for c in g):
+        return None
+    return g
 
 
 def render_grafana_ini(
@@ -120,19 +172,24 @@ def render_datasources_yaml(*, gateways: list[dict[str, Any]] | None = None) -> 
     for gw in gateways or []:
         if not isinstance(gw, dict):
             continue
-        gid = _gateway_id(gw)
-        host = _gateway_host(gw)
+        # Registry rows use ``id``; accept ``gateway_id`` as a thin alias.
+        gid = _validate_gateway_label(
+            str(gw.get("id") or gw.get("gateway_id") or "")
+        )
+        host = _validate_bootstrap_host(str(gw.get("host") or ""))
         if not gid or not host:
             continue
         uid = f"iotgw-kafka-{_sanitize_uid_part(gid)}"
+        name = _yaml_double_quoted(f"Kafka ({gid})")
+        bootstrap = _yaml_double_quoted(f"{host}:9092")
         parts.append(
-            f"  - name: Kafka ({gid})\n"
+            f"  - name: {name}\n"
             f"    type: {_KAFKA_PLUGIN_ID}\n"
             "    access: proxy\n"
             f"    uid: {uid}\n"
             "    editable: true\n"
             "    jsonData:\n"
-            f'      bootstrapServers: "{host}:9092"\n'
+            f"      bootstrapServers: {bootstrap}\n"
             '      securityProtocol: "PLAINTEXT"\n'
         )
     return "".join(parts)
@@ -178,24 +235,46 @@ def write_grafana_base_config(
     return {"grafana_ini": ini_path, "datasources_yaml": ds_path}
 
 
-def _grafana_https_healthy(grafana_url: str, *, timeout: float = 2.0) -> bool:
+def _allowlisted_grafana_origin(grafana_url: str) -> str | None:
+    origin = (grafana_url or "").strip().rstrip("/")
+    for allowed in _ALLOWED_GRAFANA_ORIGINS:
+        if origin.lower() == allowed.lower():
+            return allowed
+    return None
+
+
+class _DenyRedirect(HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        raise URLError(f"redirect denied off allowlist: {newurl}")
+
+
+def _grafana_opener():
     ctx = ssl._create_unverified_context()
-    url = grafana_url.rstrip("/") + "/api/health"
+    return build_opener(HTTPSHandler(context=ctx), _DenyRedirect())
+
+
+def _grafana_https_healthy(grafana_url: str, *, timeout: float = 2.0) -> bool:
+    origin = _allowlisted_grafana_origin(grafana_url)
+    if origin is None:
+        return False
+    url = origin + "/api/health"
     try:
-        with urlopen(url, context=ctx, timeout=timeout) as resp:  # noqa: S310
+        with _grafana_opener().open(url, timeout=timeout) as resp:  # noqa: S310
             return 200 <= getattr(resp, "status", 200) < 300
-    except (URLError, OSError, TimeoutError):
+    except (URLError, HTTPError, OSError, TimeoutError):
         return False
 
 
 def _reload_grafana_datasources(grafana_url: str, *, timeout: float = 5.0) -> bool:
-    ctx = ssl._create_unverified_context()
-    url = grafana_url.rstrip("/") + "/api/admin/provisioning/datasources/reload"
+    origin = _allowlisted_grafana_origin(grafana_url)
+    if origin is None:
+        return False
+    url = origin + "/api/admin/provisioning/datasources/reload"
     req = Request(url, data=b"", method="POST")
     try:
-        with urlopen(req, context=ctx, timeout=timeout) as resp:  # noqa: S310
+        with _grafana_opener().open(req, timeout=timeout) as resp:  # noqa: S310
             return 200 <= getattr(resp, "status", 200) < 300
-    except (URLError, OSError, TimeoutError):
+    except (URLError, HTTPError, OSError, TimeoutError):
         return False
 
 

@@ -144,8 +144,12 @@ def uninstall_gateway_over_ssh(
             pass
 
 
-def remove_gateway_from_registry(gateway_id: str) -> bool:
+def remove_gateway_from_registry(
+    gateway_id: str, *, sync: bool = True
+) -> bool:
     from registry.registry import Registry  # type: ignore[import-not-found]
+
+    from .registry_gateways import _best_effort_sync_grafana_datasources
 
     reg_path = ensure_data_dir() / "registry.sqlite"
     if not reg_path.is_file():
@@ -155,34 +159,24 @@ def remove_gateway_from_registry(gateway_id: str) -> bool:
         deleted = reg.delete_gateway(gateway_id)
     finally:
         reg.close()
-    if deleted:
-        try:
-            from telemetry.grafana_config import (  # type: ignore[import-not-found]
-                sync_grafana_datasources,
-            )
-
-            data = ensure_data_dir()
-            sync_grafana_datasources(
-                config_dir=data / "telemetry" / "config",
-                registry_path=data / "registry.sqlite",
-            )
-        except Exception:  # noqa: BLE001 — Grafana may be down
-            logger.debug(
-                "grafana datasource sync after gateway delete failed",
-                exc_info=True,
-            )
+    if deleted and sync:
+        _best_effort_sync_grafana_datasources()
     return deleted
 
 
 def remove_all_gateways_from_registry() -> list[str]:
     """Delete every gateway (and cascaded devices) from the local registry."""
+    from .registry_gateways import _best_effort_sync_grafana_datasources
+
     removed: list[str] = []
     for row in list_registered_gateways():
         gid = str(row.get("id") or "").strip()
         if not gid:
             continue
-        if remove_gateway_from_registry(gid):
+        if remove_gateway_from_registry(gid, sync=False):
             removed.append(gid)
+    if removed:
+        _best_effort_sync_grafana_datasources()
     return removed
 
 

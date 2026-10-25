@@ -17,7 +17,7 @@ DEFAULT_AGENT_ROOT = "/opt/iot-gateway-agent"
 DEFAULT_AGENT_PORT = 9139
 
 
-def _best_effort_sync_grafana_datasources() -> None:
+def _best_effort_sync_grafana_datasources(*, reload: bool = True) -> None:
     """Refresh Grafana Kafka datasources after registry changes; never raise."""
     try:
         from telemetry.grafana_config import (  # type: ignore[import-not-found]
@@ -28,9 +28,10 @@ def _best_effort_sync_grafana_datasources() -> None:
         sync_grafana_datasources(
             config_dir=data / "telemetry" / "config",
             registry_path=data / "registry.sqlite",
+            reload=reload,
         )
-    except Exception:  # noqa: BLE001 — Grafana may be down; upsert must succeed
-        logger.debug("grafana datasource sync after gateway upsert failed", exc_info=True)
+    except Exception as exc:  # noqa: BLE001 — Grafana may be down; upsert must succeed
+        logger.debug("grafana datasource sync after gateway change failed: %s", exc)
 
 
 def upsert_local_gateway(

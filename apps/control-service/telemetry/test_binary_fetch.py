@@ -379,6 +379,65 @@ class BinaryFetchTests(unittest.TestCase):
                 (plugins / f".{_KAFKA_PLUGIN_ID}-1.9.1.ok").exists()
             )
 
+    def test_ensure_grafana_kafka_plugin_id_mismatch(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            plugin = root / "pkg" / _KAFKA_PLUGIN_ID
+            plugin.mkdir(parents=True)
+            (plugin / "plugin.json").write_text(
+                '{"id":"other-plugin","type":"datasource"}',
+                encoding="utf-8",
+            )
+            archive = root / "bad.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.write(
+                    plugin / "plugin.json",
+                    arcname=f"{_KAFKA_PLUGIN_ID}/plugin.json",
+                )
+            digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+            versions = _kafka_plugin_versions(digest)
+            plugins = root / "plugins"
+
+            def _dl(url, dest_path, progress=None):
+                dest_path.write_bytes(archive.read_bytes())
+
+            with mock.patch.object(bf, "_download", side_effect=_dl):
+                with self.assertRaises(bf.BinaryFetchError) as ctx:
+                    bf.ensure_grafana_kafka_plugin(plugins, versions=versions)
+            self.assertIn("does not match pin", str(ctx.exception))
+
+    def test_ensure_grafana_kafka_plugin_clears_stale_markers(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, digest = _make_kafka_plugin_zip(root)
+            versions = _kafka_plugin_versions(digest)
+            plugins = root / "plugins"
+            plugins.mkdir()
+            stale = plugins / f".{_KAFKA_PLUGIN_ID}-0.0.1.ok"
+            stale.write_text("old\n", encoding="utf-8")
+
+            def _dl(url, dest_path, progress=None):
+                dest_path.write_bytes(archive.read_bytes())
+
+            with mock.patch.object(bf, "_download", side_effect=_dl):
+                bf.ensure_grafana_kafka_plugin(plugins, versions=versions)
+            self.assertFalse(stale.exists())
+            self.assertTrue(
+                (plugins / f".{_KAFKA_PLUGIN_ID}-1.9.1.ok").is_file()
+            )
+
+    def test_extract_archive_rejects_zip_slip(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive = root / "slip.zip"
+            with zipfile.ZipFile(archive, "w") as zf:
+                zf.writestr("../evil.txt", "nope")
+            dest = root / "out"
+            with self.assertRaises(bf.BinaryFetchError) as ctx:
+                bf._extract_archive(archive, dest, kind="zip")
+            self.assertIn("unsafe archive member", str(ctx.exception))
+            self.assertFalse((root / "evil.txt").exists())
+
 
 if __name__ == "__main__":
     unittest.main()
