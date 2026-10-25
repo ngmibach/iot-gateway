@@ -381,6 +381,41 @@ class QueryApiTests(unittest.TestCase):
         ids = {s["device_id"] for s in body["connected_sensors"]}
         self.assertEqual(ids, {"sensor_a", "sensor_b"})
 
+    def test_summary_gateway_catalog_sync_scrubs_ssh_keys(self) -> None:
+        """Activities warnings must never include OpenSSH key bodies."""
+        leaked = "AAAAC3NzaC1lZDI1NTE5AAAAICGmoZVh+fAh2Lm6O/yyMx3c98oO6pdT5aW2C96IvM6h"
+
+        @contextmanager
+        def bad_ssh(_gw: dict[str, Any]) -> Iterator[_FakeSSH]:
+            raise RuntimeError(
+                f"SSH host key mismatch for 172.20.10.2: got {leaked}"
+            )
+            yield _FakeSSH()  # pragma: no cover
+
+        self.app = create_app(
+            settings=self.settings,
+            registry=self.registry,
+            open_ssh=bad_ssh,
+        )
+        client = TestClient(self.app)
+
+        def empty_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {"status": "success", "data": {"result": []}}
+
+        with patch("api.query._proxy_get", side_effect=empty_proxy):
+            r = client.get(
+                "/api/v1/query/summaries/gateway", params={"gateway_id": "gw1"}
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        warnings = r.json().get("warnings") or []
+        joined = "\n".join(warnings)
+        self.assertTrue(
+            any(w.startswith("kafka_catalog_sync:") for w in warnings),
+            warnings,
+        )
+        self.assertNotIn(leaked, joined)
+        self.assertNotIn("AAAA", joined)
+
     def test_summary_gateway_scalars(self) -> None:
         self.registry.upsert_device(
             gateway_id="gw1",
