@@ -1294,8 +1294,10 @@ def _should_inject_ca(method: str, path: str) -> bool:
 
 
 def _should_inject_sudo(method: str, path: str) -> bool:
-    """Fake-sensor privileged playbooks that accept ``sudo_password``."""
+    """Playbooks that need gateway sudo (Mosquitto ACL/passwords or fake netns)."""
     if method == "POST" and path.endswith("/devices/fake"):
+        return True
+    if method == "POST" and path.endswith("/devices"):
         return True
     if method == "POST" and path.endswith("/fake/feed-cert"):
         return True
@@ -1304,6 +1306,12 @@ def _should_inject_sudo(method: str, path: str) -> bool:
     if method == "POST" and path.endswith("/fake/stop"):
         return True
     if method == "PATCH" and path.endswith("/fake"):
+        return True
+    # Real-sensor View update re-runs register (ACL/password writes).
+    if method == "PATCH" and "/devices/" in path and not path.endswith("/fake"):
+        return True
+    # Unregister / fake teardown needs sudo for Mosquitto secrets + netns.
+    if method == "DELETE" and "/devices/" in path:
         return True
     return False
 

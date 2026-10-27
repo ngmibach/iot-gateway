@@ -7,7 +7,7 @@ import time
 from datetime import datetime
 from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Response, status
 
 from actions.discover_sensors import discover_sensor_hosts
 from actions.fake_sensors import (
@@ -47,6 +47,7 @@ from .deps import (
 from .device_meta import is_fake_meta, merge_device_meta, parse_meta
 from .schemas import (
     CreateFakeDeviceRequest,
+    DeleteDeviceRequest,
     DeviceOut,
     DiscoverSensorsResponse,
     FakeActionRequest,
@@ -445,6 +446,7 @@ def post_create_fake_device(
                 if body.message_schema is not None
                 else FAKE_DEFAULT_SCHEMA,
                 also_fake_crypto_copy=True,
+                sudo_password=sudo_password,
             )
             if not result.ok:
                 teardown_fake(
@@ -1029,6 +1031,7 @@ def post_register_device(
                 crypto_profile=body.crypto_profile or "v1-psk",
                 schema_id=body.schema_id or "default",
                 schema=body.message_schema,
+                sudo_password=body.sudo_password,
             )
     except ValueError as exc:
         raise http_400(exc) from exc
@@ -1249,6 +1252,7 @@ def patch_device(
                     topic_r=topic_r,
                     install_root=gw["install_root"],
                     ca_passphrase=ca_pass,
+                    sudo_password=body.sudo_password,
                 )
         except ValueError as exc:
             raise http_400(exc) from exc
@@ -1427,6 +1431,7 @@ def delete_device(
     gid: str,
     device_id: str,
     remove_ip: bool = Query(default=False),
+    body: Optional[DeleteDeviceRequest] = Body(default=None),
     state: AppState = Depends(get_state),
     registry: Registry = Depends(get_registry),
 ) -> dict[str, Any]:
@@ -1444,11 +1449,15 @@ def delete_device(
         )
     ip = row.get("ip")
     is_fake = is_fake_meta(_meta_dict(row))
+    sudo_password = body.sudo_password if body is not None else None
     try:
         with open_ssh_for(state, gw) as ssh:
             if is_fake:
                 torn = teardown_fake(
-                    ssh, device_id, install_root=gw["install_root"]
+                    ssh,
+                    device_id,
+                    sudo_password=sudo_password,
+                    install_root=gw["install_root"],
                 )
                 if not torn.ok and torn.status == "failed":
                     raise HTTPException(
@@ -1461,6 +1470,7 @@ def delete_device(
                 ip=ip if remove_ip else None,
                 remove_ip=remove_ip and bool(ip),
                 install_root=gw["install_root"],
+                sudo_password=sudo_password,
             )
     except HTTPException:
         raise

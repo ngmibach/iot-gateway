@@ -78,8 +78,14 @@ class CaInjectHelpersTests(unittest.TestCase):
                 "PATCH", "/api/v1/gateways/gw1/devices/fake1/fake"
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             _should_inject_sudo("POST", "/api/v1/gateways/gw1/devices")
+        )
+        self.assertTrue(
+            _should_inject_sudo("PATCH", "/api/v1/gateways/gw1/devices/s1")
+        )
+        self.assertTrue(
+            _should_inject_sudo("DELETE", "/api/v1/gateways/gw1/devices/s1")
         )
 
     def test_inject_merges_keyring(self) -> None:

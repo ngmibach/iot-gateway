@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import secrets
+import time
 from dataclasses import dataclass, field
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Any, Optional
 
 from . import files as fileops
@@ -36,7 +39,7 @@ from .validate import (
 )
 
 if TYPE_CHECKING:
-    from .ssh import SSHClient
+    from .ssh import CommandResult, SSHClient
 
 
 @dataclass
@@ -178,13 +181,140 @@ def _ensure_kafka_topic_slot(
     }
 
 
-def _chmod_mosquitto_secrets(ssh: "SSHClient", paths: GatewayPaths) -> None:
-    ssh.run(
-        f"chmod 0600 {shell_quote(paths.passwords)} {shell_quote(paths.acl)} || true"
+def _sudo(
+    ssh: "SSHClient",
+    command: str,
+    *,
+    sudo_password: str | None = None,
+    timeout: float | None = 60.0,
+) -> "CommandResult":
+    """Run ``command`` as root via sudo (password on stdin when provided)."""
+    quoted = shell_quote(command)
+    if sudo_password:
+        return ssh.run(
+            f"sudo -S -p '' -- sh -c {quoted}",
+            timeout=timeout,
+            stdin=sudo_password,
+        )
+    return ssh.run(f"sudo -n -- sh -c {quoted}", timeout=timeout)
+
+
+def _read_mosquitto_secret(
+    ssh: "SSHClient",
+    path: str,
+    *,
+    sudo_password: str | None = None,
+) -> str:
+    """Read ACL/passwords; fall back to ``sudo cat`` when SFTP is denied."""
+    try:
+        return ssh.read_text(path)
+    except (OSError, IOError, PermissionError):
+        pass
+    result = _sudo(
+        ssh,
+        f"cat {shell_quote(path)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
     )
-    ssh.run(
-        f"chown mosquitto:mosquitto {shell_quote(paths.passwords)} "
-        f"{shell_quote(paths.acl)} 2>/dev/null || true"
+    if result.exit_code != 0:
+        err = (result.stderr or result.stdout or "").strip()[:200]
+        raise PermissionError(
+            f"cannot read {path}: {err or 'permission denied'}"
+        )
+    return result.stdout or ""
+
+
+def _write_mosquitto_secret(
+    ssh: "SSHClient",
+    path: str,
+    content: str,
+    *,
+    sudo_password: str | None = None,
+) -> None:
+    """Install ACL/passwords via /tmp + sudo mv (same pattern as Install).
+
+    Day-2 SFTP as the SSH login user fails with ``[Errno 13] Permission denied``
+    after Install chowns these files to ``mosquitto:mosquitto``.
+    """
+    body = content if content.endswith("\n") else content + "\n"
+    token = secrets.token_hex(8)
+    remote_tmp = f"/tmp/iotgw-mosq-{PurePosixPath(path).name}-{token}"
+    ssh.write_text(remote_tmp, body, mode=0o600)
+    result = _sudo(
+        ssh,
+        f"mv {shell_quote(remote_tmp)} {shell_quote(path)} && "
+        f"chmod 600 {shell_quote(path)} && "
+        f"chown mosquitto:mosquitto {shell_quote(path)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
+    )
+    if result.exit_code != 0:
+        ssh.run(f"rm -f {shell_quote(remote_tmp)}")
+        err = (result.stderr or result.stdout or "").strip()[:300]
+        raise PermissionError(
+            f"cannot write {path} via sudo: {err or 'permission denied'}"
+        )
+
+
+def _backup_mosquitto_secret(
+    ssh: "SSHClient",
+    path: str,
+    *,
+    sudo_password: str | None = None,
+) -> str:
+    """Copy ``path`` beside itself when writable; otherwise backup under ``/tmp``."""
+    try:
+        return ssh.backup(path)
+    except (OSError, IOError, PermissionError):
+        pass
+    content = _read_mosquitto_secret(ssh, path, sudo_password=sudo_password)
+    bak = (
+        f"/tmp/iotgw-bak-{PurePosixPath(path).name}."
+        f"{int(time.time())}.{secrets.token_hex(3)}"
+    )
+    body = content if content.endswith("\n") else content + "\n"
+    ssh.write_text(bak, body, mode=0o600)
+    return bak
+
+
+def _restore_mosquitto_secret(
+    ssh: "SSHClient",
+    path: str,
+    bak_path: str,
+    *,
+    sudo_password: str | None = None,
+) -> None:
+    """Restore a Mosquitto secret from ``bak_path`` (sidecar or /tmp)."""
+    try:
+        ssh.restore_backup(path, bak_path)
+        _chmod_mosquitto_secrets(ssh, path, sudo_password=sudo_password)
+        return
+    except (OSError, IOError, PermissionError):
+        pass
+    content = ssh.read_text(bak_path)
+    _write_mosquitto_secret(
+        ssh, path, content, sudo_password=sudo_password
+    )
+
+
+def _chmod_mosquitto_secrets(
+    ssh: "SSHClient",
+    paths_or_file: GatewayPaths | str,
+    *,
+    sudo_password: str | None = None,
+) -> None:
+    """Best-effort ``chmod 600`` + ``chown mosquitto`` via sudo."""
+    if isinstance(paths_or_file, str):
+        targets = [paths_or_file]
+    else:
+        targets = [paths_or_file.passwords, paths_or_file.acl]
+    quoted = " ".join(shell_quote(p) for p in targets)
+    _sudo(
+        ssh,
+        f"chmod 600 {quoted} && "
+        f"chown mosquitto:mosquitto {quoted} 2>/dev/null || true",
+        sudo_password=sudo_password,
+        timeout=30.0,
     )
 
 
@@ -194,11 +324,16 @@ def _restore_backups(
     bak_acl: str | None = None,
     bak_pw: str | None = None,
     paths: GatewayPaths,
+    sudo_password: str | None = None,
 ) -> None:
     if bak_pw:
-        ssh.restore_backup(paths.passwords, bak_pw)
+        _restore_mosquitto_secret(
+            ssh, paths.passwords, bak_pw, sudo_password=sudo_password
+        )
     if bak_acl:
-        ssh.restore_backup(paths.acl, bak_acl)
+        _restore_mosquitto_secret(
+            ssh, paths.acl, bak_acl, sudo_password=sudo_password
+        )
 
 
 def _cert_fields(
@@ -256,6 +391,7 @@ def register_device(
     schema: dict[str, Any] | None = None,
     provision_crypto: bool = True,
     also_fake_crypto_copy: bool = False,
+    sudo_password: str | None = None,
 ) -> RegisterResult:
     """Register MQTT user + Kafka topic: ACL upsert + hashed passwd + CSR/sign.
 
@@ -320,30 +456,56 @@ def register_device(
             else:
                 _write_kafka_catalog(ssh, paths, catalog_before)
 
-        # 1 Backup
-        bak_acl = ssh.backup(paths.acl)
-        bak_pw = ssh.backup(paths.passwords)
+        # 1 Backup (SFTP when writable; else /tmp via sudo cat)
+        bak_acl = _backup_mosquitto_secret(
+            ssh, paths.acl, sudo_password=sudo_password
+        )
+        bak_pw = _backup_mosquitto_secret(
+            ssh, paths.passwords, sudo_password=sudo_password
+        )
 
         # 2 ACL upsert (replace block if user already exists)
         try:
             acl = fileops.upsert_user_acl(
-                ssh.read_text(paths.acl),
+                _read_mosquitto_secret(
+                    ssh, paths.acl, sudo_password=sudo_password
+                ),
                 user_id,
                 topic_rw=topic_rw,
                 topic_r=topic_r,
             )
-            ssh.write_text(paths.acl, acl, mode=0o600)
+            _write_mosquitto_secret(
+                ssh, paths.acl, acl, sudo_password=sudo_password
+            )
         except Exception:
-            _restore_backups(ssh, bak_acl=bak_acl, paths=paths)
+            _restore_backups(
+                ssh,
+                bak_acl=bak_acl,
+                paths=paths,
+                sudo_password=sudo_password,
+            )
             _restore_kafka()
             raise
 
         # 3 Password hash line
         try:
-            pw = fileops.merge_password_line(ssh.read_text(paths.passwords), hash_line)
-            ssh.write_text(paths.passwords, pw, mode=0o600)
+            pw = fileops.merge_password_line(
+                _read_mosquitto_secret(
+                    ssh, paths.passwords, sudo_password=sudo_password
+                ),
+                hash_line,
+            )
+            _write_mosquitto_secret(
+                ssh, paths.passwords, pw, sudo_password=sudo_password
+            )
         except Exception:
-            _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
+            _restore_backups(
+                ssh,
+                bak_acl=bak_acl,
+                bak_pw=bak_pw,
+                paths=paths,
+                sudo_password=sudo_password,
+            )
             _restore_kafka()
             raise
 
@@ -358,11 +520,17 @@ def register_device(
                 reject_default_admin_passphrase=reject_default_admin_passphrase,
             )
         except Exception:
-            _restore_backups(ssh, bak_acl=bak_acl, bak_pw=bak_pw, paths=paths)
+            _restore_backups(
+                ssh,
+                bak_acl=bak_acl,
+                bak_pw=bak_pw,
+                paths=paths,
+                sudo_password=sudo_password,
+            )
             _restore_kafka()
             raise
 
-        _chmod_mosquitto_secrets(ssh, paths)
+        _chmod_mosquitto_secrets(ssh, paths, sudo_password=sudo_password)
 
         crypto_meta: dict[str, Any] = {}
         crypto_json: dict[str, Any] | None = None
@@ -482,6 +650,7 @@ def update_acl(
     delete_r: list[str] | str | None = None,
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
+    sudo_password: str | None = None,
 ) -> PlaybookResult:
     """Update topics for an existing Mosquitto ACL user block."""
     try:
@@ -498,9 +667,13 @@ def update_acl(
         add_rw_l, add_r_l = _list(add_rw), _list(add_r)
         del_rw_l, del_r_l = _list(delete_rw), _list(delete_r)
 
-        bak = ssh.backup(paths.acl)
+        bak = _backup_mosquitto_secret(
+            ssh, paths.acl, sudo_password=sudo_password
+        )
         try:
-            content = ssh.read_text(paths.acl)
+            content = _read_mosquitto_secret(
+                ssh, paths.acl, sudo_password=sudo_password
+            )
             updated = fileops.update_user_acl(
                 content,
                 user_id,
@@ -509,8 +682,10 @@ def update_acl(
                 delete_rw=del_rw_l,
                 delete_r=del_r_l,
             )
-            ssh.write_text(paths.acl, updated, mode=0o600)
-            _chmod_mosquitto_secrets(ssh, paths)
+            _write_mosquitto_secret(
+                ssh, paths.acl, updated, sudo_password=sudo_password
+            )
+            _chmod_mosquitto_secrets(ssh, paths, sudo_password=sudo_password)
             mosq_mode = reload_mosquitto(ssh)
             return PlaybookResult(
                 ok=True,
@@ -519,7 +694,9 @@ def update_acl(
             )
         except Exception:
             try:
-                ssh.restore_backup(paths.acl, bak)
+                _restore_mosquitto_secret(
+                    ssh, paths.acl, bak, sudo_password=sudo_password
+                )
             except Exception:
                 pass
             raise
@@ -535,6 +712,7 @@ def unregister_device(
     remove_ip: bool = False,
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
+    sudo_password: str | None = None,
 ) -> PlaybookResult:
     """Remove ACL block + password line + Kafka topic catalog entry.
 
@@ -551,16 +729,34 @@ def unregister_device(
         if ip is not None:
             ip = validate_ip_or_cidr(ip)
 
-        bak_acl = ssh.backup(paths.acl)
-        bak_pw = ssh.backup(paths.passwords)
+        bak_acl = _backup_mosquitto_secret(
+            ssh, paths.acl, sudo_password=sudo_password
+        )
+        bak_pw = _backup_mosquitto_secret(
+            ssh, paths.passwords, sudo_password=sudo_password
+        )
         if ssh.exists(paths.kafka_topics_catalog):
             bak_kafka = ssh.backup(paths.kafka_topics_catalog)
 
-        acl = fileops.remove_user_acl(ssh.read_text(paths.acl), user_id)
-        ssh.write_text(paths.acl, acl, mode=0o600)
+        acl = fileops.remove_user_acl(
+            _read_mosquitto_secret(
+                ssh, paths.acl, sudo_password=sudo_password
+            ),
+            user_id,
+        )
+        _write_mosquitto_secret(
+            ssh, paths.acl, acl, sudo_password=sudo_password
+        )
 
-        pw = fileops.remove_password_user(ssh.read_text(paths.passwords), user_id)
-        ssh.write_text(paths.passwords, pw, mode=0o600)
+        pw = fileops.remove_password_user(
+            _read_mosquitto_secret(
+                ssh, paths.passwords, sudo_password=sudo_password
+            ),
+            user_id,
+        )
+        _write_mosquitto_secret(
+            ssh, paths.passwords, pw, sudo_password=sudo_password
+        )
 
         catalog = _read_kafka_catalog(ssh, paths)
         removed = catalog.remove_device(user_id)
@@ -576,7 +772,7 @@ def unregister_device(
                 # Catalog already updated; broker delete can retry on next sync.
                 pass
 
-        _chmod_mosquitto_secrets(ssh, paths)
+        _chmod_mosquitto_secrets(ssh, paths, sudo_password=sudo_password)
         mosq_mode = reload_mosquitto(ssh)
         mosquitto_reloaded = True
 
@@ -603,6 +799,7 @@ def unregister_device(
                     bak_acl=bak_acl,
                     bak_pw=bak_pw,
                     paths=paths,
+                    sudo_password=sudo_password,
                 )
             except Exception:
                 pass
