@@ -12,6 +12,7 @@ from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from api.app import create_app
+from api import query as query_mod
 from api import queries as Q
 from api.settings import Settings
 from registry.registry import Registry
@@ -224,6 +225,8 @@ class QueryApiTests(unittest.TestCase):
                 captured["params"] = params
                 return _Resp()
 
+        query_mod.close_http_client()
+        self.addCleanup(query_mod.close_http_client)
         with patch("api.query.httpx.Client", _Client):
             r = self.client.get(
                 "/api/v1/query/loki",
@@ -271,6 +274,8 @@ class QueryApiTests(unittest.TestCase):
                 captured["params"] = params
                 return _Resp()
 
+        query_mod.close_http_client()
+        self.addCleanup(query_mod.close_http_client)
         with patch("api.query.httpx.Client", _Client):
             r = self.client.get(
                 "/api/v1/query/prometheus",
@@ -302,6 +307,8 @@ class QueryApiTests(unittest.TestCase):
             def get(self, url: str, params: dict | None = None) -> _Resp:
                 return _Resp()
 
+        query_mod.close_http_client()
+        self.addCleanup(query_mod.close_http_client)
         with patch("api.query.httpx.Client", _Client):
             r = self.client.get("/api/v1/query/prometheus", params={"query": "up"})
         self.assertEqual(r.status_code, 502)
@@ -678,6 +685,14 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(body["applications"]["cpu"][0]["name"], "agent")
         self.assertEqual(body["applications"]["mem_mib"][0]["name"], "agent")
         self.assertEqual(body["containers"]["cpu"][0]["name"], "agent")
+
+    def test_http_client_is_reused(self) -> None:
+        """Prom/Loki proxies must share one httpx client (Windows Client() is slow)."""
+        query_mod.close_http_client()
+        self.addCleanup(query_mod.close_http_client)
+        first = query_mod._http_client()
+        second = query_mod._http_client()
+        self.assertIs(first, second)
 
     def test_query_requires_token_when_configured(self) -> None:
         settings = Settings(

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import threading
 import time
 from typing import Any, Optional
 
@@ -18,16 +19,46 @@ from .device_meta import is_fake_meta
 router = APIRouter(dependencies=[Depends(require_token)])
 
 _TIMEOUT = 20.0
+_client_lock = threading.Lock()
+_shared_client: httpx.Client | None = None
 
 
 def _backend_urls(state: AppState) -> tuple[str, str]:
     return state.settings.loki_url.rstrip("/"), state.settings.prometheus_url.rstrip("/")
 
 
+def _http_client() -> httpx.Client:
+    """Reuse one httpx client for Prom/Loki proxies.
+
+    Opening a new Client per query costs ~0.5s on Windows, so Gateway Metric
+    summaries (~25 sequential queries) were taking ~13s and the UI often showed
+    browser ``Failed to fetch`` when the wizard GET proxy timed out or the
+    control-service restarted mid-request.
+    """
+    global _shared_client
+    if _shared_client is not None:
+        return _shared_client
+    with _client_lock:
+        if _shared_client is None:
+            _shared_client = httpx.Client(timeout=_TIMEOUT, trust_env=False)
+        return _shared_client
+
+
+def close_http_client() -> None:
+    """Close the shared backend client (tests / shutdown)."""
+    global _shared_client
+    with _client_lock:
+        client = _shared_client
+        _shared_client = None
+    if client is not None:
+        close = getattr(client, "close", None)
+        if callable(close):
+            close()
+
+
 def _proxy_get(url: str, params: dict[str, Any]) -> Any:
     try:
-        with httpx.Client(timeout=_TIMEOUT) as client:
-            r = client.get(url, params=params)
+        r = _http_client().get(url, params=params)
     except httpx.HTTPError as e:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
