@@ -4,7 +4,19 @@
 
 - Packaged app: `IoTGatewayMonitor.exe` (Windows) or AppImage (Linux).
 - Local control service on `127.0.0.1:9137`; wizard/UI on `:9138`.
-- Loki (`:3100`) and Prometheus (`:9090`) as native processes under the app data directory.
+- Loki (`:3100`), Prometheus (`:9090`), and Grafana HTTPS
+  (`https://127.0.0.1:9140`) as native children under NativeTelemetryManager.
+  Ready/start requires all three.
+- Grafana OSS ~445 MiB compressed (pin 13.2.4); free-space preflight ≥2.5 GiB.
+  Self-signed cert is **download-only** from Settings → Certificates (no OS
+  auto-import); trust it in the system browser after download. Anonymous Admin
+  on localhost. Open Grafana via Settings/nav → system browser
+  (`POST /api/wizard/open-url`), not an in-app iframe. No starter dashboards.
+  Provisioned datasources: Prometheus, Loki, and one Kafka datasource per
+  registered gateway (`{gateway_ip}:9092` PLAINTEXT).
+- Upgrade: ensure pulls the Grafana tree + Kafka plugin; on Windows stop Grafana
+  before force/version-marker tree replace. Healthy Loki+Prometheus alone no
+  longer skips Grafana install.
 - Device registry in SQLite; secrets in the OS keyring (with file fallback).
 
 ## Gateway device
@@ -20,7 +32,11 @@
 - Kafka topic catalog under `/var/lib/iot-gateway-agent/kafka/topics.json`
   (one retention-capped topic per registered sensor).
 - Apache Kafka KRaft single-node (`/opt/kafka`, systemd `iotgw-kafka`,
-  `127.0.0.1:9092`, heap 128–256M) applies `retention.bytes` per topic.
+  heap 128–256M) with dual PLAINTEXT listeners:
+  INTERNAL `127.0.0.1:9092` (agent) and EXTERNAL `{gateway_ip}:9092`
+  (desktop Grafana). LAN EXTERNAL is plaintext — treat as trusted-LAN only.
+  Already-provisioned gateways need a Kafka config rewrite / re-provision
+  before LAN Grafana datasources work. Applies `retention.bytes` per topic.
   Redpanda is not used.
 - Agent provides decrypt (mTLS client on :8883) → `sensor_data.log` → Kafka
   produce, Loki shipper, `/metrics` (incl. per-device + denied/IDS),

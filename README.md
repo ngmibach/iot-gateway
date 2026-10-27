@@ -7,7 +7,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 | Piece | Role |
 |-------|------|
 | **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, Actions, Monitoring, Admin |
-| **Local Loki + Prometheus** | App-managed native processes (downloaded once in-UI) |
+| **Local Loki + Prometheus + Grafana** | App-managed native processes (downloaded once in-UI); Grafana HTTPS on `127.0.0.1:9140` |
 | **Gateway agent** | One systemd service: Mosquitto (MQTTS :8883 mTLS ingress) + Kafka topic store (per sensor) + decrypt → log + metrics + Loki shipper + mDNS |
 | **Communication** | SSH for control/provision; MQTT + HTTP for data |
 
@@ -24,7 +24,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 
 ### First-run Wizard (all in the UI)
 
-1. **Install monitoring** — downloads Loki + Prometheus once and starts them (progress in the Wizard; no Docker). Then **Open app**.
+1. **Install monitoring** — downloads Loki + Prometheus + Grafana once and starts them (progress in the Wizard; no Docker; Grafana ~445 MiB). Then **Open app**.
 2. Under **Gateways → Registration** — pick MONITORING_IP (LAN), Find gateway (SSH), enter credentials, **Install gateway** (apt packages + agent over SSH; sudo password is saved in the app keyring for later fake-sensor / cleanup use).
 
 App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGatewayMonitor\`.
@@ -39,6 +39,8 @@ App data: Linux `~/.local/share/iot-gateway-monitor/`, Windows `%APPDATA%\IoTGat
 | **`linux`** | Push → rebuild AppImage → `desktop-latest` |
 | **`windows`** | Push → rebuild `.exe` → `desktop-latest` |
 
+Shared docs/UI changes ship on `windows` then `linux` (`docs(windows):` / `docs(linux):` or feat/fix pairs), then return to `windows`.
+
 ---
 
 ## Architecture — gateway and monitoring
@@ -52,10 +54,12 @@ IoTGatewayMonitor                          iot-gateway-agent (systemd)
   Wizard / Gateways / Control Plane          ├─ Mosquitto (MQTTS :8883 mTLS)
   Monitoring (Metric / Activities)           │    ← sensor + decrypt worker
   Loki :3100 (native)                        ├─ Kafka topic store          ← one topic per sensor
-  Prometheus :9090 (native)                  │    retention.bytes = topic cap
-  registry.sqlite (gateways + devices)       ├─ decrypt → sensor_data.log
-  keyring (CA passphrases)                   ├─ Loki shipper → PC:3100
-  FakeCertRenewer (fakes only)               ├─ GET :9139/metrics /v1/health
+  Prometheus :9090 (native)                  │    INTERNAL 127.0.0.1:9092 (agent)
+  Grafana HTTPS :9140 (native)               │    EXTERNAL {gateway_ip}:9092 (Grafana)
+  registry.sqlite (gateways + devices)       │    retention.bytes = topic cap
+  keyring (CA passphrases)                   ├─ decrypt → sensor_data.log
+  FakeCertRenewer (fakes only)               ├─ Loki shipper → PC:3100
+                                             ├─ GET :9139/metrics /v1/health
                                              ├─ mDNS
                                              └─ iotgw-fake bridge / iotgw-fake@ units
                                                   (optional test sensors)
@@ -127,10 +131,13 @@ API:
 - Device responses include `kafka_topic` and `kafka_retention_bytes`.
 
 > **Note:** Gateway provision installs **Apache Kafka** in minimal KRaft
-> single-node mode (`iotgw-kafka`, heap 128–256M, localhost:9092) — not
-> Redpanda. Sensor register/unregister creates or deletes topics with
-> `retention.bytes` from the catalog. The agent produces decrypted payloads to
-> `sensor.<device_id>` after MQTT decrypt.
+> single-node mode (`iotgw-kafka`, heap 128–256M) with dual PLAINTEXT listeners —
+> INTERNAL `127.0.0.1:9092` (agent) and EXTERNAL `{gateway_ip}:9092` (desktop
+> Grafana on the LAN). Not Redpanda. Already-provisioned gateways need a Kafka
+> config rewrite / re-provision before LAN Grafana datasources work. Sensor
+> register/unregister creates or deletes topics with `retention.bytes` from the
+> catalog. The agent produces decrypted payloads to `sensor.<device_id>` after
+> MQTT decrypt.
 
 ### Monitoring stack (operator PC)
 
@@ -138,11 +145,13 @@ API:
 |-----------|------|
 | **Prometheus** `:9090` | Scrapes gateway agent `/metrics` (`job=iot-gateway-agent`, `instance=gateway`) |
 | **Loki** `:3100` | Receives shipped sensor log lines from the gateway |
+| **Grafana** `https://127.0.0.1:9140` | Localhost HTTPS; provisioned Prometheus, Loki, and per-gateway Kafka datasources; open via system browser (Settings → Certificates downloads the self-signed cert — no OS auto-import) |
 | **Control service** `:9137` | Device registry, SSH playbooks, query APIs |
 | **Wizard / UI** `:9138` | Setup, Gateways, Monitoring, Control Plane |
 
 Monitoring tabs: **Gateway Metric** (host + application health), **Gateway Activities**
-(gateway + per-sensor Kafka activity), **Control Plane** (Registration | View | Simulate).
+(gateway + per-sensor Kafka activity), **Control Plane** (Registration | View | Simulate),
+plus **Grafana** (opens in the system browser).
 
 ### Fake sensors (Control Plane testing)
 

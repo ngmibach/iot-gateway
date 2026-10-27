@@ -8,16 +8,16 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
 
 | Platform | File | First run |
 |----------|------|-----------|
-| Windows | `IoTGatewayMonitor.exe` | Double-click. **WSL is not required.** Loki and Prometheus run as native Windows processes under `%APPDATA%\IoTGatewayMonitor`. If SmartScreen says unrecognized: **More info → Run anyway**. |
+| Windows | `IoTGatewayMonitor.exe` | Double-click. **WSL is not required.** Loki, Prometheus, and Grafana run as native Windows processes under `%APPDATA%\IoTGatewayMonitor`. If SmartScreen says unrecognized: **More info → Run anyway**. |
 | Linux | `IoTGatewayMonitor-*.AppImage` | `chmod +x` once, then double-click. |
 
-1. First launch: Setup Wizard — **Install monitoring**, then **Open app**.
+1. First launch: Setup Wizard — **Install monitoring** (downloads Loki + Prometheus + Grafana), then **Open app**.
 2. App shell sections:
-   - **Monitoring:** Gateway Metric · Gateway Activities · Control Plane
+   - **Monitoring:** Gateway Metric · Gateway Activities · Control Plane · Grafana (system browser → `https://127.0.0.1:9140`)
    - **Gateways:** Registration · Settings · Clean up
-   - **Settings:** Remove (panel) · Admin
+   - **Settings:** Remove (panel) · Certificates · Admin
 3. Register gateways under **Gateways → Registration**: Find gateway (SSH scan), select a host, Install gateway. Configure under **Gateways → Settings**. Remove one gateway under **Gateways → Clean up**.
-4. **Settings → Remove** uninstalls the monitoring panel on this PC (and every gateway registered to it). Returns you to the first-run wizard.
+4. **Settings → Certificates** downloads the Grafana HTTPS cert for browser trust (no OS auto-import). **Settings → Remove** uninstalls the monitoring panel on this PC (and every gateway registered to it). Returns you to the first-run wizard.
 
 ## Maintainers
 
