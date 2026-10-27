@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Certificates</title>
+  <link rel="stylesheet" href="wizard.css" />
+</head>
+<body data-page="certificates">
+  <header>
+    <div>
+      <h1>Certificates</h1>
+      <div class="sub">Trust Grafana HTTPS on this PC</div>
+    </div>
+    <div id="hdr-status"></div>
+  </header>
+  <main>
+    <section class="panel">
+      <h2>Grafana certificate</h2>
+      <p class="muted">Trust this certificate in your browser to open Grafana over HTTPS on this PC.</p>
+      <p class="muted">Anyone signed in on this PC can open Grafana as Admin (localhost).</p>
+      <ul class="remove-list">
+        <li>Certificate: localhost / 127.0.0.1</li>
+        <li id="cert-expiry">Valid until: —</li>
+        <li id="cert-fp">SHA-256: —</li>
+        <li id="grafana-state">Grafana: —</li>
+      </ul>
+      <div class="row">
+        <button class="primary" id="btn-cert-download">Download certificate</button>
+        <button class="secondary" id="btn-cert-regen">Regenerate</button>
+        <button class="secondary" id="btn-open-grafana">Open Grafana</button>
+        <button class="secondary" id="btn-grafana-retry">Retry install</button>
+      </div>
+      <p class="muted" id="cert-trust-hint">
+        Windows: open the downloaded .crt → Install Certificate → Current User →
+        Trusted Root Certification Authorities. Then open Grafana.
+      </p>
+      <p class="muted">
+        Linux: import the .crt into your user certificate store (or browser trust settings), then open Grafana.
+      </p>
+      <div id="cert-msg"></div>
+    </section>
+  </main>
+  <script src="app-shell.js"></script>
+  <script src="certificates.js"></script>
+</body>
+</html>

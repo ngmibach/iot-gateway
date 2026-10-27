@@ -25,6 +25,14 @@
           href: "actions.html",
           page: "actions",
         },
+        {
+          id: "grafana",
+          label: "Grafana",
+          href: "#grafana-external",
+          page: null,
+          external: true,
+          openUrl: "https://127.0.0.1:9140/",
+        },
       ],
     },
     {
@@ -59,6 +67,12 @@
       label: "Settings",
       items: [
         { id: "remove", label: "Remove", href: "settings.html", page: "settings" },
+        {
+          id: "certificates",
+          label: "Certificates",
+          href: "certificates.html",
+          page: "certificates",
+        },
         { id: "admin", label: "Admin", href: "admin.html", page: "admin" },
       ],
     },
@@ -72,6 +86,7 @@
     if (name.indexOf("monitoring") === 0) return "monitoring";
     if (name.indexOf("actions") === 0) return "actions";
     if (name.indexOf("gateways") === 0) return "gateways";
+    if (name.indexOf("certificates") === 0) return "certificates";
     if (name.indexOf("settings") === 0) return "settings";
     if (name.indexOf("admin") === 0) return "admin";
     return "";
@@ -82,6 +97,7 @@
   }
 
   function isActive(item, page, hash) {
+    if (item.external) return false;
     if (item.page !== page) return false;
     if (page === "monitoring" || page === "gateways") {
       const want = item.hash || "";
@@ -89,6 +105,16 @@
       return want === have;
     }
     return true;
+  }
+
+  function openExternalUrl(url) {
+    fetch("/api/wizard/open-url", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: url }),
+    }).catch(() => {
+      /* best-effort system-browser open */
+    });
   }
 
   function renderSidebar(mount) {
@@ -121,6 +147,12 @@
         if (isActive(item, page, hash)) {
           a.classList.add("active");
           a.setAttribute("aria-current", "page");
+        }
+        if (item.external && item.openUrl) {
+          a.addEventListener("click", (ev) => {
+            ev.preventDefault();
+            openExternalUrl(item.openUrl);
+          });
         }
         list.appendChild(a);
       });
