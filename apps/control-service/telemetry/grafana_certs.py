@@ -113,6 +113,29 @@ def ensure_grafana_certs(
             ),
             critical=False,
         )
+        # CA:TRUE so Windows “Automatically select” can place this in Trusted Root.
+        .add_extension(
+            x509.BasicConstraints(ca=True, path_length=0),
+            critical=True,
+        )
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=True,
+                key_encipherment=True,
+                key_cert_sign=True,
+                content_commitment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                crl_sign=False,
+                encipher_only=False,
+                decipher_only=False,
+            ),
+            critical=True,
+        )
+        .add_extension(
+            x509.ExtendedKeyUsage([x509.oid.ExtendedKeyUsageOID.SERVER_AUTH]),
+            critical=False,
+        )
         .sign(key, hashes.SHA256())
     )
 

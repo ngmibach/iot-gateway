@@ -222,7 +222,17 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("btn-cert-regen", cert_html)
         self.assertIn("btn-open-grafana", cert_html)
         self.assertIn("btn-grafana-retry", cert_html)
-        self.assertIn("Anyone signed in on this PC can open Grafana as Admin", cert_html)
+        self.assertIn(
+            "Trust this certificate in your browser to open Grafana over HTTPS on this PC.",
+            cert_html,
+        )
+        self.assertNotIn(
+            "Anyone signed in on this PC can open Grafana as Admin", cert_html
+        )
+        self.assertIn('id="cert-status-list"', cert_html)
+        self.assertIn("Place all certificates in the following store", cert_html)
+        self.assertNotIn("SHA-256:", cert_html)
+        self.assertNotIn("Certificate: localhost", cert_html)
         with urllib.request.urlopen(self.base + "/certificates.js", timeout=5) as resp:
             cjs = resp.read().decode("utf-8")
         self.assertIn("/api/wizard/grafana/status", cjs)
