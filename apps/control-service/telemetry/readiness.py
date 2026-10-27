@@ -1,7 +1,8 @@
-"""Readiness probes for Loki and Prometheus."""
+"""Readiness probes for Loki, Prometheus, and Grafana."""
 
 from __future__ import annotations
 
+import ssl
 import time
 import urllib.error
 import urllib.request
@@ -57,6 +58,27 @@ def check_prometheus(base_url: str, *, timeout: float = 5.0) -> ProbeResult:
     )
 
 
+def check_grafana(
+    base_url: str = "https://127.0.0.1:9140", *, timeout: float = 5.0
+) -> ProbeResult:
+    """Grafana health: ``GET {base}/api/health`` over unverified HTTPS (self-signed)."""
+    base = base_url.rstrip("/")
+    url = f"{base}/api/health"
+    try:
+        req = urllib.request.Request(url, method="GET")
+        ctx = ssl._create_unverified_context()
+        with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+            code = int(getattr(resp, "status", resp.getcode()))
+            body = resp.read(4096)
+            if code == 200:
+                return ProbeResult(True, url, f"HTTP {code} ({len(body)} bytes)")
+            return ProbeResult(False, url, f"HTTP {code}")
+    except urllib.error.HTTPError as e:
+        return ProbeResult(False, url, f"HTTP {e.code}")
+    except Exception as e:  # noqa: BLE001 — surface any reachability failure
+        return ProbeResult(False, url, f"{type(e).__name__}: {e}")
+
+
 def gateway_loki_ready_curl(
     monitoring_ip: str, *, port: int = 3100, max_time: int = 5
 ) -> str:
@@ -78,13 +100,15 @@ def wait_ready(
     *,
     loki_url: str | None = None,
     prometheus_url: str | None = None,
+    grafana_url: str | None = None,
     timeout_s: float = 60.0,
     interval_s: float = 2.0,
     probe_timeout: float = 5.0,
 ) -> dict[str, ProbeResult]:
-    """Poll until Loki/Prometheus are ready or ``timeout_s`` elapses.
+    """Poll until Loki/Prometheus (and Grafana when URL set) are ready or timeout.
 
     Defaults probe local native backends on :3100 / :9090 when URLs are omitted.
+    Omitting ``grafana_url`` keeps Loki+Prometheus-only polling (backward compatible).
     """
     if loki_url is None:
         loki_url = "http://127.0.0.1:3100"
@@ -97,6 +121,8 @@ def wait_ready(
         results["prometheus"] = check_prometheus(
             prometheus_url, timeout=probe_timeout
         )
+        if grafana_url is not None:
+            results["grafana"] = check_grafana(grafana_url, timeout=probe_timeout)
         pending = [k for k, r in results.items() if not r.ok]
         if not pending:
             return results

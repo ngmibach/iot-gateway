@@ -1,4 +1,4 @@
-"""App-managed Loki + Prometheus as native OS processes (no Docker)."""
+"""App-managed Loki + Prometheus + Grafana as native OS processes (no Docker)."""
 
 from __future__ import annotations
 
@@ -11,10 +11,28 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from .binary_fetch import BinaryFetchError, ensure_telemetry_binaries
+from .binary_fetch import (
+    BinaryFetchError,
+    _grafana_layout_ok,
+    ensure_grafana_kafka_plugin,
+    ensure_grafana_tree,
+    ensure_telemetry_binaries,
+    load_versions,
+    platform_key,
+)
+from .grafana_certs import ensure_grafana_admin_password, ensure_grafana_certs
+from .grafana_config import sync_grafana_datasources, write_grafana_base_config
 from .lifecycle import BackendStatus
-from .readiness import check_loki, check_prometheus, wait_ready
+from .readiness import (
+    ProbeResult,
+    check_grafana,
+    check_loki,
+    check_prometheus,
+    wait_ready,
+)
 from .scrape import render_prometheus_scrape
+
+_GRAFANA_URL = "https://127.0.0.1:9140"
 
 
 def _port_open(host: str, port: int, *, timeout: float = 0.4) -> bool:
@@ -41,7 +59,7 @@ def _bind_conflict_message(log_text: str, *, port: int, name: str) -> str | None
         return (
             f"Port {port} is already in use, so {name} cannot start. "
             "Stop the other process (legacy Docker monitoring, another "
-            "Loki/Prometheus, or a previous app instance) and try again."
+            "Loki/Prometheus/Grafana, or a previous app instance) and try again."
         )
     return None
 
@@ -119,12 +137,13 @@ class NativeTelemetryStatus:
     binaries_present: bool
     loki_running: bool
     prometheus_running: bool
+    grafana_running: bool = False
     detail: str = ""
     progress: str = ""
 
 
 class NativeTelemetryManager:
-    """Fetch binaries once, then run Loki + Prometheus as child processes."""
+    """Fetch binaries once, then run Loki + Prometheus + Grafana as children."""
 
     def __init__(self, root: Path | str):
         self.root = Path(root)
@@ -132,17 +151,71 @@ class NativeTelemetryManager:
         self.config_dir = self.root / "config"
         self.loki_data = self.root / "loki-data"
         self.prom_data = self.root / "prometheus-data"
+        self.grafana_home = self.root / "grafana"
+        self.grafana_data = self.root / "grafana-data"
+        self.certs_dir = self.root / "certs"
         self._loki: Optional[subprocess.Popen] = None
         self._prom: Optional[subprocess.Popen] = None
+        self._grafana: Optional[subprocess.Popen] = None
         self.last_progress: str = ""
 
     def _progress(self, msg: str, frac: float) -> None:
         self.last_progress = f"{msg} ({frac:.0%})"
 
+    def _grafana_tree_present(self) -> bool:
+        """True when version marker and Grafana layout (public/, conf/, server) exist."""
+        if not _grafana_layout_ok(self.grafana_home):
+            return False
+        try:
+            versions = load_versions()
+            plat = platform_key()
+            version = str(versions["grafana"]["version"])
+        except (KeyError, OSError, ValueError, BinaryFetchError):
+            return False
+        marker = self.grafana_home / f".grafana-{version}-{plat}.ok"
+        return marker.is_file()
+
+    def _grafana_needs_ensure(self, *, force: bool = False) -> bool:
+        return force or not self._grafana_tree_present()
+
+    def _grafana_bin(self) -> Path:
+        bin_dir = self.grafana_home / "bin"
+        for name in ("grafana.exe", "grafana", "grafana-server.exe", "grafana-server"):
+            cand = bin_dir / name
+            if cand.is_file():
+                return cand
+        return bin_dir / ("grafana.exe" if os.name == "nt" else "grafana")
+
     def ensure_binaries(self, *, force: bool = False) -> dict[str, Path]:
-        return ensure_telemetry_binaries(
-            self.bin_dir, progress=self._progress, force=force
+        def _lp_progress(msg: str, frac: float) -> None:
+            self._progress(msg, 0.45 * frac)
+
+        out = dict(
+            ensure_telemetry_binaries(
+                self.bin_dir, progress=_lp_progress, force=force
+            )
         )
+
+        # Windows locks Grafana tree files while the child is running.
+        if self._grafana_needs_ensure(force=force) and self._running(self._grafana):
+            self._stop_grafana_only(grace=5.0)
+
+        def _g_progress(msg: str, frac: float) -> None:
+            self._progress(msg, 0.45 + 0.35 * frac)
+
+        out["grafana"] = ensure_grafana_tree(
+            self.grafana_home, progress=_g_progress, force=force
+        )
+
+        def _plugin_progress(msg: str, frac: float) -> None:
+            self._progress(msg, 0.80 + 0.20 * frac)
+
+        out["grafana_kafka_plugin"] = ensure_grafana_kafka_plugin(
+            self.grafana_data / "plugins",
+            progress=_plugin_progress,
+            force=force,
+        )
+        return out
 
     def write_configs(self, *, gateway_ip: str = "127.0.0.1") -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
@@ -151,6 +224,26 @@ class NativeTelemetryManager:
         prom_yml = render_prometheus_scrape(gateway_ip)
         (self.config_dir / "prometheus.yml").write_text(prom_yml, encoding="utf-8")
         self.prom_data.mkdir(parents=True, exist_ok=True)
+
+        self.grafana_data.mkdir(parents=True, exist_ok=True)
+        cert_meta = ensure_grafana_certs(self.certs_dir)
+        admin_password = ensure_grafana_admin_password(self.certs_dir)
+        logs_dir = self.root / "logs"
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        plugins_dir = self.grafana_data / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        write_grafana_base_config(
+            self.config_dir,
+            grafana_data=self.grafana_data,
+            logs_dir=logs_dir,
+            plugins_dir=plugins_dir,
+            cert_file=cert_meta["cert_file"],
+            cert_key=cert_meta["key_file"],
+            admin_password=admin_password,
+            gateways=[],
+        )
+        # Registry Kafka DS without requiring Grafana to be up yet.
+        sync_grafana_datasources(config_dir=self.config_dir, reload=False)
 
     def _bin(self, name: str) -> Path:
         if os.name == "nt":
@@ -162,33 +255,48 @@ class NativeTelemetryManager:
     def _running(self, proc: Optional[subprocess.Popen]) -> bool:
         return proc is not None and proc.poll() is None
 
+    def _bins_present(self) -> bool:
+        return (
+            self._bin("loki").is_file()
+            and self._bin("prometheus").is_file()
+            and self._grafana_tree_present()
+        )
+
     def _http_ready(
         self,
         *,
         loki_url: str = "http://127.0.0.1:3100",
         prometheus_url: str = "http://127.0.0.1:9090",
+        grafana_url: str = _GRAFANA_URL,
         timeout: float = 2.0,
-    ) -> tuple[bool, object, object]:
+    ) -> tuple[bool, ProbeResult, ProbeResult, ProbeResult]:
         loki = check_loki(loki_url, timeout=timeout)
         prom = check_prometheus(prometheus_url, timeout=timeout)
-        return bool(loki.ok and prom.ok), loki, prom
+        if not self._grafana_tree_present():
+            grafana = ProbeResult(False, grafana_url, "grafana tree missing")
+            return False, loki, prom, grafana
+        grafana = check_grafana(grafana_url, timeout=timeout)
+        return bool(loki.ok and prom.ok and grafana.ok), loki, prom, grafana
 
     def status(
         self,
         *,
         loki_url: str = "http://127.0.0.1:3100",
         prometheus_url: str = "http://127.0.0.1:9090",
+        grafana_url: str = _GRAFANA_URL,
         probe: bool = True,
         probe_timeout: float = 2.0,
     ) -> BackendStatus:
-        bins_ok = self._bin("loki").is_file() and self._bin("prometheus").is_file()
+        bins_ok = self._bins_present()
         child_loki = self._running(self._loki)
         child_prom = self._running(self._prom)
+        child_grafana = self._running(self._grafana)
         status = BackendStatus(
             running=False,
             compose_ps=(
                 f"native loki_child={'up' if child_loki else 'down'} "
                 f"prometheus_child={'up' if child_prom else 'down'} "
+                f"grafana_child={'up' if child_grafana else 'down'} "
                 f"binaries={'yes' if bins_ok else 'no'}"
             ),
             detail="",
@@ -197,30 +305,34 @@ class NativeTelemetryManager:
             status.detail = "Monitoring binaries are not installed yet."
             return status
         if not probe:
-            status.running = child_loki and child_prom
+            status.running = child_loki and child_prom and child_grafana
             status.detail = (
-                "Loki and Prometheus child processes are running."
+                "Loki, Prometheus, and Grafana child processes are running."
                 if status.running
                 else "Monitoring processes are not running."
             )
             return status
 
-        ok, loki, prom = self._http_ready(
+        ok, loki, prom, grafana = self._http_ready(
             loki_url=loki_url,
             prometheus_url=prometheus_url,
+            grafana_url=grafana_url,
             timeout=probe_timeout,
         )
         status.loki = loki
         status.prometheus = prom
+        status.grafana = grafana
         status.running = ok
         if ok:
-            status.detail = "Loki and Prometheus are running."
+            status.detail = "Loki, Prometheus, and Grafana are running."
         else:
             parts = []
             if not loki.ok:
                 parts.append(f"loki: {loki.detail}")
             if not prom.ok:
                 parts.append(f"prometheus: {prom.detail}")
+            if not grafana.ok:
+                parts.append(f"grafana: {grafana.detail}")
             status.detail = "; ".join(parts) or "Monitoring is not ready."
         return status
 
@@ -229,15 +341,27 @@ class NativeTelemetryManager:
         # 127.0.0.1 port can take ~2s to refuse (WSL localhost relay). Probe
         # once, with a short timeout, and skip probes until binaries exist so
         # a fresh PC is not stuck for several seconds per request.
+        bins = self._bins_present()
+        if not bins:
+            return NativeTelemetryStatus(
+                ready=False,
+                binaries_present=False,
+                loki_running=False,
+                prometheus_running=False,
+                grafana_running=False,
+                detail="Monitoring binaries are not installed yet.",
+                progress=self.last_progress,
+            )
         st = self.status(probe=True, probe_timeout=0.8)
         return NativeTelemetryStatus(
             ready=bool(st.running),
-            binaries_present=self._bin("loki").is_file()
-            and self._bin("prometheus").is_file(),
+            binaries_present=bins,
             loki_running=bool(getattr(st.loki, "ok", False))
             or self._running(self._loki),
             prometheus_running=bool(getattr(st.prometheus, "ok", False))
             or self._running(self._prom),
+            grafana_running=bool(getattr(st.grafana, "ok", False))
+            or self._running(self._grafana),
             detail=st.detail or st.compose_ps,
             progress=self.last_progress,
         )
@@ -248,7 +372,7 @@ class NativeTelemetryManager:
             "stderr": subprocess.STDOUT,
         }
         if os.name == "nt":
-            # Hide Loki/Prometheus console windows on Windows.
+            # Hide console windows on Windows.
             kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         else:
             kwargs["start_new_session"] = True
@@ -263,14 +387,15 @@ class NativeTelemetryManager:
         ensure_bins: bool = True,
     ) -> BackendStatus:
         # Already serving? Succeed before any download (common after app restart).
-        already_ok, loki_p, prom_p = self._http_ready()
+        already_ok, loki_p, prom_p, grafana_p = self._http_ready()
         if already_ok:
             return BackendStatus(
                 running=True,
                 compose_ps="native (already running)",
-                detail="Loki and Prometheus are running.",
+                detail="Loki, Prometheus, and Grafana are running.",
                 loki=loki_p,
                 prometheus=prom_p,
+                grafana=grafana_p,
             )
 
         # Port taken by a non-ready process → fail fast with a clear message.
@@ -289,11 +414,18 @@ class NativeTelemetryManager:
         self.write_configs(gateway_ip=gateway_ip or "127.0.0.1")
         loki_bin = self._bin("loki")
         prom_bin = self._bin("prometheus")
+        grafana_bin = self._grafana_bin()
         if not loki_bin.is_file() or not prom_bin.is_file():
             return BackendStatus(
                 running=False,
                 compose_ps="native",
                 detail="loki/prometheus binaries missing after ensure",
+            )
+        if not self._grafana_tree_present() or not grafana_bin.is_file():
+            return BackendStatus(
+                running=False,
+                compose_ps="native",
+                detail="grafana tree/binary missing after ensure",
             )
 
         log_dir = self.root / "logs"
@@ -324,11 +456,38 @@ class NativeTelemetryManager:
                 stdout=prom_log,
                 **popen_kwargs,
             )
+        if not self._running(self._grafana) and not check_grafana(
+            _GRAFANA_URL, timeout=1.0
+        ).ok:
+            grafana_log = open(  # noqa: SIM115
+                log_dir / "grafana.log", "a", encoding="utf-8"
+            )
+            if grafana_bin.name.lower().startswith("grafana-server"):
+                cmd = [
+                    str(grafana_bin),
+                    f"--homepath={self.grafana_home}",
+                    f"--config={self.config_dir / 'grafana.ini'}",
+                ]
+            else:
+                cmd = [
+                    str(grafana_bin),
+                    "server",
+                    f"--homepath={self.grafana_home}",
+                    f"--config={self.config_dir / 'grafana.ini'}",
+                ]
+            grafana_kwargs = dict(popen_kwargs)
+            grafana_kwargs["cwd"] = str(self.grafana_home)
+            self._grafana = subprocess.Popen(
+                cmd,
+                stdout=grafana_log,
+                **grafana_kwargs,
+            )
 
         if wait:
             ready = wait_ready(
                 loki_url="http://127.0.0.1:3100",
                 prometheus_url="http://127.0.0.1:9090",
+                grafana_url=_GRAFANA_URL,
                 timeout_s=wait_timeout_s,
             )
             st = BackendStatus(
@@ -336,16 +495,17 @@ class NativeTelemetryManager:
                 compose_ps="native",
                 loki=ready.get("loki"),
                 prometheus=ready.get("prometheus"),
+                grafana=ready.get("grafana"),
             )
             if st.running:
-                st.detail = "Loki and Prometheus are running."
+                st.detail = "Loki, Prometheus, and Grafana are running."
             else:
                 st.detail = self._failure_detail(ready)
             return st
         return self.status(probe=True)
 
     def _port_conflict_detail(self) -> str | None:
-        """Detect ports occupied by something that is not ready Loki/Prometheus."""
+        """Detect ports occupied by something that is not ready Loki/Prometheus/Grafana."""
         parts: list[str] = []
         if _port_open("127.0.0.1", 3100) and not check_loki(
             "http://127.0.0.1:3100", timeout=1.0
@@ -361,6 +521,13 @@ class NativeTelemetryManager:
                 "Port 9090 is in use but Prometheus is not ready. "
                 "Stop legacy Docker monitoring or another Prometheus process."
             )
+        if _port_open("127.0.0.1", 9140) and not check_grafana(
+            _GRAFANA_URL, timeout=1.0
+        ).ok:
+            parts.append(
+                "Port 9140 is in use but Grafana is not ready. "
+                "Stop another Grafana process or a previous app instance."
+            )
         return " ".join(parts) or None
 
     def _failure_detail(self, ready: dict) -> str:
@@ -373,9 +540,12 @@ class NativeTelemetryManager:
             parts.append(f"loki exited (code {self._loki.returncode})")
         if self._prom is not None and self._prom.poll() is not None:
             parts.append(f"prometheus exited (code {self._prom.returncode})")
+        if self._grafana is not None and self._grafana.poll() is not None:
+            parts.append(f"grafana exited (code {self._grafana.returncode})")
         for log_name, port, svc in (
             ("loki.log", 3100, "Loki"),
             ("prometheus.log", 9090, "Prometheus"),
+            ("grafana.log", 9140, "Grafana"),
         ):
             path = self.root / "logs" / log_name
             if not path.is_file():
@@ -388,47 +558,60 @@ class NativeTelemetryManager:
             if conflict:
                 parts.append(conflict)
                 continue
+            err_needles = (
+                "level=error",
+                "permission denied",
+                "address already in use",
+                "access is denied",
+                "being used by another process",
+            )
             err_lines = [
                 ln.strip()
                 for ln in text.splitlines()
-                if "level=error" in ln
-                or "permission denied" in ln.lower()
-                or "address already in use" in ln.lower()
+                if any(n in ln.lower() for n in err_needles)
             ]
             if err_lines:
                 parts.append(f"{log_name}: {err_lines[-1][-240:]}")
         return "; ".join(parts) or "Monitoring failed to become ready."
 
-    def stop(self, *, grace: float = 5.0) -> None:
-        for proc in (self._prom, self._loki):
-            if proc is None or proc.poll() is not None:
-                continue
+    def _stop_one(self, proc: Optional[subprocess.Popen], *, grace: float) -> None:
+        if proc is None or proc.poll() is not None:
+            return
+        try:
+            if os.name != "nt":
+                os.killpg(proc.pid, signal.SIGTERM)
+            else:
+                proc.terminate()
+        except (ProcessLookupError, PermissionError, OSError):
+            proc.terminate()
+        deadline = time.time() + grace
+        while time.time() < deadline and proc.poll() is None:
+            time.sleep(0.1)
+        if proc.poll() is None:
             try:
                 if os.name != "nt":
-                    os.killpg(proc.pid, signal.SIGTERM)
+                    os.killpg(proc.pid, signal.SIGKILL)
                 else:
-                    proc.terminate()
-            except (ProcessLookupError, PermissionError, OSError):
-                proc.terminate()
-            deadline = time.time() + grace
-            while time.time() < deadline and proc.poll() is None:
-                time.sleep(0.1)
-            if proc.poll() is None:
-                try:
-                    if os.name != "nt":
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    else:
-                        proc.kill()
-                except (ProcessLookupError, PermissionError, OSError):
                     proc.kill()
-        self._prom = None
-        self._loki = None
+            except (ProcessLookupError, PermissionError, OSError):
+                proc.kill()
+
+    def _stop_grafana_only(self, *, grace: float = 5.0) -> None:
+        self._stop_one(self._grafana, grace=grace)
+        self._grafana = None
+
+    def stop(self, *, grace: float = 5.0) -> None:
+        # Grafana first so tree replace / uninstall can unlock files on Windows.
+        for attr in ("_grafana", "_prom", "_loki"):
+            self._stop_one(getattr(self, attr), grace=grace)
+            setattr(self, attr, None)
 
     def uninstall(self, *, grace: float = 5.0) -> dict[str, object]:
-        """Stop Loki/Prometheus and delete binaries, configs, and data under ``root``.
+        """Stop Loki/Prometheus/Grafana and delete binaries, configs, and data under ``root``.
 
         Idempotent: a missing tree is success. Does not delete the parent
-        app-data directory (only contents of the telemetry root).
+        app-data directory (only contents of the telemetry root). Children such
+        as ``grafana/``, ``grafana-data/``, and ``certs/`` are removed with the rest.
         """
         import shutil
 

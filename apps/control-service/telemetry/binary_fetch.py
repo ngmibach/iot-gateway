@@ -414,8 +414,7 @@ def ensure_grafana_kafka_plugin(
     """Download and install the pinned Grafana Kafka datasource plugin.
 
     Extracts into ``plugins_dir / <plugin_id>/``. Writes a version marker only
-    after a successful replace. TODO(PR3): call from NativeTelemetryManager
-    ensure_binaries / write_configs.
+    after a successful replace.
     """
     plugins_dir = Path(plugins_dir)
     versions = versions or load_versions()

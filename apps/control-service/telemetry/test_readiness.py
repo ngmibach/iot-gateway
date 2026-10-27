@@ -1,4 +1,4 @@
-"""Unit tests for Loki/Prometheus readiness helpers."""
+"""Unit tests for Loki/Prometheus/Grafana readiness helpers."""
 
 from __future__ import annotations
 
@@ -6,10 +6,13 @@ import unittest
 from unittest import mock
 
 from telemetry.readiness import (
+    ProbeResult,
+    check_grafana,
     check_loki,
     check_prometheus,
     gateway_loki_ready_curl,
     probe_http,
+    wait_ready,
 )
 
 
@@ -63,8 +66,6 @@ class ReadinessTests(unittest.TestCase):
 
         def fake(url: str, *, timeout: float = 5.0):
             calls.append(url)
-            from telemetry.readiness import ProbeResult
-
             if "/-/healthy" in url:
                 return ProbeResult(False, url, "boom")
             return ProbeResult(True, url, "ok")
@@ -79,6 +80,44 @@ class ReadinessTests(unittest.TestCase):
                 "http://127.0.0.1:9090/api/v1/status/config",
             ],
         )
+
+    def test_check_grafana_uses_unverified_context(self) -> None:
+        with mock.patch(
+            "telemetry.readiness.ssl._create_unverified_context"
+        ) as mk_ctx:
+            mk_ctx.return_value = object()
+            with mock.patch(
+                "telemetry.readiness.urllib.request.urlopen",
+                return_value=_FakeResp(200, b'{"database":"ok"}'),
+            ) as urlopen:
+                r = check_grafana("https://127.0.0.1:9140/", timeout=1.5)
+        self.assertTrue(r.ok)
+        mk_ctx.assert_called_once_with()
+        self.assertEqual(
+            urlopen.call_args.kwargs.get("context"), mk_ctx.return_value
+        )
+        self.assertIn("/api/health", r.url)
+
+    def test_wait_ready_optional_grafana(self) -> None:
+        ok = ProbeResult(True, "u", "ok")
+        with mock.patch(
+            "telemetry.readiness.check_loki", return_value=ok
+        ):
+            with mock.patch(
+                "telemetry.readiness.check_prometheus", return_value=ok
+            ):
+                with mock.patch(
+                    "telemetry.readiness.check_grafana", return_value=ok
+                ) as cg:
+                    without = wait_ready(timeout_s=0.1, interval_s=0.01)
+                    with_g = wait_ready(
+                        grafana_url="https://127.0.0.1:9140",
+                        timeout_s=0.1,
+                        interval_s=0.01,
+                    )
+        self.assertNotIn("grafana", without)
+        self.assertIn("grafana", with_g)
+        cg.assert_called()
 
     def test_gateway_loki_ready_curl(self) -> None:
         self.assertEqual(

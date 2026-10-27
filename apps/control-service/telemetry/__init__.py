@@ -14,6 +14,7 @@ from .nic import (
     pick_default_monitoring_ip,
 )
 from .readiness import (
+    check_grafana,
     check_loki,
     check_prometheus,
     gateway_loki_ready_curl,
@@ -28,6 +29,7 @@ __all__ = [
     "NativeTelemetryManager",
     "NativeTelemetryStatus",
     "default_native_root",
+    "check_grafana",
     "check_loki",
     "check_prometheus",
     "filter_nic_candidates",
