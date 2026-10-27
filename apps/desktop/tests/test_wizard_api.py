@@ -209,6 +209,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("https://127.0.0.1:9140/", shell)
         self.assertIn("/api/wizard/open-url", shell)
         self.assertIn("external: true", shell)
+        self.assertIn("if (item.external) return false", shell)
+        self.assertNotIn("window.open", shell)
         self.assertNotIn("wizard.html", shell)
         with urllib.request.urlopen(self.base + "/certificates.html", timeout=5) as resp:
             cert_html = resp.read().decode("utf-8")
@@ -216,7 +218,7 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn('data-page="certificates"', cert_html)
         self.assertIn("app-shell.js", cert_html)
         self.assertIn("certificates.js", cert_html)
-        self.assertIn("btn-cert-download", cert_html)
+        self.assertIn('id="btn-cert-download" disabled', cert_html)
         self.assertIn("btn-cert-regen", cert_html)
         self.assertIn("btn-open-grafana", cert_html)
         self.assertIn("btn-grafana-retry", cert_html)

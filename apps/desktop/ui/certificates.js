@@ -3,10 +3,7 @@
   const $ = (id) => document.getElementById(id);
   const GRAFANA_URL = "https://127.0.0.1:9140/";
 
-  let lastStatus = {
-    running: false,
-    cert: { present: false, not_after: null, fingerprint_sha256: null },
-  };
+  let retryInFlight = false;
 
   async function api(path, opts) {
     let res;
@@ -45,7 +42,6 @@
   }
 
   function applyStatus(st) {
-    lastStatus = st || lastStatus;
     const cert = (st && st.cert) || {};
     const present = !!cert.present;
     const running = !!(st && st.running);
@@ -61,12 +57,15 @@
 
     if (!running) {
       $("hdr-status").innerHTML = '<span class="badge warn">Grafana down</span>';
-      $("cert-msg").innerHTML =
-        '<div class="err">' +
-        escapeHtml(
-          "Grafana is not running. Use Install monitoring / Retry on the Certificates page."
-        ) +
-        "</div>";
+      // Keep retry wait guidance while ensure is still running.
+      if (!retryInFlight) {
+        $("cert-msg").innerHTML =
+          '<div class="err">' +
+          escapeHtml(
+            "Grafana is not running. Use Install monitoring / Retry on the Certificates page."
+          ) +
+          "</div>";
+      }
     } else {
       $("hdr-status").innerHTML = '<span class="badge ok">Ready</span>';
       if ($("cert-msg").querySelector(".err")) {
@@ -123,6 +122,7 @@
   }
 
   async function retryInstall() {
+    retryInFlight = true;
     $("cert-msg").textContent = "Starting install…";
     $("btn-grafana-retry").disabled = true;
     try {
@@ -153,11 +153,13 @@
         }
       }
     } finally {
+      retryInFlight = false;
       $("btn-grafana-retry").disabled = false;
     }
   }
 
   function wire() {
+    $("btn-cert-download").disabled = true;
     $("btn-cert-download").addEventListener("click", () =>
       downloadCert().catch((e) => {
         $("cert-msg").innerHTML =
@@ -179,6 +181,7 @@
     );
     $("btn-grafana-retry").addEventListener("click", () =>
       retryInstall().catch((e) => {
+        retryInFlight = false;
         $("cert-msg").innerHTML =
           '<div class="err">' + escapeHtml(e.message || e) + "</div>";
         $("btn-grafana-retry").disabled = false;
