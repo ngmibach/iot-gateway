@@ -328,11 +328,15 @@ class NativeHelperTests(unittest.TestCase):
                     with mock.patch.object(mgr, "write_configs") as write:
                         with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
                             with mock.patch.object(mgr, "start") as start:
-                                out = mgr.regenerate_grafana_certs()
+                                with mock.patch.object(
+                                    mgr, "_spawn_grafana_child"
+                                ) as spawn:
+                                    out = mgr.regenerate_grafana_certs()
             ensure.assert_called_once_with(mgr.certs_dir, force=True)
             write.assert_not_called()
             stop_g.assert_not_called()
             start.assert_not_called()
+            spawn.assert_not_called()
             self.assertFalse(out["restarted"])
             self.assertEqual(out["fingerprint_sha256"], "b" * 64)
             self.assertIn("not installed", out["detail"].lower())
@@ -340,12 +344,8 @@ class NativeHelperTests(unittest.TestCase):
     def test_regenerate_grafana_certs_restarts_when_tree_present(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mgr = nv.NativeTelemetryManager(tmp)
-            st = BackendStatus(
-                running=True,
-                compose_ps="native",
-                detail="ok",
-                grafana=_ok(),
-            )
+            child = mock.Mock()
+            child.poll.return_value = None
             with mock.patch(
                 "telemetry.native.ensure_grafana_certs",
                 return_value={
@@ -358,15 +358,84 @@ class NativeHelperTests(unittest.TestCase):
                 ):
                     with mock.patch.object(mgr, "write_configs") as write:
                         with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
-                            with mock.patch.object(
-                                mgr, "start", return_value=st
-                            ) as start:
-                                out = mgr.regenerate_grafana_certs()
+                            with mock.patch(
+                                "telemetry.native._best_effort_stop_listeners"
+                            ) as kill_port:
+                                with mock.patch.object(
+                                    mgr, "_spawn_grafana_child", return_value=True
+                                ) as spawn:
+                                    with mock.patch.object(
+                                        mgr,
+                                        "_wait_grafana_ready",
+                                        return_value=_ok(),
+                                    ):
+                                        with mock.patch.object(mgr, "start") as start:
+                                            def _spawn_side_effect() -> bool:
+                                                mgr._grafana = child
+                                                return True
+
+                                            spawn.side_effect = _spawn_side_effect
+                                            out = mgr.regenerate_grafana_certs()
             write.assert_called_once()
             stop_g.assert_called_once()
-            start.assert_called_once_with(ensure_bins=False, wait=True)
+            kill_port.assert_called_once_with(nv._GRAFANA_PORT)
+            spawn.assert_called_once()
+            start.assert_not_called()
             self.assertTrue(out["restarted"])
             self.assertEqual(out["fingerprint_sha256"], "c" * 64)
+
+    def test_regenerate_does_not_use_start_short_circuit(self) -> None:
+        """Orphan still healthy on :9140 must not skip respawn via start()._http_ready."""
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            child = mock.Mock()
+            child.poll.return_value = None
+            ok = _ok()
+            with mock.patch(
+                "telemetry.native.ensure_grafana_certs",
+                return_value={
+                    "fingerprint_sha256": "d" * 64,
+                    "not_after": mock.Mock(isoformat=lambda: "2028-06-01T00:00:00+00:00"),
+                },
+            ):
+                with mock.patch.object(
+                    mgr, "_grafana_tree_present", return_value=True
+                ):
+                    with mock.patch.object(mgr, "write_configs"):
+                        with mock.patch.object(mgr, "_stop_grafana_only"):
+                            with mock.patch(
+                                "telemetry.native._best_effort_stop_listeners"
+                            ) as kill_port:
+                                # Simulate orphan still answering HTTPS after stop.
+                                with mock.patch.object(
+                                    mgr,
+                                    "_http_ready",
+                                    return_value=(True, ok, ok, ok),
+                                ) as http_ready:
+                                    with mock.patch.object(
+                                        mgr, "start"
+                                    ) as start:
+                                        with mock.patch.object(
+                                            mgr,
+                                            "_spawn_grafana_child",
+                                            return_value=True,
+                                        ) as spawn:
+                                            with mock.patch.object(
+                                                mgr,
+                                                "_wait_grafana_ready",
+                                                return_value=ok,
+                                            ):
+                                                def _spawn_side_effect() -> bool:
+                                                    mgr._grafana = child
+                                                    return True
+
+                                                spawn.side_effect = _spawn_side_effect
+                                                out = mgr.regenerate_grafana_certs()
+            kill_port.assert_called_once_with(nv._GRAFANA_PORT)
+            spawn.assert_called_once()
+            start.assert_not_called()
+            http_ready.assert_not_called()
+            self.assertTrue(out["restarted"])
 
 
 class PortOpenTests(unittest.TestCase):
