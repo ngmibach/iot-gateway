@@ -132,12 +132,11 @@ API:
 
 > **Note:** Gateway provision installs **Apache Kafka** in minimal KRaft
 > single-node mode (`iotgw-kafka`, heap 128–256M) with dual PLAINTEXT listeners —
-> INTERNAL `127.0.0.1:9092` (agent) and EXTERNAL `{gateway_ip}:9092` (desktop
-> Grafana on the LAN). Not Redpanda. Already-provisioned gateways need a Kafka
-> config rewrite / re-provision before LAN Grafana datasources work. Sensor
-> register/unregister creates or deletes topics with `retention.bytes` from the
-> catalog. The agent produces decrypted payloads to `sensor.<device_id>` after
-> MQTT decrypt.
+> INTERNAL `127.0.0.1:9092` and EXTERNAL `{gateway_ip}:9092`. Not Redpanda.
+> Re-provision older gateways for LAN Grafana; details in
+> [`docs/architecture.md`](docs/architecture.md). Sensor register/unregister
+> creates or deletes topics with `retention.bytes` from the catalog. The agent
+> produces decrypted payloads to `sensor.<device_id>` after MQTT decrypt.
 
 ### Monitoring stack (operator PC)
 
@@ -145,7 +144,7 @@ API:
 |-----------|------|
 | **Prometheus** `:9090` | Scrapes gateway agent `/metrics` (`job=iot-gateway-agent`, `instance=gateway`) |
 | **Loki** `:3100` | Receives shipped sensor log lines from the gateway |
-| **Grafana** `https://127.0.0.1:9140` | Localhost HTTPS; provisioned Prometheus, Loki, and per-gateway Kafka datasources; open via system browser (Settings → Certificates downloads the self-signed cert — no OS auto-import) |
+| **Grafana** `https://127.0.0.1:9140` | Localhost HTTPS; Prometheus, Loki, and per-gateway Kafka datasources; opens in system browser |
 | **Control service** `:9137` | Device registry, SSH playbooks, query APIs |
 | **Wizard / UI** `:9138` | Setup, Gateways, Monitoring, Control Plane |
 

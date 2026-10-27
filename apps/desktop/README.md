@@ -30,5 +30,5 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
 apps/desktop/
   packaging/   # PyInstaller + AppImage/exe
   shell/       # wizard server + GUI
-  ui/          # wizard / gateways / monitoring / actions / settings / admin
+  ui/          # wizard / gateways / monitoring / actions / settings / certificates / admin
 ```

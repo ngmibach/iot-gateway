@@ -5,18 +5,16 @@
 - Packaged app: `IoTGatewayMonitor.exe` (Windows) or AppImage (Linux).
 - Local control service on `127.0.0.1:9137`; wizard/UI on `:9138`.
 - Loki (`:3100`), Prometheus (`:9090`), and Grafana HTTPS
-  (`https://127.0.0.1:9140`) as native children under NativeTelemetryManager.
+  (`https://127.0.0.1:9140`) as native processes under the app data directory.
   Ready/start requires all three.
 - Grafana OSS ~445 MiB compressed (pin 13.2.4); free-space preflight ≥2.5 GiB.
   Self-signed cert is **download-only** from Settings → Certificates (no OS
   auto-import); trust it in the system browser after download. Anonymous Admin
-  on localhost. Open Grafana via Settings/nav → system browser
-  (`POST /api/wizard/open-url`), not an in-app iframe. No starter dashboards.
-  Provisioned datasources: Prometheus, Loki, and one Kafka datasource per
-  registered gateway (`{gateway_ip}:9092` PLAINTEXT).
-- Upgrade: ensure pulls the Grafana tree + Kafka plugin; on Windows stop Grafana
-  before force/version-marker tree replace. Healthy Loki+Prometheus alone no
-  longer skips Grafana install.
+  on localhost. Open Grafana via Monitoring nav or Settings → Certificates
+  (system browser). Provisioned datasources: Prometheus, Loki, and one Kafka
+  datasource per registered gateway (`{gateway_ip}:9092` PLAINTEXT).
+- Upgrade ensure installs Grafana (+ Kafka plugin) if missing; stop Grafana
+  before force/version-marker tree replace (needed on Windows for file locks).
 - Device registry in SQLite; secrets in the OS keyring (with file fallback).
 
 ## Gateway device
