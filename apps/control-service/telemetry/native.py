@@ -522,29 +522,7 @@ class NativeTelemetryManager:
         if not self._running(self._grafana) and not check_grafana(
             _GRAFANA_URL, timeout=1.0
         ).ok:
-            grafana_log = open(  # noqa: SIM115
-                log_dir / "grafana.log", "a", encoding="utf-8"
-            )
-            if grafana_bin.name.lower().startswith("grafana-server"):
-                cmd = [
-                    str(grafana_bin),
-                    f"--homepath={self.grafana_home}",
-                    f"--config={self.config_dir / 'grafana.ini'}",
-                ]
-            else:
-                cmd = [
-                    str(grafana_bin),
-                    "server",
-                    f"--homepath={self.grafana_home}",
-                    f"--config={self.config_dir / 'grafana.ini'}",
-                ]
-            grafana_kwargs = dict(popen_kwargs)
-            grafana_kwargs["cwd"] = str(self.grafana_home)
-            self._grafana = subprocess.Popen(
-                cmd,
-                stdout=grafana_log,
-                **grafana_kwargs,
-            )
+            self._spawn_grafana_child()
 
         if wait:
             ready = wait_ready(
@@ -663,6 +641,54 @@ class NativeTelemetryManager:
         self._stop_one(self._grafana, grace=grace)
         self._grafana = None
 
+    def _spawn_grafana_child(self) -> bool:
+        """Launch Grafana (caller must stop prior child / :9140 orphans first)."""
+        grafana_bin = self._grafana_bin()
+        if not self._grafana_tree_present() or not grafana_bin.is_file():
+            return False
+        log_dir = self.root / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        grafana_log = open(  # noqa: SIM115
+            log_dir / "grafana.log", "a", encoding="utf-8"
+        )
+        if grafana_bin.name.lower().startswith("grafana-server"):
+            cmd = [
+                str(grafana_bin),
+                f"--homepath={self.grafana_home}",
+                f"--config={self.config_dir / 'grafana.ini'}",
+            ]
+        else:
+            cmd = [
+                str(grafana_bin),
+                "server",
+                f"--homepath={self.grafana_home}",
+                f"--config={self.config_dir / 'grafana.ini'}",
+            ]
+        grafana_kwargs = dict(self._popen_kwargs())
+        grafana_kwargs["cwd"] = str(self.grafana_home)
+        self._grafana = subprocess.Popen(
+            cmd,
+            stdout=grafana_log,
+            **grafana_kwargs,
+        )
+        return True
+
+    def _wait_grafana_ready(self, *, timeout_s: float = 90.0) -> ProbeResult:
+        deadline = time.time() + timeout_s
+        last = ProbeResult(False, _GRAFANA_URL, "not probed")
+        while time.time() < deadline:
+            last = check_grafana(_GRAFANA_URL, timeout=1.0)
+            if last.ok:
+                return last
+            if self._grafana is not None and self._grafana.poll() is not None:
+                return ProbeResult(
+                    False,
+                    _GRAFANA_URL,
+                    f"grafana exited (code {self._grafana.returncode})",
+                )
+            time.sleep(0.4)
+        return last
+
     def grafana_cert_public_meta(self) -> dict[str, Any]:
         """Public cert fields only (no private key / admin password)."""
         cert_path = self.certs_dir / "grafana.crt"
@@ -687,7 +713,7 @@ class NativeTelemetryManager:
             }
 
     def regenerate_grafana_certs(self) -> dict[str, Any]:
-        """Force new TLS cert; restart Grafana child if tree present."""
+        """Force new TLS cert; kill :9140 and respawn Grafana (no start() short-circuit)."""
         meta = ensure_grafana_certs(self.certs_dir, force=True)
         not_after = meta.get("not_after")
         out: dict[str, Any] = {
@@ -705,18 +731,23 @@ class NativeTelemetryManager:
             return out
 
         self.write_configs()
+        # Drop tracked child and any orphan still serving the old cert on :9140.
         self._stop_grafana_only(grace=5.0)
-        st = self.start(ensure_bins=False, wait=True)
-        grafana_ok = bool(getattr(st.grafana, "ok", False)) or self._running(
-            self._grafana
-        )
-        out["restarted"] = grafana_ok
-        if grafana_ok:
+        _best_effort_stop_listeners(_GRAFANA_PORT)
+        if not self._spawn_grafana_child():
+            out["detail"] = (
+                "Certificate regenerated but Grafana binary/tree is missing."
+            )
+            return out
+        probe = self._wait_grafana_ready(timeout_s=90.0)
+        # restarted only after verified stop + new child that became healthy.
+        out["restarted"] = bool(probe.ok and self._running(self._grafana))
+        if out["restarted"]:
             out["detail"] = "Certificate regenerated and Grafana restarted."
         else:
             out["detail"] = (
                 "Certificate regenerated but Grafana did not become ready: "
-                + (st.detail or "unknown")
+                + (probe.detail or "unknown")
             )
         return out
 
