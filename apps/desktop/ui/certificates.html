@@ -18,12 +18,8 @@
     <section class="panel">
       <h2>Grafana certificate</h2>
       <p class="muted">Trust this certificate in your browser to open Grafana over HTTPS on this PC.</p>
-      <p class="muted">Anyone signed in on this PC can open Grafana as Admin (localhost).</p>
-      <ul class="remove-list">
-        <li>Certificate: localhost / 127.0.0.1</li>
+      <ul class="remove-list" id="cert-status-list" hidden>
         <li id="cert-expiry">Valid until: —</li>
-        <li id="cert-fp">SHA-256: —</li>
-        <li id="grafana-state">Grafana: —</li>
       </ul>
       <div class="row">
         <button class="primary" id="btn-cert-download" disabled>Download certificate</button>
@@ -33,10 +29,13 @@
       </div>
       <p class="muted" id="cert-trust-hint">
         Windows: open the downloaded .crt → Install Certificate → Current User →
-        Trusted Root Certification Authorities. Then open Grafana.
+        <strong>Place all certificates in the following store</strong> →
+        Trusted Root Certification Authorities
+        (do not use “Automatically select” — that leaves the browser warning).
+        Close and reopen the browser, then open Grafana.
       </p>
       <p class="muted">
-        Linux: import the .crt into your user certificate store (or browser trust settings), then open Grafana.
+        Linux: import the .crt into your browser trust settings, then open Grafana.
       </p>
       <div id="cert-msg"></div>
     </section>

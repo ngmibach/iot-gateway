@@ -99,6 +99,15 @@ class EnsureGrafanaCertsTests(unittest.TestCase):
                 cert.fingerprint(hashes.SHA256()).hex(),
                 meta["fingerprint_sha256"],
             )
+            bc = cert.extensions.get_extension_for_class(
+                x509.BasicConstraints
+            ).value
+            self.assertTrue(bc.ca)
+            self.assertEqual(bc.path_length, 0)
+            eku = cert.extensions.get_extension_for_class(
+                x509.ExtendedKeyUsage
+            ).value
+            self.assertIn(x509.oid.ExtendedKeyUsageOID.SERVER_AUTH, list(eku))
             key = load_pem_private_key(meta["key_file"].read_bytes(), password=None)
             self.assertIsInstance(key, rsa.RSAPrivateKey)
             self.assertEqual(key.key_size, 2048)

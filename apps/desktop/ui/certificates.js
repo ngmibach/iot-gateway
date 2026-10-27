@@ -35,7 +35,11 @@
     try {
       const d = new Date(iso);
       if (Number.isNaN(d.getTime())) return String(iso);
-      return d.toISOString().replace(/\.\d{3}Z$/, "Z");
+      return d.toLocaleDateString(undefined, {
+        year: "numeric",
+        month: "short",
+        day: "numeric",
+      });
     } catch (_) {
       return String(iso);
     }
@@ -45,13 +49,16 @@
     const cert = (st && st.cert) || {};
     const present = !!cert.present;
     const running = !!(st && st.running);
+    const list = $("cert-status-list");
 
-    $("cert-expiry").textContent =
-      "Valid until: " + (present ? formatExpiry(cert.not_after) : "—");
-    $("cert-fp").textContent =
-      "SHA-256: " + (present && cert.fingerprint_sha256 ? cert.fingerprint_sha256 : "—");
-    $("grafana-state").textContent =
-      "Grafana: " + (running ? "running" : "not running");
+    // Only show a human expiry when Grafana is up and a cert exists.
+    if (running && present) {
+      $("cert-expiry").textContent =
+        "Valid until: " + formatExpiry(cert.not_after);
+      list.hidden = false;
+    } else {
+      list.hidden = true;
+    }
 
     $("btn-cert-download").disabled = !present;
 
@@ -107,7 +114,9 @@
       await refreshStatus();
       $("cert-msg").innerHTML =
         '<div class="okmsg">' +
-        escapeHtml("Certificate regenerated. Re-download and re-trust if needed.") +
+        escapeHtml(
+          "Certificate regenerated. Download it again and install into Trusted Root (not Automatic)."
+        ) +
         "</div>";
     } finally {
       $("btn-cert-regen").disabled = false;
