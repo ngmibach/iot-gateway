@@ -44,6 +44,9 @@ class FakeSSH:
         self.stdins.append(stdin)
         if self._run_handler is not None:
             handled = self._run_handler(command)
+            # Still apply filesystem side effects on success so sudo mv/rm work.
+            if handled.exit_code == 0:
+                self._apply_fs_side_effects(command)
             # Handlers often return empty stdout; synthesize df so capacity probes work.
             if "df -Pk" in command and not (handled.stdout or "").strip():
                 return CommandResult(
@@ -52,16 +55,26 @@ class FakeSSH:
                     stdout=_FAKE_DF_LINE,
                     stderr=handled.stderr,
                 )
+            # Prefer real file content for sudo cat when handler left stdout empty.
+            cat_out = self._cat_stdout(command)
+            if cat_out is not None and not (handled.stdout or "").strip():
+                return CommandResult(
+                    argv=command,
+                    exit_code=handled.exit_code,
+                    stdout=cat_out,
+                    stderr=handled.stderr,
+                )
             return handled
         if "df -Pk" in command:
             return CommandResult(
                 argv=command, exit_code=0, stdout=_FAKE_DF_LINE, stderr=""
             )
-        self._apply_rm(command)
-        for m in _TRUNCATE_RE.finditer(command):
-            path = m.group(1) or m.group(2)
-            if path and path in self.files:
-                self.files[path] = b""
+        self._apply_fs_side_effects(command)
+        cat_out = self._cat_stdout(command)
+        if cat_out is not None:
+            return CommandResult(
+                argv=command, exit_code=0, stdout=cat_out, stderr=""
+            )
         if "openssl x509 -req" in command:
             parts = command.split()
             out_path = None
@@ -73,6 +86,25 @@ class FakeSSH:
                     b"-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n"
                 )
         return CommandResult(argv=command, exit_code=0, stdout="", stderr="")
+
+    def _cat_stdout(self, command: str) -> str | None:
+        normalized = command.replace("'\"'\"'", "'")
+        cat_m = re.search(r"\bcat\s+'([^']+)'", normalized)
+        if not cat_m:
+            return None
+        path = cat_m.group(1)
+        if path not in self.files:
+            return None
+        data = self.files[path]
+        return data.decode("utf-8") if isinstance(data, bytes) else str(data)
+
+    def _apply_fs_side_effects(self, command: str) -> None:
+        self._apply_rm(command)
+        self._apply_mv(command)
+        for m in _TRUNCATE_RE.finditer(command):
+            path = m.group(1) or m.group(2)
+            if path and path in self.files:
+                self.files[path] = b""
 
     def read_text(self, path: str) -> str:
         return self.read_bytes(path).decode("utf-8")
@@ -133,10 +165,11 @@ class FakeSSH:
 
     def _apply_rm(self, command: str) -> None:
         """Best-effort simulate ``rm -rf`` / ``rm -f`` for playbook tests."""
+        normalized = command.replace("'\"'\"'", "'")
         # Match rm -rf 'path' or rm -f 'path' (possibly several paths).
         for m in re.finditer(
             r"\brm\s+(-[a-zA-Z]+\s+)*'([^']+)'",
-            command,
+            normalized,
         ):
             flags = m.group(1) or ""
             path = m.group(2)
@@ -149,3 +182,15 @@ class FakeSSH:
             else:
                 if path in self.files:
                     self.unlink(path)
+
+    def _apply_mv(self, command: str) -> None:
+        """Best-effort simulate ``mv 'src' 'dst'`` (incl. inside sudo sh -c).
+
+        ``shell_quote`` embeds paths as ``'"'"'path'"'"'``; normalize those to
+        plain single quotes before matching.
+        """
+        normalized = command.replace("'\"'\"'", "'")
+        for m in re.finditer(r"\bmv\s+'([^']+)'\s+'([^']+)'", normalized):
+            src, dst = m.group(1), m.group(2)
+            if src in self.files:
+                self.files[dst] = self.files.pop(src)

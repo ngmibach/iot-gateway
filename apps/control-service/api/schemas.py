@@ -36,6 +36,7 @@ class RegisterDeviceRequest(BaseModel):
     topic_readwrite: Optional[Union[str, list[str]]] = None
     monitor_enabled: bool = True
     ca_passphrase: Optional[str] = None
+    sudo_password: Optional[str] = None
     schema_id: Optional[str] = Field(default="default", max_length=128)
     crypto_profile: Optional[str] = Field(default="v1-psk", max_length=32)
     message_schema: Optional[dict[str, Any]] = None
@@ -180,6 +181,12 @@ class FakeActionRequest(BaseModel):
     sudo_password: Optional[str] = None
 
 
+class DeleteDeviceRequest(BaseModel):
+    """Optional body for DELETE device (wizard injects gateway sudo)."""
+
+    sudo_password: Optional[str] = None
+
+
 class DeviceOut(BaseModel):
     id: str
     gateway_id: str
@@ -235,6 +242,7 @@ class UpdateDeviceRequest(BaseModel):
     topic_readwrite: Optional[Union[str, list[str]]] = None
     monitor_enabled: Optional[bool] = None
     ca_passphrase: Optional[str] = None
+    sudo_password: Optional[str] = None
 
     @field_validator("ip")
     @classmethod

@@ -88,6 +88,48 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertTrue(any("iotgw-ca-pass-" in p for p in ssh.unlinked))
         self.assertTrue(any("iotgw-csr-" in p for p in ssh.unlinked))
         self.assertEqual(result.details.get("mosquitto"), "reload")
+        # Mosquitto secrets install via /tmp + sudo mv (Install-style).
+        self.assertTrue(
+            any(
+                "sudo" in c and "mv" in c and "/mosquitto/acl" in c
+                for c in ssh.commands
+            )
+        )
+        self.assertTrue(
+            any(
+                "sudo" in c and "chown mosquitto:mosquitto" in c
+                for c in ssh.commands
+            )
+        )
+
+    def test_register_with_sudo_password_passes_stdin(self) -> None:
+        ssh = FakeSSH(_base_files())
+        mat = generate_client_key_and_csr("sensor9")
+        signed = local_self_sign_for_tests(mat)
+        ssh._run_handler = _register_ok_handler(ssh, signed.client_crt_pem)
+
+        result = register_device(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor9",
+            password="hunter2xx",
+            ip="10.0.0.9",
+            topic_rw="sensors/sensor9/#",
+            ca_passphrase="correct-horse",
+            key_material=mat,
+            sudo_password="pi-sudo-secret",
+        )
+        self.assertTrue(result.ok)
+        self.assertIn("user sensor9\n", ssh.read_text(ACL))
+        self.assertTrue(
+            any(
+                stdin == "pi-sudo-secret"
+                for stdin in ssh.stdins
+                if stdin is not None
+            )
+        )
+        self.assertTrue(
+            any("sudo -S -p '' -- sh -c" in c for c in ssh.commands)
+        )
 
     def test_register_upserts_existing_user(self) -> None:
         ssh = FakeSSH(_base_files())
@@ -128,7 +170,10 @@ class TestRegisterDevice(unittest.TestCase):
         original_pw = ssh.read_text(PW)
 
         def boom_write(path: str, content: str, *, mode: int = 0o644) -> None:
-            if path == PW:
+            # Secrets now stage under /tmp/iotgw-mosq-passwords-* before sudo mv.
+            if path == PW or (
+                path.startswith("/tmp/iotgw-mosq-passwords-")
+            ):
                 raise RuntimeError("disk full")
             FakeSSH.write_text(ssh, path, content, mode=mode)
 
