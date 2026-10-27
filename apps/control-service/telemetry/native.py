@@ -9,7 +9,10 @@ import subprocess
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
+
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes
 
 from .binary_fetch import (
     BinaryFetchError,
@@ -659,6 +662,63 @@ class NativeTelemetryManager:
     def _stop_grafana_only(self, *, grace: float = 5.0) -> None:
         self._stop_one(self._grafana, grace=grace)
         self._grafana = None
+
+    def grafana_cert_public_meta(self) -> dict[str, Any]:
+        """Public cert fields only (no private key / admin password)."""
+        cert_path = self.certs_dir / "grafana.crt"
+        if not cert_path.is_file() or cert_path.stat().st_size <= 0:
+            return {
+                "present": False,
+                "not_after": None,
+                "fingerprint_sha256": None,
+            }
+        try:
+            cert = x509.load_pem_x509_certificate(cert_path.read_bytes())
+            return {
+                "present": True,
+                "not_after": cert.not_valid_after_utc.isoformat(),
+                "fingerprint_sha256": cert.fingerprint(hashes.SHA256()).hex(),
+            }
+        except Exception:  # noqa: BLE001
+            return {
+                "present": True,
+                "not_after": None,
+                "fingerprint_sha256": None,
+            }
+
+    def regenerate_grafana_certs(self) -> dict[str, Any]:
+        """Force new TLS cert; restart Grafana child if tree present."""
+        meta = ensure_grafana_certs(self.certs_dir, force=True)
+        not_after = meta.get("not_after")
+        out: dict[str, Any] = {
+            "fingerprint_sha256": meta.get("fingerprint_sha256"),
+            "not_after": (
+                not_after.isoformat() if hasattr(not_after, "isoformat") else not_after
+            ),
+            "restarted": False,
+            "detail": "Certificate regenerated.",
+        }
+        if not self._grafana_tree_present():
+            out["detail"] = (
+                "Certificate regenerated; Grafana is not installed — restart skipped."
+            )
+            return out
+
+        self.write_configs()
+        self._stop_grafana_only(grace=5.0)
+        st = self.start(ensure_bins=False, wait=True)
+        grafana_ok = bool(getattr(st.grafana, "ok", False)) or self._running(
+            self._grafana
+        )
+        out["restarted"] = grafana_ok
+        if grafana_ok:
+            out["detail"] = "Certificate regenerated and Grafana restarted."
+        else:
+            out["detail"] = (
+                "Certificate regenerated but Grafana did not become ready: "
+                + (st.detail or "unknown")
+            )
+        return out
 
     def stop(self, *, grace: float = 5.0) -> None:
         # Grafana first so tree replace / uninstall can unlock files on Windows.

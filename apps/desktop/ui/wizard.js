@@ -29,7 +29,7 @@
     $("telemetry-hint").textContent =
       detail ||
       (ready
-        ? "Loki and Prometheus are running."
+        ? "Loki, Prometheus, and Grafana are running."
         : "Click Install monitoring to continue.");
     $("hdr-status").innerHTML = ready
       ? '<span class="badge ok">Ready</span>'
@@ -56,7 +56,7 @@
     setTelemetryReadyUi(
       !!t.ready,
       t.ready
-        ? t.detail || "Loki and Prometheus are running."
+        ? t.detail || "Loki, Prometheus, and Grafana are running."
         : t.progress || t.detail || "Click Install monitoring to continue."
     );
   }
@@ -85,7 +85,7 @@
         if (job.state === "ok") {
           setTelemetryReadyUi(
             true,
-            last.detail || job.detail || "Loki and Prometheus are running."
+            last.detail || job.detail || "Loki, Prometheus, and Grafana are running."
           );
           return;
         }

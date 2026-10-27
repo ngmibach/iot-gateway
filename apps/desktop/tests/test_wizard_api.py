@@ -81,7 +81,7 @@ class WizardApiTests(unittest.TestCase):
             settings_html = resp.read().decode("utf-8")
         self.assertIn("Remove", settings_html)
         self.assertIn("monitoring panel", settings_html.lower())
-        self.assertIn("Loki and Prometheus", settings_html)
+        self.assertIn("Loki, Prometheus, and Grafana", settings_html)
         self.assertIn("Local app data", settings_html)
         self.assertNotIn("Gateway only", settings_html)
         self.assertNotIn("Gateways → Clean up", settings_html)
@@ -577,6 +577,7 @@ class WizardApiTests(unittest.TestCase):
             binaries_present = True
             loki_running = False
             prometheus_running = False
+            grafana_running = False
             detail = "waiting"
             progress = "Downloading (10%)"
 
@@ -594,14 +595,16 @@ class WizardApiTests(unittest.TestCase):
 
                 class _St:
                     running = True
-                    detail = "Loki and Prometheus are running."
+                    detail = "Loki, Prometheus, and Grafana are running."
                     loki = None
                     prometheus = None
+                    grafana = None
 
                 _Snap.ready = True
                 _Snap.loki_running = True
                 _Snap.prometheus_running = True
-                _Snap.detail = "Loki and Prometheus are running."
+                _Snap.grafana_running = True
+                _Snap.detail = "Loki, Prometheus, and Grafana are running."
                 return _St()
 
         with mock.patch.object(ws.STATE, "_telemetry", _FakeTel()):
@@ -904,6 +907,121 @@ class WizardApiTests(unittest.TestCase):
         ssh_un.assert_called_once()
         self.assertTrue(out["ok"])
         self.assertTrue((tel / "loki").is_file())
+
+    def test_open_url_allowlist(self) -> None:
+        from shell import wizard_server as ws
+
+        with mock.patch.object(ws, "open_in_browser") as browser:
+            for url in (
+                "https://127.0.0.1:9140",
+                "https://127.0.0.1:9140/",
+                "https://127.0.0.1:9140/login",
+                "https://localhost:9140",
+                "https://localhost:9140/d/abc",
+            ):
+                out = self._post("/api/wizard/open-url", {"url": url})
+                self.assertTrue(out.get("ok"), url)
+                self.assertEqual(out.get("url"), url)
+            self.assertEqual(browser.call_count, 5)
+
+        for bad in (
+            "http://127.0.0.1:9140",
+            "https://127.0.0.1:443",
+            "https://example.com:9140",
+            "https://192.168.1.1:9140",
+            "https://localhost:9090",
+        ):
+            req = urllib.request.Request(
+                self.base + "/api/wizard/open-url",
+                data=json.dumps({"url": bad}).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(ctx.exception.code, 400)
+            body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertIn("not allowed", body.get("error", "").lower())
+
+    def test_grafana_cert_download(self) -> None:
+        from pathlib import Path
+
+        from shell import wizard_server as ws
+
+        certs = Path(self._td.name) / "telemetry" / "certs"
+        certs.mkdir(parents=True)
+        pem = (
+            b"-----BEGIN CERTIFICATE-----\n"
+            b"MIIBdummy\n"
+            b"-----END CERTIFICATE-----\n"
+        )
+
+        class _FakeTel:
+            certs_dir = certs
+
+        with mock.patch.object(ws.STATE, "_telemetry", _FakeTel()):
+            req = urllib.request.Request(self.base + "/api/wizard/grafana/cert")
+            with self.assertRaises(urllib.error.HTTPError) as ctx:
+                urllib.request.urlopen(req, timeout=10)
+            self.assertEqual(ctx.exception.code, 404)
+            body = json.loads(ctx.exception.read().decode("utf-8"))
+            self.assertIn("error", body)
+
+            (certs / "grafana.crt").write_bytes(pem)
+            with urllib.request.urlopen(
+                self.base + "/api/wizard/grafana/cert", timeout=10
+            ) as resp:
+                data = resp.read()
+                disp = resp.headers.get("Content-Disposition", "")
+                ctype = resp.headers.get("Content-Type", "")
+            self.assertIn("BEGIN CERTIFICATE", data.decode("utf-8"))
+            self.assertIn("iot-gateway-grafana.crt", disp)
+            self.assertIn("attachment", disp)
+            self.assertEqual(ctype, "application/x-x509-ca-cert")
+
+    def test_grafana_cert_regenerate(self) -> None:
+        from shell import wizard_server as ws
+
+        fake = mock.Mock()
+        fake.regenerate_grafana_certs.return_value = {
+            "fingerprint_sha256": "a" * 64,
+            "not_after": "2028-01-01T00:00:00+00:00",
+            "restarted": True,
+            "detail": "Certificate regenerated and Grafana restarted.",
+        }
+        with mock.patch.object(ws.STATE, "_telemetry", fake):
+            out = self._post("/api/wizard/grafana/cert/regenerate", {})
+        fake.regenerate_grafana_certs.assert_called_once_with()
+        self.assertEqual(out.get("fingerprint_sha256"), "a" * 64)
+        self.assertIn("not_after", out)
+        self.assertTrue(out.get("restarted"))
+
+    def test_telemetry_status_includes_grafana_running(self) -> None:
+        from shell import wizard_server as ws
+
+        class _Snap:
+            ready = True
+            binaries_present = True
+            loki_running = True
+            prometheus_running = True
+            grafana_running = True
+            detail = "Loki, Prometheus, and Grafana are running."
+            progress = ""
+
+        class _FakeTel:
+            def snapshot(self):
+                return _Snap()
+
+        with mock.patch.object(ws.STATE, "_telemetry", _FakeTel()):
+            with ws.STATE.lock:
+                ws.STATE._telemetry_job = {
+                    "state": "ok",
+                    "detail": "ready",
+                    "error": None,
+                }
+            st = self._get("/api/wizard/telemetry/status")
+        self.assertIn("grafana_running", st)
+        self.assertTrue(st["grafana_running"])
 
 
 if __name__ == "__main__":
