@@ -188,7 +188,9 @@ def _find_tree_root(extract_dir: Path, root_dir_glob: str) -> Path:
     return matches[0]
 
 
-def _grafana_layout_ok(tree: Path) -> bool:
+def grafana_tree_layout_ok(tree: Path) -> bool:
+    """True when ``tree`` has public/, conf/, and a grafana[-server][.exe] binary."""
+    tree = Path(tree)
     if not (tree / "public").is_dir():
         return False
     if not (tree / "conf").is_dir():
@@ -197,6 +199,10 @@ def _grafana_layout_ok(tree: Path) -> bool:
     if not bin_dir.is_dir():
         return False
     return any((bin_dir / name).is_file() for name in _GRAFANA_SERVER_NAMES)
+
+
+def _grafana_layout_ok(tree: Path) -> bool:
+    return grafana_tree_layout_ok(tree)
 
 
 def _atomic_replace_dir(staging: Path, dest: Path, old: Path) -> None:

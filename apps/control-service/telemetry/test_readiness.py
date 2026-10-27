@@ -82,10 +82,10 @@ class ReadinessTests(unittest.TestCase):
         )
 
     def test_check_grafana_uses_unverified_context(self) -> None:
+        ctx = object()
         with mock.patch(
-            "telemetry.readiness.ssl._create_unverified_context"
+            "telemetry.readiness._unverified_https_context", return_value=ctx
         ) as mk_ctx:
-            mk_ctx.return_value = object()
             with mock.patch(
                 "telemetry.readiness.urllib.request.urlopen",
                 return_value=_FakeResp(200, b'{"database":"ok"}'),
@@ -93,9 +93,7 @@ class ReadinessTests(unittest.TestCase):
                 r = check_grafana("https://127.0.0.1:9140/", timeout=1.5)
         self.assertTrue(r.ok)
         mk_ctx.assert_called_once_with()
-        self.assertEqual(
-            urlopen.call_args.kwargs.get("context"), mk_ctx.return_value
-        )
+        self.assertEqual(urlopen.call_args.kwargs.get("context"), ctx)
         self.assertIn("/api/health", r.url)
 
     def test_wait_ready_optional_grafana(self) -> None:

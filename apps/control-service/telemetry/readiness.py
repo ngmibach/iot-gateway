@@ -58,6 +58,11 @@ def check_prometheus(base_url: str, *, timeout: float = 5.0) -> ProbeResult:
     )
 
 
+def _unverified_https_context() -> ssl.SSLContext:
+    """SSL context that accepts self-signed localhost Grafana certs."""
+    return ssl._create_unverified_context()
+
+
 def check_grafana(
     base_url: str = "https://127.0.0.1:9140", *, timeout: float = 5.0
 ) -> ProbeResult:
@@ -66,7 +71,7 @@ def check_grafana(
     url = f"{base}/api/health"
     try:
         req = urllib.request.Request(url, method="GET")
-        ctx = ssl._create_unverified_context()
+        ctx = _unverified_https_context()
         with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
             code = int(getattr(resp, "status", resp.getcode()))
             body = resp.read(4096)

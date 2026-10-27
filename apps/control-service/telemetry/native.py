@@ -13,10 +13,10 @@ from typing import Optional
 
 from .binary_fetch import (
     BinaryFetchError,
-    _grafana_layout_ok,
     ensure_grafana_kafka_plugin,
     ensure_grafana_tree,
     ensure_telemetry_binaries,
+    grafana_tree_layout_ok,
     load_versions,
     platform_key,
 )
@@ -31,8 +31,10 @@ from .readiness import (
     wait_ready,
 )
 from .scrape import render_prometheus_scrape
+from .winproc import hidden_kwargs
 
 _GRAFANA_URL = "https://127.0.0.1:9140"
+_GRAFANA_PORT = 9140
 
 
 def _port_open(host: str, port: int, *, timeout: float = 0.4) -> bool:
@@ -42,6 +44,58 @@ def _port_open(host: str, port: int, *, timeout: float = 0.4) -> bool:
             return True
     except OSError:
         return False
+
+
+def _best_effort_stop_listeners(port: int) -> None:
+    """Terminate whatever is listening on ``port`` (orphans after app restart)."""
+    if not _port_open("127.0.0.1", port, timeout=0.3):
+        return
+    try:
+        if os.name == "nt":
+            # Prefer netstat+taskkill — no admin PowerShell module dependency.
+            out = subprocess.check_output(
+                ["netstat", "-ano", "-p", "tcp"],
+                text=True,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                **hidden_kwargs(),
+            )
+            needle = f":{port}"
+            pids: list[int] = []
+            for line in out.splitlines():
+                if "LISTENING" not in line.upper():
+                    continue
+                parts = line.split()
+                if len(parts) < 5:
+                    continue
+                local = parts[1]
+                if not (local.endswith(needle) or local.endswith(f"]{needle}")):
+                    continue
+                try:
+                    pid = int(parts[-1])
+                except ValueError:
+                    continue
+                if pid > 0 and pid not in pids:
+                    pids.append(pid)
+            for pid in pids:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=5,
+                    check=False,
+                    **hidden_kwargs(),
+                )
+        else:
+            subprocess.run(
+                ["fuser", "-k", f"{port}/tcp"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                timeout=5,
+                check=False,
+            )
+    except (OSError, subprocess.SubprocessError):
+        pass
 
 
 def _bind_conflict_message(log_text: str, *, port: int, name: str) -> str | None:
@@ -164,7 +218,7 @@ class NativeTelemetryManager:
 
     def _grafana_tree_present(self) -> bool:
         """True when version marker and Grafana layout (public/, conf/, server) exist."""
-        if not _grafana_layout_ok(self.grafana_home):
+        if not grafana_tree_layout_ok(self.grafana_home):
             return False
         try:
             versions = load_versions()
@@ -196,9 +250,11 @@ class NativeTelemetryManager:
             )
         )
 
-        # Windows locks Grafana tree files while the child is running.
-        if self._grafana_needs_ensure(force=force) and self._running(self._grafana):
+        # Windows locks Grafana tree files while a process holds them.
+        if self._grafana_needs_ensure(force=force):
             self._stop_grafana_only(grace=5.0)
+            # Orphan after app restart: no self._grafana handle.
+            _best_effort_stop_listeners(_GRAFANA_PORT)
 
         def _g_progress(msg: str, frac: float) -> None:
             self._progress(msg, 0.45 + 0.35 * frac)
@@ -243,7 +299,11 @@ class NativeTelemetryManager:
             gateways=[],
         )
         # Registry Kafka DS without requiring Grafana to be up yet.
-        sync_grafana_datasources(config_dir=self.config_dir, reload=False)
+        sync_grafana_datasources(
+            config_dir=self.config_dir,
+            registry_path=self.root.parent / "registry.sqlite",
+            reload=False,
+        )
 
     def _bin(self, name: str) -> Path:
         if os.name == "nt":
@@ -521,11 +581,11 @@ class NativeTelemetryManager:
                 "Port 9090 is in use but Prometheus is not ready. "
                 "Stop legacy Docker monitoring or another Prometheus process."
             )
-        if _port_open("127.0.0.1", 9140) and not check_grafana(
+        if _port_open("127.0.0.1", _GRAFANA_PORT) and not check_grafana(
             _GRAFANA_URL, timeout=1.0
         ).ok:
             parts.append(
-                "Port 9140 is in use but Grafana is not ready. "
+                f"Port {_GRAFANA_PORT} is in use but Grafana is not ready. "
                 "Stop another Grafana process or a previous app instance."
             )
         return " ".join(parts) or None

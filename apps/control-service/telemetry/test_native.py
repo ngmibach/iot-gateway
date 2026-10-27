@@ -198,21 +198,91 @@ class NativeHelperTests(unittest.TestCase):
             ):
                 with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
                     with mock.patch(
-                        "telemetry.native.ensure_telemetry_binaries",
-                        return_value={"loki": Path("l"), "prometheus": Path("p")},
-                    ):
+                        "telemetry.native._best_effort_stop_listeners"
+                    ) as kill_port:
                         with mock.patch(
-                            "telemetry.native.ensure_grafana_tree",
-                            return_value=Path(tmp) / "grafana",
-                        ) as ensure_tree:
+                            "telemetry.native.ensure_telemetry_binaries",
+                            return_value={
+                                "loki": Path("l"),
+                                "prometheus": Path("p"),
+                            },
+                        ):
                             with mock.patch(
-                                "telemetry.native.ensure_grafana_kafka_plugin",
-                                return_value=Path(tmp) / "plugins",
-                            ):
-                                mgr.ensure_binaries(force=True)
+                                "telemetry.native.ensure_grafana_tree",
+                                return_value=Path(tmp) / "grafana",
+                            ) as ensure_tree:
+                                with mock.patch(
+                                    "telemetry.native.ensure_grafana_kafka_plugin",
+                                    return_value=Path(tmp) / "plugins",
+                                ):
+                                    mgr.ensure_binaries(force=True)
             stop_g.assert_called_once()
+            kill_port.assert_called_once_with(nv._GRAFANA_PORT)
             ensure_tree.assert_called_once()
             self.assertTrue(ensure_tree.call_args.kwargs.get("force"))
+
+    def test_failure_detail_tails_grafana_log(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            log_dir = Path(tmp) / "logs"
+            log_dir.mkdir()
+            (log_dir / "grafana.log").write_text(
+                "t=info msg=starting\n"
+                "logger=server t=err msg=\"Access is denied opening plugin\"\n",
+                encoding="utf-8",
+            )
+            detail = mgr._failure_detail(
+                {"grafana": ProbeResult(False, "u", "down")}
+            )
+            self.assertIn("grafana: down", detail)
+            self.assertIn("grafana.log", detail)
+            self.assertIn("Access is denied", detail)
+
+    def test_failure_detail_grafana_bind_conflict(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            log_dir = Path(tmp) / "logs"
+            log_dir.mkdir()
+            (log_dir / "grafana.log").write_text(
+                'msg="listen tcp :9140: bind: address already in use"\n',
+                encoding="utf-8",
+            )
+            detail = mgr._failure_detail(
+                {"grafana": ProbeResult(False, "u", "down")}
+            )
+            self.assertIn("9140", detail)
+            self.assertIn("Grafana", detail)
+
+    def test_write_configs_passes_registry_beside_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "telemetry"
+            mgr = nv.NativeTelemetryManager(root)
+            with mock.patch("telemetry.native.ensure_grafana_certs") as certs:
+                certs.return_value = {
+                    "cert_file": root / "certs" / "grafana.crt",
+                    "key_file": root / "certs" / "grafana.key",
+                }
+                with mock.patch(
+                    "telemetry.native.ensure_grafana_admin_password",
+                    return_value="secret",
+                ):
+                    with mock.patch(
+                        "telemetry.native.write_grafana_base_config"
+                    ):
+                        with mock.patch(
+                            "telemetry.native.sync_grafana_datasources"
+                        ) as sync:
+                            with mock.patch(
+                                "telemetry.native.render_prometheus_scrape",
+                                return_value="scrape: []\n",
+                            ):
+                                mgr.write_configs(gateway_ip="10.0.0.1")
+            sync.assert_called_once()
+            self.assertEqual(
+                sync.call_args.kwargs.get("registry_path"),
+                root.parent / "registry.sqlite",
+            )
+            self.assertFalse(sync.call_args.kwargs.get("reload"))
 
     def test_uninstall_removes_bins_and_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
