@@ -312,6 +312,62 @@ class NativeHelperTests(unittest.TestCase):
             self.assertTrue(out["ok"])
             self.assertEqual(out["removed"], [])
 
+    def test_regenerate_grafana_certs_skips_restart_without_tree(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            with mock.patch(
+                "telemetry.native.ensure_grafana_certs",
+                return_value={
+                    "fingerprint_sha256": "b" * 64,
+                    "not_after": mock.Mock(isoformat=lambda: "2028-01-01T00:00:00+00:00"),
+                },
+            ) as ensure:
+                with mock.patch.object(
+                    mgr, "_grafana_tree_present", return_value=False
+                ):
+                    with mock.patch.object(mgr, "write_configs") as write:
+                        with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
+                            with mock.patch.object(mgr, "start") as start:
+                                out = mgr.regenerate_grafana_certs()
+            ensure.assert_called_once_with(mgr.certs_dir, force=True)
+            write.assert_not_called()
+            stop_g.assert_not_called()
+            start.assert_not_called()
+            self.assertFalse(out["restarted"])
+            self.assertEqual(out["fingerprint_sha256"], "b" * 64)
+            self.assertIn("not installed", out["detail"].lower())
+
+    def test_regenerate_grafana_certs_restarts_when_tree_present(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            st = BackendStatus(
+                running=True,
+                compose_ps="native",
+                detail="ok",
+                grafana=_ok(),
+            )
+            with mock.patch(
+                "telemetry.native.ensure_grafana_certs",
+                return_value={
+                    "fingerprint_sha256": "c" * 64,
+                    "not_after": mock.Mock(isoformat=lambda: "2028-06-01T00:00:00+00:00"),
+                },
+            ):
+                with mock.patch.object(
+                    mgr, "_grafana_tree_present", return_value=True
+                ):
+                    with mock.patch.object(mgr, "write_configs") as write:
+                        with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
+                            with mock.patch.object(
+                                mgr, "start", return_value=st
+                            ) as start:
+                                out = mgr.regenerate_grafana_certs()
+            write.assert_called_once()
+            stop_g.assert_called_once()
+            start.assert_called_once_with(ensure_bins=False, wait=True)
+            self.assertTrue(out["restarted"])
+            self.assertEqual(out["fingerprint_sha256"], "c" * 64)
+
 
 class PortOpenTests(unittest.TestCase):
     def test_port_open_false_when_free(self) -> None:

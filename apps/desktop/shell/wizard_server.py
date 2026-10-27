@@ -104,7 +104,7 @@ class WizardState:
                         self._telemetry_job = {
                             "state": "ok",
                             "detail": snap0.detail
-                            or "Loki and Prometheus are running.",
+                            or "Loki, Prometheus, and Grafana are running.",
                             "error": None,
                         }
                     return
@@ -182,6 +182,42 @@ def _json_response(handler: BaseHTTPRequestHandler, code: int, body: Any) -> Non
     handler.wfile.write(raw)
 
 
+def _file_response(
+    handler: BaseHTTPRequestHandler,
+    data: bytes,
+    *,
+    content_type: str,
+    filename: str,
+    status: int = 200,
+) -> None:
+    handler.send_response(status)
+    handler.send_header("Content-Type", content_type)
+    handler.send_header("Content-Length", str(len(data)))
+    handler.send_header(
+        "Content-Disposition", f'attachment; filename="{filename}"'
+    )
+    handler.send_header("Cache-Control", "no-store")
+    handler.end_headers()
+    handler.wfile.write(data)
+
+
+def _grafana_open_url_allowed(url: str) -> bool:
+    """Allow only https://127.0.0.1:9140/... and https://localhost:9140/..."""
+    try:
+        parsed = urlparse(url)
+    except Exception:  # noqa: BLE001
+        return False
+    if parsed.scheme != "https":
+        return False
+    if parsed.username is not None or parsed.password is not None:
+        return False
+    if parsed.hostname not in ("127.0.0.1", "localhost"):
+        return False
+    if parsed.port != 9140:
+        return False
+    return True
+
+
 def _read_json(handler: BaseHTTPRequestHandler) -> dict:
     length = int(handler.headers.get("Content-Length") or "0")
     if length <= 0:
@@ -222,9 +258,9 @@ def _handle_api(
                     "progress": tel.progress,
                     "job": job,
                     "hint": (
-                        "Loki and Prometheus are running."
+                        "Loki, Prometheus, and Grafana are running."
                         if tel.ready
-                        else "Install monitoring to download and start Loki and Prometheus."
+                        else "Install monitoring to download and start Loki, Prometheus, and Grafana."
                     ),
                 }
             except Exception as e:  # noqa: BLE001
@@ -433,6 +469,7 @@ def _handle_api(
                         "binaries_present": bins,
                         "loki_running": False,
                         "prometheus_running": False,
+                        "grafana_running": False,
                         "detail": progress or job.get("detail") or "Installing…",
                         "progress": progress,
                         "job": job,
@@ -452,11 +489,81 @@ def _handle_api(
                     "binaries_present": tel.binaries_present,
                     "loki_running": tel.loki_running,
                     "prometheus_running": tel.prometheus_running,
+                    "grafana_running": bool(
+                        getattr(tel, "grafana_running", False)
+                    ),
                     "detail": detail,
                     "progress": tel.progress,
                     "job": job,
                 },
             )
+            return
+
+        if method == "GET" and path == "/api/wizard/grafana/status":
+            tel = STATE.telemetry
+            try:
+                snap = tel.snapshot()
+                running = bool(getattr(snap, "grafana_running", False))
+                detail = snap.detail or ""
+            except Exception as e:  # noqa: BLE001
+                running = False
+                detail = str(e)
+            cert = tel.grafana_cert_public_meta()
+            _json_response(
+                handler,
+                200,
+                {
+                    "running": running,
+                    "url": "https://127.0.0.1:9140/",
+                    "cert": cert,
+                    "detail": detail,
+                },
+            )
+            return
+
+        if method == "GET" and path == "/api/wizard/grafana/cert":
+            cert_path = STATE.telemetry.certs_dir / "grafana.crt"
+            if not cert_path.is_file() or cert_path.stat().st_size <= 0:
+                _json_response(
+                    handler,
+                    404,
+                    {"error": "Grafana certificate is not present yet."},
+                )
+                return
+            _file_response(
+                handler,
+                cert_path.read_bytes(),
+                content_type="application/x-x509-ca-cert",
+                filename="iot-gateway-grafana.crt",
+            )
+            return
+
+        if method == "POST" and path == "/api/wizard/grafana/cert/regenerate":
+            try:
+                out = STATE.telemetry.regenerate_grafana_certs()
+                _json_response(handler, 200, out)
+            except Exception as e:  # noqa: BLE001
+                logger.exception("grafana cert regenerate failed")
+                _json_response(handler, 500, {"error": str(e)})
+            return
+
+        if method == "POST" and path == "/api/wizard/open-url":
+            body = _read_json(handler)
+            url = str(body.get("url") or "").strip()
+            if not url or not _grafana_open_url_allowed(url):
+                _json_response(
+                    handler,
+                    400,
+                    {
+                        "error": (
+                            "URL not allowed. Only https://127.0.0.1:9140 "
+                            "and https://localhost:9140 (and paths) are permitted."
+                        )
+                    },
+                )
+                return
+            open_in_browser(url)
+            _json_response(handler, 200, {"ok": True, "url": url})
             return
 
         if method == "GET" and path == "/api/wizard/control":
