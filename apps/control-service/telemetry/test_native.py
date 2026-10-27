@@ -1,4 +1,4 @@
-"""Unit tests for native Loki/Prometheus lifecycle helpers."""
+"""Unit tests for native Loki/Prometheus/Grafana lifecycle helpers."""
 
 from __future__ import annotations
 
@@ -11,6 +11,14 @@ from unittest import mock
 from telemetry import native as nv
 from telemetry.lifecycle import BackendStatus
 from telemetry.readiness import ProbeResult
+
+
+def _ok() -> ProbeResult:
+    return ProbeResult(True, "u", "ok")
+
+
+def _down() -> ProbeResult:
+    return ProbeResult(False, "u", "down")
 
 
 class NativeHelperTests(unittest.TestCase):
@@ -29,7 +37,7 @@ class NativeHelperTests(unittest.TestCase):
     def test_port_conflict_detail_when_occupied(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mgr = nv.NativeTelemetryManager(tmp)
-            with mock.patch.object(nv, "_port_open", side_effect=[True, False]):
+            with mock.patch.object(nv, "_port_open", side_effect=[True, False, False]):
                 with mock.patch.object(
                     nv,
                     "check_loki",
@@ -40,9 +48,32 @@ class NativeHelperTests(unittest.TestCase):
                         "check_prometheus",
                         return_value=ProbeResult(True, "u", "ok"),
                     ):
-                        detail = mgr._port_conflict_detail()
+                        with mock.patch.object(
+                            nv,
+                            "check_grafana",
+                            return_value=ProbeResult(True, "u", "ok"),
+                        ):
+                            detail = mgr._port_conflict_detail()
             self.assertIsNotNone(detail)
             self.assertIn("3100", detail or "")
+
+    def test_port_conflict_detail_mentions_9140(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            with mock.patch.object(
+                nv, "_port_open", side_effect=[False, False, True]
+            ):
+                with mock.patch.object(nv, "check_loki", return_value=_ok()):
+                    with mock.patch.object(
+                        nv, "check_prometheus", return_value=_ok()
+                    ):
+                        with mock.patch.object(
+                            nv, "check_grafana", return_value=_down()
+                        ):
+                            detail = mgr._port_conflict_detail()
+            self.assertIsNotNone(detail)
+            self.assertIn("9140", detail or "")
+            self.assertIn("Grafana", detail or "")
 
     def test_start_fails_fast_on_port_conflict(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -51,9 +82,11 @@ class NativeHelperTests(unittest.TestCase):
             (root / "bin" / "loki").write_text("#!/bin/sh\n", encoding="utf-8")
             (root / "bin" / "prometheus").write_text("#!/bin/sh\n", encoding="utf-8")
             mgr = nv.NativeTelemetryManager(root)
-            not_ready = ProbeResult(False, "u", "down")
+            not_ready = _down()
             with mock.patch.object(
-                mgr, "_http_ready", return_value=(False, not_ready, not_ready)
+                mgr,
+                "_http_ready",
+                return_value=(False, not_ready, not_ready, not_ready),
             ):
                 with mock.patch.object(
                     mgr,
@@ -65,7 +98,7 @@ class NativeHelperTests(unittest.TestCase):
             self.assertIn("3100", st.detail)
 
     def test_snapshot_does_not_probe_before_binaries_exist(self) -> None:
-        """Fresh PC: no Loki/Prometheus files, so status must not touch the ports."""
+        """Fresh PC: no Loki/Prometheus/Grafana files, so status must not touch ports."""
         with tempfile.TemporaryDirectory() as tmp:
             mgr = nv.NativeTelemetryManager(tmp)
             with mock.patch.object(mgr, "_http_ready") as probe:
@@ -75,14 +108,111 @@ class NativeHelperTests(unittest.TestCase):
             self.assertFalse(snap.binaries_present)
             self.assertIn("not installed", snap.detail.lower())
 
+    def test_snapshot_skips_grafana_https_when_tree_absent(self) -> None:
+        """Loki+Prom bins alone are not enough; no Grafana HTTPS probe."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "bin").mkdir()
+            (root / "bin" / "loki").write_text("x", encoding="utf-8")
+            (root / "bin" / "prometheus").write_text("x", encoding="utf-8")
+            mgr = nv.NativeTelemetryManager(root)
+            with mock.patch.object(mgr, "_grafana_tree_present", return_value=False):
+                with mock.patch.object(nv, "check_grafana") as cg:
+                    with mock.patch.object(mgr, "_http_ready") as probe:
+                        snap = mgr.snapshot()
+            probe.assert_not_called()
+            cg.assert_not_called()
+            self.assertFalse(snap.binaries_present)
+            self.assertFalse(snap.grafana_running)
+
+    def test_http_ready_short_circuits_grafana_probe_when_tree_absent(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            with mock.patch.object(mgr, "_grafana_tree_present", return_value=False):
+                with mock.patch.object(nv, "check_loki", return_value=_ok()):
+                    with mock.patch.object(
+                        nv, "check_prometheus", return_value=_ok()
+                    ):
+                        with mock.patch.object(nv, "check_grafana") as cg:
+                            ok, loki, prom, grafana = mgr._http_ready()
+            self.assertFalse(ok)
+            self.assertTrue(loki.ok)
+            self.assertTrue(prom.ok)
+            self.assertFalse(grafana.ok)
+            self.assertIn("tree missing", grafana.detail)
+            cg.assert_not_called()
+
     def test_start_reuses_already_ready(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             mgr = nv.NativeTelemetryManager(tmp)
-            ok = ProbeResult(True, "u", "ok")
-            with mock.patch.object(mgr, "_http_ready", return_value=(True, ok, ok)):
+            ok = _ok()
+            with mock.patch.object(
+                mgr, "_http_ready", return_value=(True, ok, ok, ok)
+            ):
                 st = mgr.start(ensure_bins=False, wait=False)
             self.assertTrue(st.running)
             self.assertIn("running", st.detail.lower())
+            self.assertIsNotNone(st.grafana)
+
+    def test_start_does_not_early_return_when_grafana_down(self) -> None:
+        """Loki+Prom healthy but Grafana missing/failing must still ensure binaries."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            mgr = nv.NativeTelemetryManager(root)
+            ok, down = _ok(), _down()
+            with mock.patch.object(
+                mgr, "_http_ready", return_value=(False, ok, ok, down)
+            ):
+                with mock.patch.object(mgr, "_port_conflict_detail", return_value=None):
+                    with mock.patch.object(
+                        mgr, "ensure_binaries", return_value={}
+                    ) as ensure:
+                        with mock.patch.object(mgr, "write_configs"):
+                            with mock.patch.object(
+                                mgr, "_grafana_tree_present", return_value=False
+                            ):
+                                with mock.patch.object(
+                                    mgr,
+                                    "_bin",
+                                    side_effect=lambda n: root / "bin" / n,
+                                ):
+                                    (root / "bin").mkdir(parents=True)
+                                    (root / "bin" / "loki").write_text(
+                                        "x", encoding="utf-8"
+                                    )
+                                    (root / "bin" / "prometheus").write_text(
+                                        "x", encoding="utf-8"
+                                    )
+                                    st = mgr.start(ensure_bins=True, wait=False)
+            ensure.assert_called_once()
+            self.assertFalse(st.running)
+            self.assertIn("grafana", st.detail.lower())
+
+    def test_force_ensure_stops_grafana_before_tree_replace(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            mgr._grafana = mock.Mock()
+            mgr._grafana.poll.return_value = None  # still running
+            with mock.patch.object(
+                mgr, "_grafana_needs_ensure", return_value=True
+            ):
+                with mock.patch.object(mgr, "_stop_grafana_only") as stop_g:
+                    with mock.patch(
+                        "telemetry.native.ensure_telemetry_binaries",
+                        return_value={"loki": Path("l"), "prometheus": Path("p")},
+                    ):
+                        with mock.patch(
+                            "telemetry.native.ensure_grafana_tree",
+                            return_value=Path(tmp) / "grafana",
+                        ) as ensure_tree:
+                            with mock.patch(
+                                "telemetry.native.ensure_grafana_kafka_plugin",
+                                return_value=Path(tmp) / "plugins",
+                            ):
+                                mgr.ensure_binaries(force=True)
+            stop_g.assert_called_once()
+            ensure_tree.assert_called_once()
+            self.assertTrue(ensure_tree.call_args.kwargs.get("force"))
 
     def test_uninstall_removes_bins_and_data(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
