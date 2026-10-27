@@ -1388,7 +1388,8 @@ def _proxy_control(
             headers["Content-Type"] = ct_override
     req = urllib.request.Request(target, data=body or None, headers=headers, method=method)
     # Device register/update/delete SSH playbooks can exceed 30s.
-    timeout = 120 if method in ("POST", "PUT", "PATCH", "DELETE") else 30
+    # GET summaries fan out many Prom/Loki queries; keep headroom above that.
+    timeout = 120 if method in ("POST", "PUT", "PATCH", "DELETE") else 60
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()

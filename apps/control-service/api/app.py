@@ -55,6 +55,8 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        from .query import close_http_client
+
         renewer = state.fake_cert_renewer
         if renewer is not None and renewer.enabled:
             renewer.start()
@@ -63,6 +65,7 @@ def create_app(
         finally:
             if renewer is not None:
                 renewer.stop()
+            close_http_client()
 
     app = FastAPI(title="iot-gateway-control", version="0.1.0", lifespan=lifespan)
     app.state.control = state
