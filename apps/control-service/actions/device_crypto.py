@@ -25,11 +25,13 @@ DEFAULT_SCHEMA: dict[str, Any] = {
     "properties": {},
 }
 
-# Stricter lab schema for fake sensors (supports schema attack toggles).
+# Default fake schema. additionalProperties stays true so the manufacturing
+# sample payload (docs/samples/fake-sensor-payload.json) validates; schema
+# attack toggles that need a closed schema rewrite this file when enabled.
 FAKE_DEFAULT_SCHEMA: dict[str, Any] = {
     "schema_id": "default",
     "type": "object",
-    "additionalProperties": False,
+    "additionalProperties": True,
     "required": ["device_id"],
     "properties": {
         "device_id": {"type": "string", "const": "@device_id"},

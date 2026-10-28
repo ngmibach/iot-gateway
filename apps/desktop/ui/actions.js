@@ -627,10 +627,10 @@
           ),
         { prefix: "fake", devicePassword: password }
       );
-      const status = (data.device && data.device.fake && data.device.fake.status) || "";
+      const status = (data.device && data.device.fake && data.device.fake.status) || "stopped";
       const okLine =
-        status === "running" || !status
-          ? "Fake sensor running. Certs are managed by this app — open Simulate to drive it."
+        status === "stopped" || !status
+          ? "Fake sensor created (stopped). Certs are managed by this app — open Simulate and press Start to activate it."
           : `Fake sensor created (${escapeHtml(status)}). Certs are managed by this app — open Simulate to drive it.`;
       $("fake-msg").innerHTML = `<div class="okmsg">${okLine}</div>`;
       // Fake mTLS is auto-fed/renewed by the monitoring app — no operator cert zip.

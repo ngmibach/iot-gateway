@@ -8,11 +8,14 @@ Wants=network-online.target
 Type=simple
 NetworkNamespacePath=/run/netns/iotgw-fake-%i
 Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
+Environment=PYTHONPATH=/opt/iot-gateway-agent
 EnvironmentFile=-/etc/iot-gateway-agent.env
 ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id %i
 Restart=on-failure
 RestartSec=3
-WorkingDirectory=/var/lib/iot-gateway-agent/fake/%i
+# Package lives under /opt/iot-gateway-agent (same as the agent unit). Device
+# config/certs are resolved via IOTGW_AGENT_DATA, not WorkingDirectory.
+WorkingDirectory=/opt/iot-gateway-agent
 StandardOutput=append:/var/lib/iot-gateway-agent/fake/%i/run.log
 StandardError=append:/var/lib/iot-gateway-agent/fake/%i/run.log
 

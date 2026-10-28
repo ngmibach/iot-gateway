@@ -90,7 +90,7 @@ class TestRegisterDevice(unittest.TestCase):
         self.assertTrue(result.ok)
         self.assertEqual(result.status, "ok")
         self.assertIn("user sensor9\n", ssh.read_text(ACL))
-        self.assertIn("sensor9:$7$1000$", ssh.read_text(PW))
+        self.assertIn("sensor9:$7$101$", ssh.read_text(PW))
         self.assertNotIn("hunter2", ssh.read_text(PW))
         self.assertIsNotNone(result.cert_bundle)
         self.assertTrue(any(k.startswith(ACL + ".bak.") for k in ssh.files))

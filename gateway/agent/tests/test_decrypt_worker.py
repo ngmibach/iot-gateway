@@ -87,9 +87,11 @@ class DecryptWorkerTlsTests(unittest.TestCase):
             fake_client.connect.side_effect = _connect
 
             # _run does `import paho.mqtt.client as mqtt` — seed sys.modules.
+            import ssl
             import sys
             import types
 
+            fake_ctx = mock.MagicMock()
             paho_mod = types.ModuleType("paho")
             mqtt_pkg = types.ModuleType("paho.mqtt")
             with mock.patch.dict(
@@ -99,15 +101,16 @@ class DecryptWorkerTlsTests(unittest.TestCase):
                     "paho.mqtt": mqtt_pkg,
                     "paho.mqtt.client": fake_mqtt,
                 },
-            ):
+            ), mock.patch("ssl.SSLContext", return_value=fake_ctx):
                 worker._run()
 
-            fake_client.tls_set.assert_called_once()
-            kwargs = fake_client.tls_set.call_args.kwargs
-            self.assertEqual(kwargs["ca_certs"], str(ca))
-            self.assertEqual(kwargs["certfile"], str(cert))
-            self.assertEqual(kwargs["keyfile"], str(key))
-            self.assertIn("tls_version", kwargs)
+            fake_client.tls_set_context.assert_called_once_with(fake_ctx)
+            self.assertFalse(fake_ctx.check_hostname)
+            self.assertEqual(fake_ctx.verify_mode, ssl.CERT_REQUIRED)
+            fake_ctx.load_verify_locations.assert_called_once_with(cafile=str(ca))
+            fake_ctx.load_cert_chain.assert_called_once_with(
+                certfile=str(cert), keyfile=str(key)
+            )
             fake_client.username_pw_set.assert_called_once()
 
     def test_tls_disabled_without_paths(self) -> None:

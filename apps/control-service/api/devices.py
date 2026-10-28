@@ -498,11 +498,10 @@ def post_create_fake_device(
                     detail=installed.message or "failed to install fake files",
                 )
 
-            started = enable_and_start_unit(
-                ssh, user_id, sudo_password=sudo_password, install_root=install_root
-            )
-            unit_ok = started.ok
-            unit_msg = started.message or ""
+            # Leave the unit installed but stopped — operator starts it from Simulate.
+            stopped = stop_fake_unit(ssh, user_id, sudo_password=sudo_password)
+            unit_ok = stopped.ok
+            unit_msg = stopped.message or ""
     except HTTPException:
         raise
     except ValueError as exc:
@@ -534,13 +533,14 @@ def post_create_fake_device(
         "netns": alloc.netns,
         "unit": alloc.unit,
         "bridge": alloc.bridge,
-        "status": "running" if unit_ok else "error",
+        # Created stopped; Simulate → Start activates publishing.
+        "status": "stopped" if unit_ok else "error",
         "send_interval_ms": int(body.send_interval_ms),
         "topic": publish_topic,
         "behaviors": dict(DEFAULT_BEHAVIORS),
         "cert_fed_at": fed_at,
         "cert_feed_fingerprint": result.cert_fingerprint,
-        "last_error": None if unit_ok else (unit_msg or "unit start failed")[:400],
+        "last_error": None if unit_ok else (unit_msg or "failed to leave unit stopped")[:400],
     }
     prev_meta = _meta_dict(existing) if existing else {}
     meta = merge_device_meta(
@@ -575,7 +575,7 @@ def post_create_fake_device(
         device_id=user_id,
         detail={
             "ip": alloc.ip,
-            "status": "running" if unit_ok else "error",
+            "status": "stopped" if unit_ok else "error",
             "cert_fingerprint": result.cert_fingerprint,
             "kafka_topic": kafka_topic,
         },
@@ -599,9 +599,11 @@ def post_create_fake_device(
         )
 
     status_str = result.status if unit_ok else "degraded"
-    message = result.message or "Fake sensor created."
-    if not unit_ok:
-        message = f"{message} Unit start failed: {unit_msg}".strip()
+    message = result.message or "Fake sensor created (stopped). Start it from Simulate."
+    if unit_ok:
+        message = "Fake sensor created (stopped). Start it from Simulate."
+    else:
+        message = f"{message} Leave-stopped failed: {unit_msg}".strip()
 
     return RegisterDeviceResponse(
         device=_device_out(device),

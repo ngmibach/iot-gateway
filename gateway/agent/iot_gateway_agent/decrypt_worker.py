@@ -489,14 +489,20 @@ class DecryptWorker:
             client.username_pw_set(self.username, self.password or None)
         if self.tls_enabled:
             assert self.tls_ca and self.tls_cert and self.tls_key
-            client.tls_set(
-                ca_certs=str(self.tls_ca),
-                certfile=str(self.tls_cert),
-                keyfile=str(self.tls_key),
-                tls_version=_tls_version(),
-            )
+            # Broker cert SAN is the gateway LAN IP; decrypt connects to
+            # 127.0.0.1 so hostname verification would fail. Match fake-sensor
+            # client: verify the CA chain, skip hostname match for IP connect.
+            ctx = ssl.SSLContext(_tls_version())
+            strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+            if strict:
+                ctx.verify_flags &= ~strict
+            ctx.verify_mode = ssl.CERT_REQUIRED
+            ctx.check_hostname = False
+            ctx.load_verify_locations(cafile=str(self.tls_ca))
+            ctx.load_cert_chain(certfile=str(self.tls_cert), keyfile=str(self.tls_key))
+            client.tls_set_context(ctx)
             logger.info(
-                "decrypt worker TLS enabled ca=%s cert=%s",
+                "decrypt worker TLS enabled ca=%s cert=%s (hostname check off)",
                 self.tls_ca,
                 self.tls_cert,
             )
