@@ -81,6 +81,24 @@ def _cert_meta(pem: bytes) -> tuple[Optional[datetime], Optional[str]]:
         return None, None
 
 
+def _sudo_run(
+    ssh: "SSHClient",
+    command: str,
+    *,
+    sudo_password: str | None = None,
+    timeout: float | None = 300.0,
+):
+    """Run ``command`` as root (CA key / serial live under mosquitto-owned certs/)."""
+    quoted = shell_quote(command)
+    if sudo_password:
+        return ssh.run(
+            f"sudo -S -p '' -- sh -c {quoted}",
+            timeout=timeout,
+            stdin=sudo_password,
+        )
+    return ssh.run(f"sudo -n -- sh -c {quoted}", timeout=timeout)
+
+
 def sign_csr_on_gateway(
     ssh: "SSHClient",
     paths: GatewayPaths,
@@ -90,10 +108,16 @@ def sign_csr_on_gateway(
     days: int = 730,
     reject_default_admin_passphrase: bool = True,
     extfile_content: Optional[str] = None,
+    sudo_password: str | None = None,
 ) -> SignedClientCert:
     """SFTP CSR + passin file (0600), openssl sign on gateway, unlink temps.
 
     Never uses ``-passin pass:`` on remote argv.
+
+    Install chowns ``certs/`` (including ``ca.key``) to ``mosquitto``, so the
+    sign step runs under ``sudo``. The CA serial file is staged under ``/tmp``
+    (``-CAserial``) because ``-CAcreateserial`` would try to write ``ca.srl``
+    beside the CA as the login user and fail with Permission denied.
 
     ``extfile_content`` is written to a 0600 tmp and passed as ``-extfile``
     (e.g. ``subjectAltName=IP:GATEWAY_IP`` for server certs — K15).
@@ -107,13 +131,27 @@ def sign_csr_on_gateway(
     remote_csr = f"/tmp/iotgw-csr-{token}.csr"
     remote_crt = f"/tmp/iotgw-crt-{token}.crt"
     remote_pass = f"/tmp/iotgw-ca-pass-{token}"
+    remote_srl = f"/tmp/iotgw-ca-srl-{token}"
     remote_ext = f"/tmp/iotgw-ext-{token}.cnf" if extfile_content is not None else None
+    ca_srl = f"{paths.certs_dir}/ca.srl"
 
     try:
         ssh.write_bytes(remote_csr, csr_pem, mode=0o600)
         ssh.write_bytes(remote_pass, ca_passphrase.encode("utf-8"), mode=0o600)
         if remote_ext is not None and extfile_content is not None:
             ssh.write_bytes(remote_ext, extfile_content.encode("utf-8"), mode=0o600)
+
+        # Seed serial from existing ca.srl when present; else start at 01.
+        seed = _sudo_run(
+            ssh,
+            f"if [ -f {shell_quote(ca_srl)} ]; then "
+            f"cp {shell_quote(ca_srl)} {shell_quote(remote_srl)}; "
+            f"else printf '01\\n' > {shell_quote(remote_srl)}; fi && "
+            f"chmod 600 {shell_quote(remote_srl)}",
+            sudo_password=sudo_password,
+            timeout=30.0,
+        )
+        seed.check()
 
         # passin file: path is unquoted; token paths have no spaces/metachars.
         cmd = (
@@ -122,13 +160,25 @@ def sign_csr_on_gateway(
             f" -CA {shell_quote(paths.ca_crt)}"
             f" -CAkey {shell_quote(paths.ca_key)}"
             f" -passin file:{remote_pass}"
-            " -CAcreateserial"
+            f" -CAserial {shell_quote(remote_srl)}"
             f" -out {shell_quote(remote_crt)}"
             f" -days {int(days)}"
         )
         if remote_ext is not None:
             cmd += f" -extfile {shell_quote(remote_ext)}"
-        ssh.run(cmd, timeout=300).check()
+        _sudo_run(
+            ssh, cmd, sudo_password=sudo_password, timeout=300.0
+        ).check()
+
+        # Persist serial for the next issuance; keep mosquitto ownership.
+        _sudo_run(
+            ssh,
+            f"cp {shell_quote(remote_srl)} {shell_quote(ca_srl)} && "
+            f"chmod 644 {shell_quote(ca_srl)} && "
+            f"chown mosquitto:mosquitto {shell_quote(ca_srl)} 2>/dev/null || true",
+            sudo_password=sudo_password,
+            timeout=30.0,
+        ).check()
 
         client_crt = ssh.read_bytes(remote_crt)
         ca_crt = ssh.read_bytes(paths.ca_crt)
@@ -140,11 +190,20 @@ def sign_csr_on_gateway(
             fingerprint_sha256=fp,
         )
     finally:
-        for path in (remote_csr, remote_crt, remote_pass, remote_ext):
+        for path in (remote_csr, remote_crt, remote_pass, remote_srl, remote_ext):
             if path is None:
                 continue
             try:
                 ssh.unlink(path)
+            except Exception:
+                pass
+            try:
+                _sudo_run(
+                    ssh,
+                    f"rm -f {shell_quote(path)}",
+                    sudo_password=sudo_password,
+                    timeout=15.0,
+                )
             except Exception:
                 pass
 

@@ -81,9 +81,47 @@ def _write_kafka_catalog(
     ssh: "SSHClient",
     paths: GatewayPaths,
     catalog: TopicCatalog,
+    *,
+    sudo_password: str | None = None,
 ) -> None:
-    ssh.run(f"mkdir -p {shell_quote(paths.kafka_dir)}")
-    ssh.write_text(paths.kafka_topics_catalog, catalog.to_json(), mode=0o644)
+    """Write topics.json; chown kafka/ when root-owned so SFTP temp files work.
+
+    Install leaves ``kafka/`` root-owned; atomic SFTP write creates
+    ``topics.json.tmp.*`` beside the catalog and fails with
+    ``[Errno 13] Permission denied`` unless the directory is writable.
+    """
+    err = _ensure_data_subdir_writable(
+        ssh, paths.kafka_dir, sudo_password=sudo_password
+    )
+    body = catalog.to_json()
+    if err is None:
+        try:
+            ssh.write_text(paths.kafka_topics_catalog, body, mode=0o644)
+            return
+        except (OSError, IOError, PermissionError):
+            pass
+    # Fallback: stage under /tmp and sudo mv (same pattern as Mosquitto secrets).
+    token = secrets.token_hex(8)
+    remote_tmp = f"/tmp/iotgw-kafka-topics-{token}.json"
+    ssh.write_text(remote_tmp, body, mode=0o644)
+    owner = _login_owner(ssh)
+    result = _sudo(
+        ssh,
+        f"mkdir -p {shell_quote(paths.kafka_dir)} && "
+        f"mv {shell_quote(remote_tmp)} {shell_quote(paths.kafka_topics_catalog)} && "
+        f"chmod 644 {shell_quote(paths.kafka_topics_catalog)} && "
+        f"chown {shell_quote(owner)} {shell_quote(paths.kafka_dir)} "
+        f"{shell_quote(paths.kafka_topics_catalog)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
+    )
+    if result.exit_code != 0:
+        ssh.run(f"rm -f {shell_quote(remote_tmp)}")
+        detail = (result.stderr or result.stdout or err or "").strip()[:300]
+        raise PermissionError(
+            f"cannot write {paths.kafka_topics_catalog}: "
+            f"{detail or 'permission denied'}"
+        )
 
 
 def gateway_kafka_capacity(
@@ -116,6 +154,7 @@ def _ensure_kafka_topic_slot(
     user_id: str,
     topic_retention_bytes: int | None,
     total_storage_bytes: int | None,
+    sudo_password: str | None = None,
 ) -> tuple[TopicCatalog, dict[str, Any]]:
     """Reserve a Kafka topic for ``user_id`` or raise CapacityExceededError."""
     catalog = _read_kafka_catalog(ssh, paths)
@@ -152,7 +191,9 @@ def _ensure_kafka_topic_slot(
             total_storage_bytes=total,
         )
     record = catalog.upsert_device(user_id, retention_bytes=retention)
-    _write_kafka_catalog(ssh, paths, catalog)
+    _write_kafka_catalog(
+        ssh, paths, catalog, sudo_password=sudo_password
+    )
     # Apply retention on the local KRaft broker when installed.
     try:
         from provisioner.kafka_install import create_or_update_topic, kafka_present
@@ -197,6 +238,71 @@ def _sudo(
             stdin=sudo_password,
         )
     return ssh.run(f"sudo -n -- sh -c {quoted}", timeout=timeout)
+
+
+def _login_owner(ssh: "SSHClient") -> str:
+    """Resolve ``user:group`` for the SSH login (not root under sudo sh -c)."""
+    who = ssh.run(
+        "printf '%s:%s\\n' \"$(id -un)\" \"$(id -gn)\"",
+        timeout=15.0,
+    )
+    owner = (who.stdout or "").strip().splitlines()
+    if who.exit_code == 0 and owner and ":" in owner[0]:
+        return owner[0].strip()
+    return "root:root"
+
+
+def _ensure_data_subdir_writable(
+    ssh: "SSHClient",
+    directory: str,
+    *,
+    sudo_password: str | None = None,
+) -> str | None:
+    """mkdir ``directory`` and chown to the SSH login user.
+
+    Returns an error message on failure, or ``None`` on success.
+    ``/var/lib/iot-gateway-agent`` subdirs are often root-owned after Install,
+    so SFTP atomic writes (``.tmp.*`` beside the target) raise Errno 13.
+    """
+    owner = _login_owner(ssh)
+    result = _sudo(
+        ssh,
+        f"mkdir -p {shell_quote(directory)} && "
+        f"chown -R {shell_quote(owner)} {shell_quote(directory)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
+    )
+    if result.exit_code != 0:
+        return (result.stderr or result.stdout or "").strip()[:300] or (
+            f"failed to prepare {directory}"
+        )
+    return None
+
+
+def _backup_kafka_catalog(
+    ssh: "SSHClient",
+    paths: GatewayPaths,
+    *,
+    sudo_password: str | None = None,
+) -> str | None:
+    """Backup topics.json beside itself when writable; else under ``/tmp``."""
+    if not ssh.exists(paths.kafka_topics_catalog):
+        return None
+    _ensure_data_subdir_writable(
+        ssh, paths.kafka_dir, sudo_password=sudo_password
+    )
+    try:
+        return ssh.backup(paths.kafka_topics_catalog)
+    except (OSError, IOError, PermissionError):
+        pass
+    content = ssh.read_text(paths.kafka_topics_catalog)
+    bak = (
+        f"/tmp/iotgw-bak-kafka-topics."
+        f"{int(time.time())}.{secrets.token_hex(3)}"
+    )
+    body = content if content.endswith("\n") else content + "\n"
+    ssh.write_text(bak, body, mode=0o644)
+    return bak
 
 
 def _read_mosquitto_secret(
@@ -422,16 +528,19 @@ def register_device(
         material = key_material or generate_client_key_and_csr(cn=user_id)
 
         # 0 Kafka topic slot (storage-capped) — fail closed before MQTT writes.
+        # kafka/ is often root-owned; chown before SFTP backup/write (Errno 13).
         catalog_before = _read_kafka_catalog(ssh, paths)
         try:
-            if ssh.exists(paths.kafka_topics_catalog):
-                bak_kafka = ssh.backup(paths.kafka_topics_catalog)
+            bak_kafka = _backup_kafka_catalog(
+                ssh, paths, sudo_password=sudo_password
+            )
             _, kafka_meta = _ensure_kafka_topic_slot(
                 ssh,
                 paths,
                 user_id=user_id,
                 topic_retention_bytes=topic_retention_bytes,
                 total_storage_bytes=total_storage_bytes,
+                sudo_password=sudo_password,
             )
         except CapacityExceededError as exc:
             return RegisterResult(
@@ -452,9 +561,23 @@ def register_device(
 
         def _restore_kafka() -> None:
             if bak_kafka:
-                ssh.restore_backup(paths.kafka_topics_catalog, bak_kafka)
+                try:
+                    ssh.restore_backup(paths.kafka_topics_catalog, bak_kafka)
+                except (OSError, IOError, PermissionError):
+                    content = ssh.read_text(bak_kafka)
+                    _write_kafka_catalog(
+                        ssh,
+                        paths,
+                        TopicCatalog.from_json(content),
+                        sudo_password=sudo_password,
+                    )
             else:
-                _write_kafka_catalog(ssh, paths, catalog_before)
+                _write_kafka_catalog(
+                    ssh,
+                    paths,
+                    catalog_before,
+                    sudo_password=sudo_password,
+                )
 
         # 1 Backup (SFTP when writable; else /tmp via sudo cat)
         bak_acl = _backup_mosquitto_secret(
@@ -509,7 +632,7 @@ def register_device(
             _restore_kafka()
             raise
 
-        # 4 CSR sign
+        # 4 CSR sign (sudo: ca.key / ca.srl are mosquitto-owned after Install)
         try:
             signed = sign_csr_on_gateway(
                 ssh,
@@ -518,6 +641,7 @@ def register_device(
                 ca_passphrase,
                 days=cert_days,
                 reject_default_admin_passphrase=reject_default_admin_passphrase,
+                sudo_password=sudo_password,
             )
         except Exception:
             _restore_backups(
@@ -537,6 +661,23 @@ def register_device(
         schema_json: dict[str, Any] | None = None
         if provision_crypto:
             try:
+                # crypto/ and schemas/ are root-owned after Install; chown first.
+                _ensure_data_subdir_writable(
+                    ssh,
+                    f"{paths.data_dir}/crypto/devices",
+                    sudo_password=sudo_password,
+                )
+                _ensure_data_subdir_writable(
+                    ssh,
+                    f"{paths.data_dir}/schemas",
+                    sudo_password=sudo_password,
+                )
+                if also_fake_crypto_copy:
+                    _ensure_data_subdir_writable(
+                        ssh,
+                        f"{paths.data_dir}/fake/{user_id}",
+                        sudo_password=sudo_password,
+                    )
                 provisioned = provision_device_crypto(
                     ssh,
                     user_id,
@@ -565,7 +706,7 @@ def register_device(
 
         # 5 Reload mosquitto — files stay; do not roll back on failure.
         try:
-            mosq_mode = reload_mosquitto(ssh)
+            mosq_mode = reload_mosquitto(ssh, sudo_password=sudo_password)
         except Exception as exc:
             return RegisterResult(
                 ok=True,
@@ -614,6 +755,7 @@ def reissue_device_cert(
     cert_days: int = 730,
     reject_default_admin_passphrase: bool = True,
     key_material: ClientKeyMaterial | None = None,
+    sudo_password: str | None = None,
 ) -> RegisterResult:
     """Sign a fresh client cert for an existing device (no ACL/password changes)."""
     paths = _paths(install_root, data_dir)
@@ -627,6 +769,7 @@ def reissue_device_cert(
             ca_passphrase,
             days=cert_days,
             reject_default_admin_passphrase=reject_default_admin_passphrase,
+            sudo_password=sudo_password,
         )
         cert_kw = _cert_fields(material, signed)
         return RegisterResult(
@@ -686,7 +829,7 @@ def update_acl(
                 ssh, paths.acl, updated, sudo_password=sudo_password
             )
             _chmod_mosquitto_secrets(ssh, paths, sudo_password=sudo_password)
-            mosq_mode = reload_mosquitto(ssh)
+            mosq_mode = reload_mosquitto(ssh, sudo_password=sudo_password)
             return PlaybookResult(
                 ok=True,
                 message="ACL updated",
@@ -735,8 +878,9 @@ def unregister_device(
         bak_pw = _backup_mosquitto_secret(
             ssh, paths.passwords, sudo_password=sudo_password
         )
-        if ssh.exists(paths.kafka_topics_catalog):
-            bak_kafka = ssh.backup(paths.kafka_topics_catalog)
+        bak_kafka = _backup_kafka_catalog(
+            ssh, paths, sudo_password=sudo_password
+        )
 
         acl = fileops.remove_user_acl(
             _read_mosquitto_secret(
@@ -762,7 +906,9 @@ def unregister_device(
         removed = catalog.remove_device(user_id)
         if removed is not None:
             removed_topic = removed.topic
-            _write_kafka_catalog(ssh, paths, catalog)
+            _write_kafka_catalog(
+                ssh, paths, catalog, sudo_password=sudo_password
+            )
             try:
                 from provisioner.kafka_install import delete_topic, kafka_present
 
@@ -773,7 +919,7 @@ def unregister_device(
                 pass
 
         _chmod_mosquitto_secrets(ssh, paths, sudo_password=sudo_password)
-        mosq_mode = reload_mosquitto(ssh)
+        mosq_mode = reload_mosquitto(ssh, sudo_password=sudo_password)
         mosquitto_reloaded = True
 
         return PlaybookResult(

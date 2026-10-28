@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import unittest
 
 from actions.csr import generate_client_key_and_csr
@@ -46,12 +47,24 @@ def _base_files() -> dict[str, str]:
     }
 
 
+def _openssl_out_path(cmd: str) -> str | None:
+    """Extract ``-out`` path from a (possibly sudo-wrapped, shlex-quoted) openssl cmd."""
+    normalized = cmd.replace("'\"'\"'", "'")
+    match = re.search(r"-out\s+'([^']+)'", normalized)
+    if match:
+        return match.group(1)
+    match = re.search(r"-out\s+(\S+)", normalized)
+    if match:
+        return match.group(1).strip("'\"")
+    return None
+
+
 def _register_ok_handler(ssh: FakeSSH, signed_pem: bytes):
     def run_handler(cmd: str) -> CommandResult:
         if "openssl x509 -req" in cmd:
-            parts = cmd.split()
-            out_path = parts[parts.index("-out") + 1].strip("'")
-            ssh.files[out_path] = signed_pem
+            out_path = _openssl_out_path(cmd)
+            if out_path:
+                ssh.files[out_path] = signed_pem
         return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
 
     return run_handler
@@ -197,8 +210,9 @@ class TestRegisterDevice(unittest.TestCase):
 
         def run_handler(cmd: str) -> CommandResult:
             if "openssl x509 -req" in cmd:
-                out_path = cmd.split()[cmd.split().index("-out") + 1].strip("'")
-                ssh.files[out_path] = signed.client_crt_pem
+                out_path = _openssl_out_path(cmd)
+                if out_path:
+                    ssh.files[out_path] = signed.client_crt_pem
                 return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
             if "systemctl reload mosquitto" in cmd:
                 return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")
@@ -229,8 +243,9 @@ class TestRegisterDevice(unittest.TestCase):
 
         def run_handler(cmd: str) -> CommandResult:
             if "openssl x509 -req" in cmd:
-                out_path = cmd.split()[cmd.split().index("-out") + 1].strip("'")
-                ssh.files[out_path] = signed.client_crt_pem
+                out_path = _openssl_out_path(cmd)
+                if out_path:
+                    ssh.files[out_path] = signed.client_crt_pem
                 return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
             if "systemctl reload mosquitto" in cmd:
                 return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="no")

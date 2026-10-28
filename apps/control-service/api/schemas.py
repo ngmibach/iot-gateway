@@ -286,6 +286,7 @@ class DiscoverSensorsResponse(BaseModel):
 class ReissueCertRequest(BaseModel):
     ca_passphrase: Optional[str] = None
     days: int = Field(default=730, ge=1, le=3650)
+    sudo_password: Optional[str] = None
 
 
 class ReissueCertResponse(BaseModel):

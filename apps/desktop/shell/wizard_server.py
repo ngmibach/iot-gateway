@@ -1307,6 +1307,9 @@ def _should_inject_sudo(method: str, path: str) -> bool:
         return True
     if method == "PATCH" and path.endswith("/fake"):
         return True
+    # Reissue signs with mosquitto-owned ca.key under sudo.
+    if method == "POST" and path.endswith("/reissue-cert"):
+        return True
     # Real-sensor View update re-runs register (ACL/password writes).
     if method == "PATCH" and "/devices/" in path and not path.endswith("/fake"):
         return True

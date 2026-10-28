@@ -526,6 +526,9 @@ def ensure_kafka_layout(
     """
     kafka_dir = f"{data_dir}/kafka"
     catalog = f"{kafka_dir}/topics.json"
+    # Own kafka/ as the SSH login user so day-2 SFTP catalog updates work
+    # (atomic write creates topics.json.tmp.* beside the file).
+    owner = _remote_login_owner(ssh)
     with tempfile.NamedTemporaryFile(
         "w", suffix=".json", delete=False, encoding="utf-8"
     ) as tmp:
@@ -540,7 +543,8 @@ def ensure_kafka_layout(
             f"if [ ! -f {shlex.quote(catalog)} ]; then "
             f"mv {shlex.quote(remote_tmp)} {shlex.quote(catalog)}; "
             f"else rm -f {shlex.quote(remote_tmp)}; fi && "
-            f"chmod 644 {shlex.quote(catalog)}",
+            f"chmod 644 {shlex.quote(catalog)} && "
+            f"chown -R {shlex.quote(owner)} {shlex.quote(kafka_dir)}",
             sudo_password=sudo_password,
             timeout=60.0,
         )

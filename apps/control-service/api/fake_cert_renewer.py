@@ -88,16 +88,17 @@ def evaluate_renew(
     return RenewDecision(False, "ok")
 
 
-def resolve_ca_passphrase(
-    *,
+def _resolve_keyring_secret(
     gateway_id: str,
-    settings_ca: str | None,
+    *,
+    kind: str,
     data_dir: Path | str | None = None,
     provider: Callable[[str], str | None] | None = None,
+    settings_value: str | None = None,
 ) -> str | None:
-    """Resolve CA passphrase: settings → provider → OS keyring → file fallback."""
-    if settings_ca:
-        return settings_ca
+    """Resolve a gateway secret: settings → provider → OS keyring → file fallback."""
+    if settings_value:
+        return settings_value
     if provider is not None:
         try:
             got = provider(gateway_id)
@@ -105,7 +106,7 @@ def resolve_ca_passphrase(
             got = None
         if got:
             return got
-    account = f"ca:{gateway_id}"
+    account = f"{kind}:{gateway_id}"
     try:
         import keyring
         from keyring.backends.fail import Keyring as FailKeyring
@@ -127,6 +128,38 @@ def resolve_ca_passphrase(
             except (OSError, json.JSONDecodeError):
                 pass
     return None
+
+
+def resolve_ca_passphrase(
+    *,
+    gateway_id: str,
+    settings_ca: str | None,
+    data_dir: Path | str | None = None,
+    provider: Callable[[str], str | None] | None = None,
+) -> str | None:
+    """Resolve CA passphrase: settings → provider → OS keyring → file fallback."""
+    return _resolve_keyring_secret(
+        gateway_id,
+        kind="ca",
+        data_dir=data_dir,
+        provider=provider,
+        settings_value=settings_ca,
+    )
+
+
+def resolve_sudo_password(
+    *,
+    gateway_id: str,
+    data_dir: Path | str | None = None,
+    provider: Callable[[str], str | None] | None = None,
+) -> str | None:
+    """Resolve gateway sudo password from provider / OS keyring / file fallback."""
+    return _resolve_keyring_secret(
+        gateway_id,
+        kind="sudo",
+        data_dir=data_dir,
+        provider=provider,
+    )
 
 
 def feed_and_record_certs(
@@ -228,6 +261,12 @@ class FakeCertRenewer:
             provider=self.ca_provider,
         )
 
+    def _sudo_for(self, gateway_id: str) -> str | None:
+        return resolve_sudo_password(
+            gateway_id=gateway_id,
+            data_dir=self.data_dir,
+        )
+
     def renew_device(
         self,
         gateway: dict[str, Any],
@@ -265,12 +304,14 @@ class FakeCertRenewer:
             if ssh is None:
                 cm = self.open_ssh(gateway)
                 ssh = cm.__enter__()
+            sudo_pw = self._sudo_for(gid)
             result = reissue_device_cert(
                 ssh,
                 user_id=device_id,
                 ca_passphrase=ca_pass,
                 install_root=gateway["install_root"],
                 cert_days=int(self.client_cert_days),
+                sudo_password=sudo_pw,
             )
             if not result.ok:
                 return RenewResult(
@@ -317,6 +358,7 @@ class FakeCertRenewer:
                 client_key_pem=result.client_key_pem,
                 fingerprint=result.cert_fingerprint,
                 install_root=gateway["install_root"],
+                sudo_password=sudo_pw,
                 now=int(self.clock()),
             )
             if not fed.ok:

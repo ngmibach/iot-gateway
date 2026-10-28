@@ -76,11 +76,13 @@ class FakeSSH:
                 argv=command, exit_code=0, stdout=cat_out, stderr=""
             )
         if "openssl x509 -req" in command:
-            parts = command.split()
-            out_path = None
-            for i, p in enumerate(parts):
-                if p == "-out" and i + 1 < len(parts):
-                    out_path = parts[i + 1].strip("'")
+            normalized = command.replace("'\"'\"'", "'")
+            out_m = re.search(r"-out\s+'([^']+)'", normalized)
+            out_path = out_m.group(1) if out_m else None
+            if out_path is None:
+                out_m = re.search(r"-out\s+(\S+)", normalized)
+                if out_m:
+                    out_path = out_m.group(1).strip("'\"")
             if out_path:
                 self.files[out_path] = (
                     b"-----BEGIN CERTIFICATE-----\nFAKE\n-----END CERTIFICATE-----\n"
