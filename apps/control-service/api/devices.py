@@ -890,6 +890,7 @@ def post_feed_fake_cert(
                     ca_passphrase=ca_pass,
                     install_root=gw["install_root"],
                     cert_days=int(body.days),
+                    sudo_password=body.sudo_password,
                 )
                 if not result.ok:
                     raise HTTPException(
@@ -1362,6 +1363,7 @@ def post_reissue_cert(
                 ca_passphrase=ca_pass,
                 install_root=gw["install_root"],
                 cert_days=int(body.days),
+                sudo_password=body.sudo_password,
             )
             if not result.ok:
                 raise HTTPException(

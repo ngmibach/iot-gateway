@@ -176,6 +176,40 @@ class TestRegisterKafkaCapacity(unittest.TestCase):
         self.assertEqual(plan.registered_sensors, 2)
         self.assertEqual(plan.remaining_slots, 5)
 
+    def test_register_chowns_kafka_dir_via_sudo(self) -> None:
+        """Day-2 SFTP needs kafka/ owned by the login user (not root)."""
+        ssh = FakeSSH(_base_files())
+        mat = generate_client_key_and_csr("sensor_chown")
+        signed = local_self_sign_for_tests(mat)
+        ssh._run_handler = _register_ok_handler(ssh, signed.client_crt_pem)
+
+        result = register_device(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor_chown",
+            password="hunter2xx",
+            ip="10.0.0.42",
+            topic_rw="sensors/sensor_chown/#",
+            ca_passphrase="correct-horse",
+            key_material=mat,
+            sudo_password="s3cret",
+            total_storage_bytes=10 * DEFAULT_TOPIC_RETENTION_BYTES,
+            topic_retention_bytes=DEFAULT_TOPIC_RETENTION_BYTES,
+        )
+        self.assertTrue(result.ok, result.message)
+        joined = "\n".join(ssh.commands)
+        self.assertIn("kafka", joined)
+        self.assertTrue(
+            any(
+                "chown" in c and "kafka" in c and "sudo" in c
+                for c in ssh.commands
+            ),
+            msg=f"expected sudo chown of kafka dir; commands={ssh.commands!r}",
+        )
+        self.assertTrue(
+            any(stdin == "s3cret" for stdin in ssh.stdins),
+            msg="sudo password must be passed on stdin",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -65,9 +65,16 @@ class TestCsr(unittest.TestCase):
             raise FileNotFoundError(path)
 
         runs: list[str] = []
+        stdins: list[str | None] = []
 
-        def run(cmd: str, *, timeout: float | None = None) -> CommandResult:
+        def run(
+            cmd: str,
+            *,
+            timeout: float | None = None,
+            stdin: str | None = None,
+        ) -> CommandResult:
             runs.append(cmd)
+            stdins.append(stdin)
             return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
 
         unlinked: list[str] = []
@@ -83,9 +90,14 @@ class TestCsr(unittest.TestCase):
             mat.csr_pem,
             ca_passphrase="not-admin",
             days=30,
+            sudo_password="pi-sudo",
         )
         self.assertEqual(result.client_crt_pem, signed_local.client_crt_pem)
         self.assertTrue(any("-passin file:/tmp/iotgw-ca-pass-" in c for c in runs))
+        self.assertTrue(any("-CAserial" in c for c in runs))
+        self.assertFalse(any("-CAcreateserial" in c for c in runs))
+        self.assertTrue(any("sudo -S" in c for c in runs))
+        self.assertIn("pi-sudo", stdins)
         self.assertFalse(any("passin pass:" in c for c in runs))
         pass_files = [p for p in written if "iotgw-ca-pass-" in p]
         self.assertEqual(len(pass_files), 1)
