@@ -630,19 +630,12 @@
       const status = (data.device && data.device.fake && data.device.fake.status) || "";
       const okLine =
         status === "running" || !status
-          ? "Fake sensor running. Open Simulate to drive it."
-          : `Fake sensor created (${escapeHtml(status)}). Open Simulate to drive it.`;
+          ? "Fake sensor running. Certs are managed by this app — open Simulate to drive it."
+          : `Fake sensor created (${escapeHtml(status)}). Certs are managed by this app — open Simulate to drive it.`;
       $("fake-msg").innerHTML = `<div class="okmsg">${okLine}</div>`;
-      if (data.cert_bundle_token) {
-        renderDownloadCards($("fake-download"), gid, [
-          {
-            device_id: user_id,
-            cert_bundle_token: data.cert_bundle_token,
-            fingerprint_sha256:
-              (data.device && data.device.cert_fingerprint) || null,
-          },
-        ]);
-      }
+      // Fake mTLS is auto-fed/renewed by the monitoring app — no operator cert zip.
+      $("fake-download").classList.add("hidden");
+      $("fake-download").innerHTML = "";
       $("fake-pass").value = "";
       if ($("fake-ca-sudo")) $("fake-ca-sudo").value = "";
       if ($("fake-ca")) $("fake-ca").value = "";
@@ -697,7 +690,10 @@
       $("view-empty").classList.remove("hidden");
       $("view-msg").innerHTML = "";
       $("view-download").classList.add("hidden");
+      $("view-download").innerHTML = "";
       if ($("view-fake-meta")) $("view-fake-meta").classList.add("hidden");
+      if ($("view-fp-row")) $("view-fp-row").classList.remove("hidden");
+      if ($("btn-view-reissue")) $("btn-view-reissue").classList.remove("hidden");
       if ($("view-type-badge")) {
         $("view-type-badge").textContent = "";
         $("view-type-badge").className = "badge";
@@ -720,10 +716,12 @@
     $("view-remove-ip").checked = false;
     $("view-msg").innerHTML = "";
     $("view-download").classList.add("hidden");
+    $("view-download").innerHTML = "";
 
+    const isFake = !!device.is_fake;
     const badge = $("view-type-badge");
     if (badge) {
-      if (device.is_fake) {
+      if (isFake) {
         badge.textContent = "Fake";
         badge.className = "badge fake";
       } else {
@@ -731,9 +729,14 @@
         badge.className = "badge real";
       }
     }
+    // Fake certs are app-managed: hide operator fingerprint / re-issue / download.
+    const fpRow = $("view-fp-row");
+    if (fpRow) fpRow.classList.toggle("hidden", isFake);
+    const reissueBtn = $("btn-view-reissue");
+    if (reissueBtn) reissueBtn.classList.toggle("hidden", isFake);
     const fakeMeta = $("view-fake-meta");
     if (fakeMeta) {
-      if (device.is_fake) {
+      if (isFake) {
         fakeMeta.classList.remove("hidden");
         const fake = device.fake || {};
         const attack =
@@ -860,6 +863,12 @@
     const gid = requireGateway();
     const device_id = ($("view-id").value || "").trim();
     if (!device_id) throw new Error("Select a device first.");
+    const current = (devices || []).find((d) => d.id === device_id);
+    if (current && current.is_fake) {
+      throw new Error(
+        "Fake sensor certificates are renewed automatically by this app."
+      );
+    }
     $("view-msg").textContent = "Re-issuing certificate…";
     $("view-download").classList.add("hidden");
     $("btn-view-reissue").disabled = true;
@@ -889,7 +898,7 @@
       if (still) {
         $("view-device").value = still.id;
         fillViewForm(still);
-        if (data.cert_bundle_token) {
+        if (data.cert_bundle_token && !still.is_fake) {
           renderDownloadCards($("view-download"), gid, [
             {
               device_id: device_id,

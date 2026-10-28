@@ -136,7 +136,7 @@
 
       <div id="fake-form" class="hidden">
         <h3>Fake sensor</h3>
-        <p class="muted">Creates a test sensor on this gateway. Set rate and payload in Simulate after create.</p>
+        <p class="muted">Creates a test sensor on this gateway. Certificates are managed by this app. Set rate and payload in Simulate after create.</p>
         <div class="row">
           <label for="fake-user">
             Device ID
@@ -254,7 +254,7 @@
           <input type="checkbox" id="view-monitor" />
           <label for="view-monitor" style="min-width:auto">Monitor this device</label>
         </div>
-        <div class="row">
+        <div class="row" id="view-fp-row">
           <label>Fingerprint</label>
           <span class="mono" id="view-fp">—</span>
         </div>

@@ -162,7 +162,7 @@ Activities testing without extra LAN hardware.
 | **Registration → Create fake sensor** | Device ID, password, topics — allocates an IP on the private `iotgw-fake` bridge (`10.255.0.0/24`), creates a netns + veth, registers like a real sensor (MQTT user, Kafka topic, CA-signed client cert), feeds certs into the fake runtime, starts `iotgw-fake@<id>`. Uses the gateway sudo password saved at Install (injected by the wizard proxy). If no CA signing password is saved yet, **Generate CA passphrase** reuses that saved sudo (or asks once) |
 | **View** | Shows a **Fake** / **Real** badge; fakes show auto-renew status and **Open Simulate** |
 | **Simulate** | Fake devices only (after create): Start/Stop, send interval, MQTT topic, payload JSON, lab behavior toggles (omit/wrong client cert, skip/bad encryption, wrong password/topic), cert status line. Sample manufacturing payload: [`docs/samples/fake-sensor-payload.json`](docs/samples/fake-sensor-payload.json) |
-| **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only (real sensors still download a cert zip for the operator). TLS attack toggles pause auto-feed until cleared |
+| **Cert lifecycle** | The monitoring app **auto-renews and feeds** mTLS material for `is_fake` devices only — no operator cert zip, fingerprint, or Re-issue UI for fakes. Real sensors still download a cert zip. TLS attack toggles pause auto-feed until cleared |
 | **Capacity** | Each fake consumes one Kafka capacity slot (same formula as real sensors) |
 | **Uninstall / delete** | Deleting a fake tears down its unit + netns; Gateways → Clean up / Settings → Remove tears down **all** `iotgw-fake@*` units, leftover `iotgw-fake-*` netns, and the `iotgw-fake` bridge |
 

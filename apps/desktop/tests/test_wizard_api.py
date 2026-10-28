@@ -106,10 +106,12 @@ class WizardApiTests(unittest.TestCase):
         self.assertNotIn('id="fake-interval"', actions_html)
         self.assertNotIn('id="fake-payload"', actions_html)
         self.assertIn("Set rate and payload in Simulate", actions_html)
+        self.assertIn("Certificates are managed by this app", actions_html)
         self.assertIn('id="btn-fake-create"', actions_html)
         self.assertIn('id="btn-fake-cancel"', actions_html)
         self.assertIn('id="view-type-badge"', actions_html)
         self.assertIn('id="view-fake-meta"', actions_html)
+        self.assertIn('id="view-fp-row"', actions_html)
         self.assertIn('id="btn-open-simulate"', actions_html)
         self.assertIn("Open Simulate", actions_html)
         self.assertIn('id="panel-simulate"', actions_html)
@@ -167,6 +169,12 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("simStartStop", ajs)
         self.assertIn("omit_client_cert", ajs)
         self.assertIn("withCaRetry", ajs)
+        self.assertIn("Certs are managed by this app", ajs)
+        self.assertIn('view-fp-row', ajs)
+        self.assertIn(
+            "Fake sensor certificates are renewed automatically by this app.",
+            ajs,
+        )
         with urllib.request.urlopen(self.base + "/monitoring.html", timeout=5) as resp:
             mon = resp.read().decode("utf-8")
         self.assertIn("Monitoring", mon)

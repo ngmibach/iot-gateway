@@ -763,7 +763,8 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(body["device"]["fake"]["status"], "running")
         self.assertEqual(body["device"]["fake"]["send_interval_ms"], 500)
         self.assertEqual(body["kafka_topic"], "sensor.fake1")
-        self.assertIsNotNone(body["cert_bundle_token"])
+        # Fake certs are app-managed — no operator download token.
+        self.assertIsNone(body.get("cert_bundle_token"))
         reg.assert_called_once()
         self.assertEqual(reg.call_args.kwargs["ip"], "10.255.0.2")
         inst.assert_called_once()
