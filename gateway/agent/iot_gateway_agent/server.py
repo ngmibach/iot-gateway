@@ -63,7 +63,15 @@ def make_handler(
                     self._send_json(500, {"error": str(e)})
                 return
             if path == "/metrics" and metrics_fn is not None:
-                self._send_text(200, metrics_fn(), "text/plain; version=0.0.4; charset=utf-8")
+                try:
+                    self._send_text(
+                        200,
+                        metrics_fn(),
+                        "text/plain; version=0.0.4; charset=utf-8",
+                    )
+                except (BrokenPipeError, ConnectionResetError):
+                    # Scrape client timed out mid-write; nothing useful to log loudly.
+                    return
                 return
             self._send_json(404, {"error": "not found"})
 

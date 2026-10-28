@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import socket
+import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -369,6 +370,12 @@ def _host_metric_lines() -> list[str]:
     return lines
 
 
+# Avoid scrape stampedes: Prometheus scrape_timeout is 5–10s; if render ever
+# stalls, overlapping /metrics handlers peg the Pi and Gateway Metric shows
+# "no scrape". Serve a short-lived cached body under a single flight lock.
+_METRICS_CACHE_TTL_S = 1.0
+
+
 @dataclass
 class AgentMetrics:
     started_at: float = field(default_factory=time.time)
@@ -381,6 +388,9 @@ class AgentMetrics:
     shipper: LokiShipper | None = None
     kafka: SensorKafkaProducer | None = None
     denied_watcher: DeniedWatcher | None = None
+    _render_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    _cached_body: str = field(default="", repr=False)
+    _cached_at: float = field(default=0.0, repr=False)
 
     def refresh_mqtt_up(self) -> bool:
         """Child broker running, or system/external broker accepting TCP."""
@@ -429,6 +439,17 @@ class AgentMetrics:
         return pids
 
     def render(self) -> str:
+        """Prometheus text; cached briefly so concurrent scrapes share one render."""
+        now = time.time()
+        with self._render_lock:
+            if self._cached_body and (now - self._cached_at) < _METRICS_CACHE_TTL_S:
+                return self._cached_body
+            body = self._render_uncached()
+            self._cached_body = body
+            self._cached_at = now
+            return body
+
+    def _render_uncached(self) -> str:
         uptime = time.time() - self.started_at
         ok = self.decrypt_worker.messages_ok if self.decrypt_worker else 0
         fail = self.decrypt_worker.messages_fail if self.decrypt_worker else 0
