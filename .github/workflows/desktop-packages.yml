@@ -92,6 +92,18 @@ jobs:
           IOTGW_PYI_CONSOLE: "0"
         run: bash apps/desktop/packaging/build_windows.sh
 
+      # Optional Authenticode: set repo secrets WINDOWS_CODE_SIGN_PFX_BASE64 +
+      # WINDOWS_CODE_SIGN_PFX_PASSWORD so Chrome/Defender stop treating the
+      # GitHub Release EXE as an unsigned PyInstaller drop. Skips cleanly when unset.
+      - name: Authenticode sign Windows exe
+        shell: pwsh
+        env:
+          IOTGW_DIST: ${{ github.workspace }}/apps/desktop/dist
+          WINDOWS_CODE_SIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODE_SIGN_PFX_BASE64 }}
+          WINDOWS_CODE_SIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODE_SIGN_PFX_PASSWORD }}
+          WINDOWS_CODE_SIGN_TIMESTAMP_URL: ${{ vars.WINDOWS_CODE_SIGN_TIMESTAMP_URL }}
+        run: ./apps/desktop/packaging/sign_windows_ci.ps1
+
       - name: Upload Windows exe
         uses: actions/upload-artifact@v4
         with:
@@ -167,6 +179,11 @@ jobs:
             Built from branch `${{ steps.tag.outputs.branch }}`.
             Push to **`linux`** rebuilds the AppImage; push to **`windows`** rebuilds the `.exe`.
             Same-named assets on this release are replaced on each successful build.
+
+            Windows builds are Authenticode-signed in CI when the
+            `WINDOWS_CODE_SIGN_PFX_*` repository secrets are configured.
+            Unsigned PyInstaller EXEs are often blocked by Chrome Safe Browsing
+            and Defender (`Trojan:Win32/Wacatac.*` false positives).
 
             No Python, Rust, or CLI setup required. Day-to-day work is done in the app UI.
           files: |

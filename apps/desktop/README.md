@@ -8,7 +8,7 @@ Download from [Releases / desktop-latest](https://github.com/ngmibach/iot-gatewa
 
 | Platform | File | First run |
 |----------|------|-----------|
-| Windows | `IoTGatewayMonitor.exe` | Double-click. **WSL is not required.** Loki, Prometheus, and Grafana run as native Windows processes under `%APPDATA%\IoTGatewayMonitor`. If SmartScreen says unrecognized: **More info → Run anyway**. |
+| Windows | `IoTGatewayMonitor.exe` | Double-click. **WSL is not required.** Loki, Prometheus, and Grafana run as native Windows processes under `%APPDATA%\IoTGatewayMonitor`. CI signs with Authenticode when `WINDOWS_CODE_SIGN_PFX_BASE64` + `WINDOWS_CODE_SIGN_PFX_PASSWORD` secrets exist; otherwise SmartScreen/Chrome may block (**More info → Run anyway**). |
 | Linux | `IoTGatewayMonitor-*.AppImage` | `chmod +x` once, then double-click. |
 
 1. First launch: Setup Wizard — **Install monitoring** (downloads Loki + Prometheus + Grafana), then **Open app**.

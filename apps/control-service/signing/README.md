@@ -15,8 +15,14 @@ This is distinct from gateway MQTT/TLS certs (`certs/` / rotate-server).
 ```
 
 1. **Build (CI or developer laptop)**  
-   `cargo tauri build` → `src-tauri/target/release/bundle/`  
-   (`.msi` / NSIS `.exe` / `.AppImage`). Do **not** put org Authenticode/GPG secrets in CI for v1.
+   PyInstaller produces `IoTGatewayMonitor.exe` / AppImage (see
+   `apps/desktop/packaging/`).  
+   **Optional CI Authenticode:** set GitHub Actions secrets
+   `WINDOWS_CODE_SIGN_PFX_BASE64` (base64 of the `.pfx`) and
+   `WINDOWS_CODE_SIGN_PFX_PASSWORD`, then the `desktop-packages` workflow
+   signs the EXE via `packaging/sign_windows_ci.ps1` before publishing
+   `desktop-latest`. Without those secrets the release stays unsigned
+   (Chrome/Defender may block download — use Admin → Code Signing instead).
 
 2. **Admin unlock**  
    Open `admin.html` (Setup Wizard → Admin). Set/unlock local PIN (OS keyring).
