@@ -19,7 +19,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 
 | Platform | File | How to run |
 |----------|------|------------|
-| **Windows** | `IoTGatewayMonitor.exe` | Download → double-click (WSL not required). If SmartScreen says unrecognized: **More info → Run anyway** (sign via Admin → Code Signing for full trust). |
+| **Windows** | `IoTGatewayMonitor.exe` | Download → double-click (WSL not required). CI Authenticode-signs when `WINDOWS_CODE_SIGN_PFX_*` secrets are set; otherwise SmartScreen/Chrome may block unsigned PyInstaller builds (**More info → Run anyway**, or sign via Admin → Code Signing). |
 | **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | `chmod +x` once → double-click |
 
 ### First-run Wizard (all in the UI)
