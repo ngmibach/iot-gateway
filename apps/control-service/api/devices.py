@@ -581,10 +581,8 @@ def post_create_fake_device(
         },
     )
 
-    token = None
-    if result.cert_bundle:
-        token = cert_cache.put(gid, user_id, result.cert_bundle)
-
+    # Fake mTLS is fed into the gateway runtime and auto-renewed by the
+    # monitoring app — do not expose a one-time operator cert-bundle download.
     capacity_out = None
     if isinstance(kafka_capacity_raw, dict):
         capacity_out = KafkaCapacityOut(
@@ -607,7 +605,7 @@ def post_create_fake_device(
 
     return RegisterDeviceResponse(
         device=_device_out(device),
-        cert_bundle_token=token,
+        cert_bundle_token=None,
         status=status_str,
         message=message,
         idempotent=idempotent,
