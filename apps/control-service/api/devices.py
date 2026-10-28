@@ -108,6 +108,7 @@ def _fake_out(meta: dict[str, Any]) -> FakeDeviceOut | None:
         return FakeDeviceOut()
     interval = block.get("send_interval_ms")
     fed_at = block.get("cert_fed_at")
+    payload = block.get("payload")
     return FakeDeviceOut(
         ip=str(block["ip"]) if block.get("ip") is not None else None,
         status=str(block["status"]) if block.get("status") is not None else None,
@@ -117,6 +118,7 @@ def _fake_out(meta: dict[str, Any]) -> FakeDeviceOut | None:
         unit=str(block["unit"]) if block.get("unit") is not None else None,
         bridge=str(block["bridge"]) if block.get("bridge") is not None else None,
         behaviors=_behaviors_out(block.get("behaviors")),
+        payload=payload if payload is not None else None,
         cert_fed_at=int(fed_at) if fed_at is not None else None,
         cert_feed_fingerprint=(
             str(block["cert_feed_fingerprint"])
@@ -528,6 +530,17 @@ def post_create_fake_device(
     kafka_retention = (result.details or {}).get("kafka_retention_bytes")
     kafka_capacity_raw = (result.details or {}).get("kafka_capacity")
     fed_at = int(time.time()) if result.client_crt_pem else None
+    # Mirror the payload written to gateway payload.json so Simulate can restore it.
+    if body.payload is None:
+        create_payload: Any = {"device_id": user_id, "hello": 1}
+    elif isinstance(body.payload, (bytes, bytearray)):
+        create_payload = json.loads(body.payload.decode("utf-8"))
+    elif isinstance(body.payload, str):
+        create_payload = (
+            json.loads(body.payload) if body.payload.strip() else {"hello": 1}
+        )
+    else:
+        create_payload = body.payload
     fake_meta = {
         "ip": alloc.ip,
         "netns": alloc.netns,
@@ -538,6 +551,7 @@ def post_create_fake_device(
         "send_interval_ms": int(body.send_interval_ms),
         "topic": publish_topic,
         "behaviors": dict(DEFAULT_BEHAVIORS),
+        "payload": create_payload,
         "cert_fed_at": fed_at,
         "cert_feed_fingerprint": result.cert_fingerprint,
         "last_error": None if unit_ok else (unit_msg or "failed to leave unit stopped")[:400],
@@ -735,6 +749,16 @@ def patch_fake_device(
         fake_update["topic"] = updates["topic"]
     if "behaviors" in updates:
         fake_update["behaviors"] = updates["behaviors"]
+    if body.payload is not None:
+        # Keep registry copy in sync with gateway payload.json for Simulate restore.
+        if isinstance(body.payload, (bytes, bytearray)):
+            fake_update["payload"] = json.loads(body.payload.decode("utf-8"))
+        elif isinstance(body.payload, str):
+            fake_update["payload"] = (
+                json.loads(body.payload) if body.payload.strip() else {"hello": 1}
+            )
+        else:
+            fake_update["payload"] = body.payload
     meta = merge_device_meta(prev, is_fake=True, fake=fake_update)
     device = registry.upsert_device(gid, device_id, meta_json=meta)
     registry.audit(

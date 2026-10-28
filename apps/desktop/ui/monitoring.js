@@ -10,6 +10,8 @@
   let lastWarnings = [];
   let activitiesSensors = [];
   let selectedSensorId = null;
+  /** Per-chart zoom state for Activities line charts: { values, opts, window }. */
+  const chartZoom = Object.create(null);
 
   function tabFromHash() {
     const h = (location.hash || "").replace(/^#/, "").toLowerCase();
@@ -101,22 +103,59 @@
   function chartEmptySvg(w, h, message) {
     const msg = message || "No data in range";
     return (
-      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none" aria-label="${escapeHtml(msg)}">` +
-      `<rect x="36" y="10" width="${w - 46}" height="${h - 28}" fill="none" stroke="#243044" stroke-dasharray="4 4"/>` +
-      `<line x1="36" y1="${h - 18}" x2="${w - 10}" y2="${h - 18}" stroke="#243044"/>` +
-      `<line x1="36" y1="10" x2="36" y2="${h - 18}" stroke="#243044"/>` +
+      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" aria-label="${escapeHtml(msg)}">` +
+      `<rect x="44" y="10" width="${w - 54}" height="${h - 36}" fill="none" stroke="#243044" stroke-dasharray="4 4"/>` +
+      `<line x1="44" y1="${h - 26}" x2="${w - 10}" y2="${h - 26}" stroke="#243044"/>` +
+      `<line x1="44" y1="10" x2="44" y2="${h - 26}" stroke="#243044"/>` +
       `<text x="${w / 2}" y="${h / 2}" text-anchor="middle" fill="#8b9bb4" font-size="12">${escapeHtml(msg)}</text>` +
       `</svg>`
     );
   }
 
+  function fmtChartNum(v) {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    const a = Math.abs(n);
+    if (a >= 1e9) return (n / 1e9).toFixed(2) + "G";
+    if (a >= 1e6) return (n / 1e6).toFixed(2) + "M";
+    if (a >= 1e4) return (n / 1e3).toFixed(1) + "k";
+    if (a >= 100) return n.toFixed(0);
+    if (a >= 10) return n.toFixed(1);
+    if (a >= 1) return n.toFixed(2);
+    return n.toFixed(3);
+  }
+
+  /** Human delay for Activities cards (values are milliseconds). */
+  function formatDelay(ms) {
+    if (ms == null || ms === "" || !Number.isFinite(Number(ms))) return "—";
+    const n = Number(ms);
+    // Guard against leftover epoch-sized gauges (ts_ms=0 → ~1.7e12).
+    if (n < 0 || n > 24 * 60 * 60 * 1000) return "—";
+    if (n < 1000) return n < 10 ? n.toFixed(1) + " ms" : Math.round(n) + " ms";
+    if (n < 60_000) return (n / 1000).toFixed(n < 10_000 ? 2 : 1) + " s";
+    return (n / 60_000).toFixed(1) + " min";
+  }
+
+  function sanitizeDelaySeries(values) {
+    if (!values || !values.length) return [];
+    const max = 24 * 60 * 60 * 1000;
+    return values.map((v) => {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n < 0 || n > max) return 0;
+      return n;
+    });
+  }
+
   function lineChartSvg(values, opts) {
     const w = (opts && opts.w) || 360;
     const h = (opts && opts.h) || 140;
-    const padL = 36;
-    const padR = 10;
-    const padT = 10;
-    const padB = 18;
+    const padL = 48;
+    const padR = 14;
+    const padT = 16;
+    const padB = 30;
+    const unit = (opts && opts.unit) || "";
+    const formatValue =
+      (opts && opts.formatValue) || ((v) => fmtChartNum(v) + (unit ? " " + unit : ""));
     if (!values || !values.length) {
       return chartEmptySvg(w, h, (opts && opts.empty) || "No data in range");
     }
@@ -125,27 +164,102 @@
     const span = max - min || 1;
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
+    const n = values.length;
+    const xAt = (i) => padL + (i / Math.max(n - 1, 1)) * plotW;
+    const yAt = (v) => padT + plotH - ((v - min) / span) * plotH;
     const pts = values
-      .map((v, i) => {
-        const x = padL + (i / Math.max(values.length - 1, 1)) * plotW;
-        const y = padT + plotH - ((v - min) / span) * plotH;
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-      })
+      .map((v, i) => `${xAt(i).toFixed(1)},${yAt(v).toFixed(1)}`)
       .join(" ");
     const area =
       `${padL},${padT + plotH} ` + pts + ` ${padL + plotW},${padT + plotH}`;
-    const yTop = max.toFixed(max >= 10 ? 0 : 1);
-    const yBot = min.toFixed(min >= 10 ? 0 : 1);
+
+    // Mesh grid: 4 horizontal + several vertical guides for easier reading.
+    const yDivs = 4;
+    const xDivs = Math.min(8, Math.max(4, Math.ceil(n / 8)));
+    let mesh = "";
+    let yTicks = "";
+    for (let g = 0; g <= yDivs; g++) {
+      const frac = g / yDivs;
+      const y = padT + plotH * (1 - frac);
+      const val = min + span * frac;
+      const major = g === 0 || g === yDivs || g === Math.floor(yDivs / 2);
+      mesh +=
+        `<line class="chart-mesh" x1="${padL}" y1="${y.toFixed(1)}" ` +
+        `x2="${padL + plotW}" y2="${y.toFixed(1)}" ` +
+        `stroke="${major ? "#2a3548" : "#1a2330"}" ` +
+        `stroke-width="${major ? "1" : "0.75"}"/>`;
+      yTicks +=
+        `<text x="4" y="${(y + 3).toFixed(1)}" fill="#8b9bb4" font-size="9">` +
+        `${escapeHtml(formatValue(val))}</text>`;
+    }
+    for (let g = 0; g <= xDivs; g++) {
+      const frac = g / xDivs;
+      const x = padL + plotW * frac;
+      const major = g === 0 || g === xDivs || g === Math.floor(xDivs / 2);
+      mesh +=
+        `<line class="chart-mesh" x1="${x.toFixed(1)}" y1="${padT}" ` +
+        `x2="${x.toFixed(1)}" y2="${padT + plotH}" ` +
+        `stroke="${major ? "#2a3548" : "#1a2330"}" ` +
+        `stroke-width="${major ? "1" : "0.75"}"/>`;
+    }
+
+    // Point markers (dense enough to hit with the mouse; title as fallback).
+    const step = Math.max(1, Math.ceil(n / 60));
+    const dots = values
+      .map((v, i) => {
+        if (i % step !== 0 && i !== n - 1) return "";
+        const tip = escapeHtml(formatValue(v));
+        return (
+          `<circle class="chart-dot" data-i="${i}" cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" ` +
+          `r="3" fill="#4da3ff" stroke="#0b1118" stroke-width="1">` +
+          `<title>${tip}</title></circle>`
+        );
+      })
+      .join("");
+
+    const xLabelIdx = [];
+    for (let g = 0; g <= Math.min(4, xDivs); g++) {
+      const i = Math.round((g / Math.min(4, xDivs)) * (n - 1));
+      if (!xLabelIdx.includes(i)) xLabelIdx.push(i);
+    }
+    const xLabels = xLabelIdx
+      .map((i, idx) => {
+        const label =
+          opts && opts.xLabels && opts.xLabels[i] != null
+            ? String(opts.xLabels[i])
+            : String(i + 1);
+        const anchor =
+          idx === 0 ? "start" : idx === xLabelIdx.length - 1 ? "end" : "middle";
+        return (
+          `<text x="${xAt(i).toFixed(1)}" y="${h - 8}" text-anchor="${anchor}" ` +
+          `fill="#8b9bb4" font-size="9">${escapeHtml(label)}</text>`
+        );
+      })
+      .join("");
+
+    // Invisible hit layer + crosshair group (JS hover drives these).
     return (
-      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
-      `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="#0b1118"/>` +
-      `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#243044"/>` +
-      `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#243044"/>` +
-      `<text x="4" y="${padT + 8}" fill="#8b9bb4" font-size="9">${yTop}</text>` +
-      `<text x="4" y="${padT + plotH}" fill="#8b9bb4" font-size="9">${yBot}</text>` +
-      `<polygon fill="rgba(77,163,255,0.14)" points="${area}"/>` +
+      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" class="line-chart" ` +
+      `data-pad-l="${padL}" data-pad-r="${padR}" data-pad-t="${padT}" data-pad-b="${padB}" ` +
+      `data-min="${min}" data-max="${max}" data-n="${n}">` +
+      `<rect class="chart-plot-bg" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="#0b1118"/>` +
+      mesh +
+      `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#3a465c"/>` +
+      `<line x1="${padL}" y1="${padT}" x2="${padL}" y2="${padT + plotH}" stroke="#3a465c"/>` +
+      yTicks +
+      xLabels +
+      `<polygon fill="rgba(77,163,255,0.12)" points="${area}"/>` +
       `<polyline fill="none" stroke="#4da3ff" stroke-width="1.8" points="${pts}"/>` +
-      `</svg>`
+      dots +
+      `<g class="chart-crosshair" style="display:none">` +
+      `<line class="chart-cross-v" x1="0" y1="${padT}" x2="0" y2="${padT + plotH}" stroke="#9fd0ff" stroke-width="1" stroke-dasharray="3 3" opacity="0.85"/>` +
+      `<line class="chart-cross-h" x1="${padL}" y1="0" x2="${padL + plotW}" y2="0" stroke="#9fd0ff" stroke-width="1" stroke-dasharray="3 3" opacity="0.85"/>` +
+      `<circle class="chart-cross-dot" cx="0" cy="0" r="5" fill="#9fd0ff" stroke="#0b1118" stroke-width="1.5"/>` +
+      `</g>` +
+      `<rect class="chart-hit" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" ` +
+      `fill="transparent" style="cursor:crosshair"/>` +
+      `</svg>` +
+      `<div class="chart-readout" hidden></div>`
     );
   }
 
@@ -155,7 +269,7 @@
     const padL = 78;
     const padR = 12;
     const padT = 8;
-    const padB = 12;
+    const padB = 18;
     if (!rows || !rows.length) {
       return chartEmptySvg(w, h, (opts && opts.empty) || "No data in range");
     }
@@ -163,6 +277,23 @@
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
     const rowH = plotH / rows.length;
+    const xDivs = 4;
+    let mesh = "";
+    let xTicks = "";
+    for (let g = 0; g <= xDivs; g++) {
+      const frac = g / xDivs;
+      const x = padL + plotW * frac;
+      const major = g === 0 || g === xDivs || g === Math.floor(xDivs / 2);
+      mesh +=
+        `<line class="chart-mesh" x1="${x.toFixed(1)}" y1="${padT}" ` +
+        `x2="${x.toFixed(1)}" y2="${padT + plotH}" ` +
+        `stroke="${major ? "#2a3548" : "#1a2330"}" ` +
+        `stroke-width="${major ? "1" : "0.75"}"/>`;
+      const tickVal = max * frac;
+      xTicks +=
+        `<text x="${x.toFixed(1)}" y="${h - 4}" text-anchor="middle" fill="#8b9bb4" font-size="9">` +
+        `${escapeHtml(fmtChartNum(tickVal))}</text>`;
+    }
     const bars = rows
       .map((r, i) => {
         const val = Number(r.value) || 0;
@@ -173,23 +304,168 @@
         const tip = val >= 10 ? val.toFixed(0) : val.toFixed(2);
         return (
           `<text x="4" y="${(y + bh / 2 + 3).toFixed(1)}" fill="#8b9bb4" font-size="9">${escapeHtml(label)}</text>` +
-          `<rect x="${padL}" y="${y.toFixed(1)}" width="${Math.max(bw, 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#4da3ff" rx="2"/>` +
+          `<rect x="${padL}" y="${y.toFixed(1)}" width="${Math.max(bw, 1).toFixed(1)}" height="${bh.toFixed(1)}" fill="#4da3ff" rx="2">` +
+          `<title>${escapeHtml(label)}: ${escapeHtml(tip)}</title></rect>` +
           `<text x="${(padL + Math.max(bw, 1) + 4).toFixed(1)}" y="${(y + bh / 2 + 3).toFixed(1)}" fill="#c9d4e5" font-size="9">${tip}</text>`
         );
       })
       .join("");
     return (
-      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="none">` +
+      `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" class="bar-chart">` +
       `<rect x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="#0b1118"/>` +
+      mesh +
       bars +
+      xTicks +
       `</svg>`
     );
   }
 
-  function paintLineChart(id, values) {
+  function bindChartHover(el, id) {
+    const state = chartZoom[id];
+    if (!el || !state) return;
+    const svg = el.querySelector("svg.line-chart");
+    const readout = el.querySelector(".chart-readout");
+    const hit = svg && svg.querySelector(".chart-hit");
+    const cross = svg && svg.querySelector(".chart-crosshair");
+    if (!svg || !hit || !cross || !readout) return;
+
+    const unit = (state.opts && state.opts.unit) || "";
+    const formatValue =
+      (state.opts && state.opts.formatValue) ||
+      ((v) => fmtChartNum(v) + (unit ? " " + unit : ""));
+    const sliced = state.sliced || state.values || [];
+
+    const hide = () => {
+      cross.style.display = "none";
+      readout.hidden = true;
+      readout.textContent = "";
+    };
+
+    const showAt = (clientX) => {
+      if (!sliced.length) return hide();
+      const rect = svg.getBoundingClientRect();
+      const vb = svg.viewBox.baseVal;
+      const sx = vb.width / Math.max(rect.width, 1);
+      const sy = vb.height / Math.max(rect.height, 1);
+      const padL = Number(svg.getAttribute("data-pad-l") || 48);
+      const padR = Number(svg.getAttribute("data-pad-r") || 14);
+      const padT = Number(svg.getAttribute("data-pad-t") || 16);
+      const padB = Number(svg.getAttribute("data-pad-b") || 30);
+      const min = Number(svg.getAttribute("data-min"));
+      const max = Number(svg.getAttribute("data-max"));
+      const span = max - min || 1;
+      const plotW = vb.width - padL - padR;
+      const plotH = vb.height - padT - padB;
+      const localX = (clientX - rect.left) * sx;
+      const n = sliced.length;
+      let i = Math.round(((localX - padL) / Math.max(plotW, 1)) * (n - 1));
+      i = Math.max(0, Math.min(n - 1, i));
+      const v = sliced[i];
+      const x = padL + (i / Math.max(n - 1, 1)) * plotW;
+      const y = padT + plotH - ((v - min) / span) * plotH;
+      const vLine = cross.querySelector(".chart-cross-v");
+      const hLine = cross.querySelector(".chart-cross-h");
+      const dot = cross.querySelector(".chart-cross-dot");
+      if (vLine) {
+        vLine.setAttribute("x1", x.toFixed(1));
+        vLine.setAttribute("x2", x.toFixed(1));
+      }
+      if (hLine) {
+        hLine.setAttribute("y1", y.toFixed(1));
+        hLine.setAttribute("y2", y.toFixed(1));
+      }
+      if (dot) {
+        dot.setAttribute("cx", x.toFixed(1));
+        dot.setAttribute("cy", y.toFixed(1));
+      }
+      cross.style.display = "";
+      readout.hidden = false;
+      readout.textContent = `#${i + 1}  ·  ${formatValue(v)}`;
+      // Keep readout inside the chart body.
+      const px = (x / sx);
+      const py = (y / sy);
+      const rw = readout.offsetWidth || 90;
+      const rh = readout.offsetHeight || 22;
+      let left = px + 12;
+      let top = py - rh - 8;
+      if (left + rw > rect.width - 4) left = px - rw - 12;
+      if (top < 4) top = py + 12;
+      readout.style.left = `${Math.max(4, left)}px`;
+      readout.style.top = `${Math.max(4, top)}px`;
+    };
+
+    hit.onmousemove = (ev) => showAt(ev.clientX);
+    hit.onmouseleave = hide;
+    svg.onmouseleave = hide;
+  }
+
+  function paintLineChart(id, values, opts) {
     const el = $(id);
     if (!el) return;
-    el.innerHTML = lineChartSvg(values || [], { w: 420, h: 150 });
+    const series = values || [];
+    const baseOpts = { w: 560, h: 200, ...(opts || {}) };
+    const prev = chartZoom[id];
+    const keepWindow =
+      prev &&
+      prev.values &&
+      prev.values.length === series.length &&
+      prev.window &&
+      prev.window > 0 &&
+      prev.window < series.length;
+    const window = keepWindow ? prev.window : series.length;
+    const sliced =
+      series.length && window < series.length
+        ? series.slice(series.length - window)
+        : series;
+    chartZoom[id] = { values: series, opts: baseOpts, window, sliced };
+    el.innerHTML = lineChartSvg(sliced, baseOpts);
+    bindChartHover(el, id);
+  }
+
+  function applyChartZoom(id, action) {
+    const state = chartZoom[id];
+    if (!state || !state.values || !state.values.length) return;
+    const n = state.values.length;
+    let window = state.window || n;
+    if (action === "in") window = Math.max(4, Math.floor(window / 2));
+    else if (action === "out") window = Math.min(n, Math.max(window * 2, window + 4));
+    else window = n;
+    state.window = window;
+    const sliced = window < n ? state.values.slice(n - window) : state.values;
+    state.sliced = sliced;
+    const el = $(id);
+    if (el) {
+      el.innerHTML = lineChartSvg(sliced, state.opts || { w: 560, h: 200 });
+      bindChartHover(el, id);
+    }
+  }
+
+  const BAR_CHART_IDS = {
+    "chart-app_activity": 1,
+    "chart-app_status": 1,
+    "chart-app_cpu": 1,
+    "chart-app_mem": 1,
+    "chart-container_cpu": 1,
+    "chart-container_mem": 1,
+  };
+
+  /** Attach +/-/reset zoom to every line-chart panel that is missing controls. */
+  function ensureLineChartZoomControls() {
+    document.querySelectorAll(".chart-panel .chart-body[id]").forEach((body) => {
+      const id = body.id;
+      if (!id || BAR_CHART_IDS[id]) return;
+      const panel = body.closest(".chart-panel");
+      const head = panel && panel.querySelector(".chart-head");
+      if (!head || head.querySelector(".chart-zoom")) return;
+      const zoom = document.createElement("span");
+      zoom.className = "chart-zoom";
+      zoom.setAttribute("data-zoom-for", id);
+      zoom.innerHTML =
+        '<button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>' +
+        '<button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>' +
+        '<button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>';
+      head.appendChild(zoom);
+    });
   }
 
   function paintBarChart(id, rows) {
@@ -403,12 +679,21 @@
       ["Retention cap", fmtRetention(sensor.kafka_retention_bytes)],
     ]);
     metricCards($("gw-sensor-delay-metrics"), [
-      ["Latest delay", sm.delay_latest == null ? "—" : numOrDash(sm.delay_latest, 4)],
+      ["Latest delay", formatDelay(sm.delay_latest)],
     ]);
 
     const charts = sensor.charts || {};
-    paintLineChart("chart-sensor_kafka", charts.kafka_messages || []);
-    paintLineChart("chart-sensor_delay", charts.delay || []);
+    paintLineChart("chart-sensor_kafka", charts.kafka_messages || [], {
+      unit: "msgs/s",
+      formatValue: (v) => fmtChartNum(v) + " msgs/s",
+    });
+    paintLineChart(
+      "chart-sensor_delay",
+      sanitizeDelaySeries(charts.delay || []),
+      {
+        formatValue: (v) => formatDelay(v),
+      }
+    );
   }
 
   function renderSensorTabs(sensors) {
@@ -482,9 +767,13 @@
       ["IDS", String(m.ids_detections ?? "—")],
     ]);
     metricCards($("gw-delay-metrics"), [
-      ["Latest delay", m.delay_latest == null ? "—" : numOrDash(m.delay_latest, 4)],
+      ["Latest delay", formatDelay(m.delay_latest)],
     ]);
-    paintLineChart("chart-gw_delay", charts.delay || m.delay_sparkline || []);
+    paintLineChart(
+      "chart-gw_delay",
+      sanitizeDelaySeries(charts.delay || m.delay_sparkline || []),
+      { formatValue: (v) => formatDelay(v) }
+    );
 
     activitiesSensors = data.connected_sensors || [];
     fillTable(
@@ -685,6 +974,28 @@
       activitiesSensors = [];
       if (tab === "activities") refresh().catch(console.error);
     });
+    ensureLineChartZoomControls();
+    document.addEventListener("click", (ev) => {
+      const btn = ev.target && ev.target.closest && ev.target.closest(".chart-zoom-btn");
+      if (!btn) return;
+      const wrap = btn.closest(".chart-zoom");
+      const chartId = wrap && wrap.getAttribute("data-zoom-for");
+      const action = btn.getAttribute("data-zoom");
+      if (chartId && action) applyChartZoom(chartId, action);
+    });
+    // Ctrl/Cmd + wheel over a line chart zooms that series.
+    document.addEventListener(
+      "wheel",
+      (ev) => {
+        if (!ev.ctrlKey && !ev.metaKey) return;
+        const body = ev.target && ev.target.closest && ev.target.closest(".chart-body[id]");
+        if (!body || BAR_CHART_IDS[body.id]) return;
+        if (!chartZoom[body.id]) return;
+        ev.preventDefault();
+        applyChartZoom(body.id, ev.deltaY < 0 ? "in" : "out");
+      },
+      { passive: false }
+    );
     $("mon-tabs").addEventListener("click", () => refresh().catch(console.error));
     if (!onWizardOrigin()) return;
     loadGateways()

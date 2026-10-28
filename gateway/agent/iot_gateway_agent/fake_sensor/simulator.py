@@ -81,6 +81,15 @@ def load_payload(data_dir: str, device_id: str) -> Any:
         return json.load(fh)
 
 
+def stamp_payload_ts(payload: Any) -> Any:
+    """Ensure dict payloads carry a fresh ts_ms for gateway delay metrics."""
+    if not isinstance(payload, dict):
+        return payload
+    out = dict(payload)
+    out["ts_ms"] = int(time.time() * 1000)
+    return out
+
+
 def load_device_secrets_file(data_dir: str, device_id: str) -> DeviceSecrets | None:
     # Prefer gateway crypto store (shared data_dir); fall back to fake-local copy.
     for path in (
@@ -332,10 +341,12 @@ def run_simulator(
                 topic = _resolve_topic(cfg)
                 interval_ms = max(100, int(cfg.get("send_interval_ms") or 1000))
                 crypto_mode = str(cfg.get("crypto_mode") or "envelope").lower()
-                payload = load_payload(data_dir, device_id)
+                payload = stamp_payload_ts(load_payload(data_dir, device_id))
             except Exception as exc:
                 log.warning("reload failed: %s", exc)
-                payload = {"device_id": device_id, "error": "reload_failed"}
+                payload = stamp_payload_ts(
+                    {"device_id": device_id, "error": "reload_failed"}
+                )
 
             try:
                 use_envelope = crypto_mode == "envelope" and not behaviors.get(

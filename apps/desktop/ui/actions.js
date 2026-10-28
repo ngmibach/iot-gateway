@@ -998,7 +998,14 @@
     $("sim-interval").value =
       fake.send_interval_ms != null ? String(fake.send_interval_ms) : "1000";
     $("sim-topic").value = fake.topic || "";
-    if (!$("sim-payload").value.trim()) {
+    // Always restore the last Apply payload from registry meta (persists across tabs).
+    if (fake.payload != null) {
+      try {
+        $("sim-payload").value = JSON.stringify(fake.payload, null, 2);
+      } catch {
+        $("sim-payload").value = String(fake.payload);
+      }
+    } else if (!$("sim-payload").value.trim()) {
       $("sim-payload").value = '{\n  "hello": 1\n}';
     }
     writeSimBehaviors(fake.behaviors);

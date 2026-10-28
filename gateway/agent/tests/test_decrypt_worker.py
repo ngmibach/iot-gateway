@@ -36,6 +36,19 @@ class DelayTests(unittest.TestCase):
             100.0,
         )
 
+    def test_ts_ms_zero_ignored(self) -> None:
+        # ts_ms=0 yields epoch-sized "delay" (~1.7e12); must not be reported.
+        self.assertIsNone(
+            _delay_ms_from_payload(json.dumps({"ts_ms": 0}), received_ms=1_793_198_925_490)
+        )
+
+    def test_absurd_explicit_delay_ignored(self) -> None:
+        self.assertIsNone(
+            _delay_ms_from_payload(
+                json.dumps({"delay": 1_793_198_925_490}), received_ms=1_793_198_925_490
+            )
+        )
+
 
 class DecryptWorkerKafkaTests(unittest.TestCase):
     def test_produce_after_plain_payload(self) -> None:

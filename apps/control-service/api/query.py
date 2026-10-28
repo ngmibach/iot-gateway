@@ -398,11 +398,32 @@ def summary_gateway(
         Q.prep_prom(Q.GATEWAY_DELAY_BY_DEVICE_PROM, node="gateway")
     )
 
+    def _sane_delay_ms(v: Any) -> float | None:
+        """Drop epoch-sized gauges from bad ts_ms (e.g. ~1.7e12)."""
+        try:
+            n = float(v)
+        except (TypeError, ValueError):
+            return None
+        if n < 0 or n > 24 * 60 * 60 * 1000:
+            return None
+        return n
+
+    def _sane_delay_spark(vals: list[float]) -> list[float]:
+        out: list[float] = []
+        for v in vals:
+            n = _sane_delay_ms(v)
+            out.append(0.0 if n is None else n)
+        return out
+
     delay_by_id: dict[str, dict[str, Any]] = {}
     delay_series_legacy: list[dict[str, Any]] = []
     for did, latest in delay_latest_by_id.items():
-        spark = delay_chart_by_id.get(did) or ([latest] if latest is not None else [])
-        entry = {"device_id": did, "latest": latest, "sparkline": spark}
+        latest_sane = _sane_delay_ms(latest)
+        raw_spark = delay_chart_by_id.get(did) or (
+            [latest] if latest is not None else []
+        )
+        spark = _sane_delay_spark([float(x) for x in raw_spark])
+        entry = {"device_id": did, "latest": latest_sane, "sparkline": spark}
         delay_by_id[did] = entry
         delay_series_legacy.append(entry)
 
@@ -486,8 +507,9 @@ def summary_gateway(
     gateway_delay_spark: list[float] = []
     gateway_delay_latest: float | None = None
     avg_delay = prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_AVG_PROM, node="gateway"))
-    if avg_delay > 0:
-        gateway_delay_latest = avg_delay
+    avg_sane = _sane_delay_ms(avg_delay)
+    if avg_sane is not None and avg_sane > 0:
+        gateway_delay_latest = avg_sane
     if delay_series_legacy:
         lengths = [len(e.get("sparkline") or []) for e in delay_series_legacy]
         n = min(lengths) if lengths and min(lengths) > 0 else 0
