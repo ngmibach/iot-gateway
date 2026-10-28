@@ -14,6 +14,7 @@ global:
 scrape_configs:
   - job_name: 'iot-gateway-agent'
     scrape_interval: 5s
+    scrape_timeout: 10s
     metrics_path: /metrics
     static_configs:
       - targets: ['{{GATEWAY_IP}}:9139']
