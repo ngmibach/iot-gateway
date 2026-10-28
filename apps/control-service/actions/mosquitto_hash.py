@@ -7,9 +7,11 @@ import hashlib
 import secrets
 from typing import Optional
 
-# Matches eclipse-mosquitto 2.x default $7$ (PBKDF2-HMAC-SHA512) output.
-_DEFAULT_ITERATIONS = 1000
-_SALT_LEN = 64
+# Matches eclipse-mosquitto 2.0.x ($7$ PBKDF2-HMAC-SHA512).
+# Broker rejects salts that are not exactly 12 bytes (security_default.c).
+# Defaults match password_mosq.h: SALT_LEN=12, PW_DEFAULT_ITERATIONS=101.
+_DEFAULT_ITERATIONS = 101
+_SALT_LEN = 12
 _DK_LEN = 64
 
 

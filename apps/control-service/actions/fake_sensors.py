@@ -60,11 +60,14 @@ Wants=network-online.target
 Type=simple
 NetworkNamespacePath=/run/netns/iotgw-fake-%i
 Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
+Environment=PYTHONPATH=/opt/iot-gateway-agent
 EnvironmentFile=-/etc/iot-gateway-agent.env
 ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id %i
 Restart=on-failure
 RestartSec=3
-WorkingDirectory=/var/lib/iot-gateway-agent/fake/%i
+# Package lives under /opt/iot-gateway-agent (same as the agent unit). Device
+# config/certs are resolved via IOTGW_AGENT_DATA, not WorkingDirectory.
+WorkingDirectory=/opt/iot-gateway-agent
 StandardOutput=append:/var/lib/iot-gateway-agent/fake/%i/run.log
 StandardError=append:/var/lib/iot-gateway-agent/fake/%i/run.log
 
@@ -699,7 +702,7 @@ def enable_and_start_unit(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> FakePlaybookResult:
-    """Enable and start ``iotgw-fake@<device_id>``."""
+    """Enable and start ``iotgw-fake@<device_id>``; verify it stays active."""
     del install_root, data_dir
     device_id = validate_user_id(device_id)
     unit = unit_instance(device_id)
@@ -719,6 +722,28 @@ def enable_and_start_unit(
                 + (result.stderr or result.stdout or "").strip()[:300]
             ),
             details={"unit": unit},
+        )
+    # Crash-loops return success from restart; confirm ActiveState after a beat.
+    check = _sudo(
+        ssh,
+        f"sleep 1; systemctl is-active {shell_quote(unit)}",
+        sudo_password=sudo_password,
+        timeout=30.0,
+    )
+    active = (check.stdout or "").strip()
+    if check.exit_code != 0 or active != "active":
+        journal = _sudo(
+            ssh,
+            f"journalctl -u {shell_quote(unit)} -n 20 --no-pager -o cat",
+            sudo_password=sudo_password,
+            timeout=30.0,
+        )
+        detail = (journal.stdout or check.stderr or active or "").strip()[:400]
+        return FakePlaybookResult(
+            ok=False,
+            status="failed",
+            message=f"{unit} not active after start ({active or 'unknown'}): {detail}",
+            details={"unit": unit, "active": active},
         )
     return FakePlaybookResult(
         ok=True,

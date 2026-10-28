@@ -741,9 +741,9 @@ class ApiDeviceTests(unittest.TestCase):
                 return_value=FakePlaybookResult(ok=True, message="files"),
             ) as inst,
             patch(
-                "api.devices.enable_and_start_unit",
-                return_value=FakePlaybookResult(ok=True, message="started"),
-            ),
+                "api.devices.stop_fake_unit",
+                return_value=FakePlaybookResult(ok=True, message="stopped"),
+            ) as stop,
             patch("api.devices.teardown_fake") as torn,
         ):
             r = self.client.post(
@@ -760,14 +760,16 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertTrue(body["device"]["is_fake"])
         self.assertEqual(body["device"]["ip"], "10.255.0.2")
         self.assertEqual(body["device"]["fake"]["ip"], "10.255.0.2")
-        self.assertEqual(body["device"]["fake"]["status"], "running")
+        self.assertEqual(body["device"]["fake"]["status"], "stopped")
         self.assertEqual(body["device"]["fake"]["send_interval_ms"], 500)
         self.assertEqual(body["kafka_topic"], "sensor.fake1")
         # Fake certs are app-managed — no operator download token.
         self.assertIsNone(body.get("cert_bundle_token"))
+        self.assertIn("stopped", (body.get("message") or "").lower())
         reg.assert_called_once()
         self.assertEqual(reg.call_args.kwargs["ip"], "10.255.0.2")
         inst.assert_called_once()
+        stop.assert_called_once()
         netns.assert_called_once()
         torn.assert_not_called()
 

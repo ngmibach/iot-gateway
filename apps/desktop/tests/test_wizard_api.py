@@ -105,7 +105,7 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn('id="fake-pass"', actions_html)
         self.assertNotIn('id="fake-interval"', actions_html)
         self.assertNotIn('id="fake-payload"', actions_html)
-        self.assertIn("Set rate and payload in Simulate", actions_html)
+        self.assertIn("Open Simulate to Start it", actions_html)
         self.assertIn("Certificates are managed by this app", actions_html)
         self.assertIn('id="btn-fake-create"', actions_html)
         self.assertIn('id="btn-fake-cancel"', actions_html)
@@ -170,6 +170,7 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("omit_client_cert", ajs)
         self.assertIn("withCaRetry", ajs)
         self.assertIn("Certs are managed by this app", ajs)
+        self.assertIn("press Start to activate", ajs)
         self.assertIn('view-fp-row', ajs)
         self.assertIn(
             "Fake sensor certificates are renewed automatically by this app.",

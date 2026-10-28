@@ -198,8 +198,15 @@ def _ssl_context(
     wrong_dir = certs_dir.parent / "wrong-certs"
 
     ctx = ssl.create_default_context(ssl.Purpose.SERVER_AUTH)
+    # OpenSSL 3 / Python 3.13 VERIFY_X509_STRICT rejects CAs that omit keyUsage
+    # (legacy gateway CAs only set basicConstraints CA:TRUE).
+    strict = getattr(ssl, "VERIFY_X509_STRICT", 0)
+    if strict:
+        ctx.verify_flags &= ~strict
     if ca.is_file():
         ctx.load_verify_locations(cafile=str(ca))
+        # Broker presents an IP SAN; disable hostname check for IP connect.
+        ctx.check_hostname = False
     else:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
