@@ -83,6 +83,10 @@ def device_id_from_mqtt_topic(topic: str) -> str:
     return parts[0]
 
 
+# Reject absurd delays (e.g. ts_ms=0 → epoch-sized "delay" like 1.7e12 ms).
+_MAX_DELAY_MS = 24 * 60 * 60 * 1000.0  # 24h
+
+
 def _delay_ms_from_payload(clear_json: str, *, received_ms: int) -> Optional[float]:
     """Prefer explicit delay; else derive from sensor timestamp fields."""
     try:
@@ -93,15 +97,25 @@ def _delay_ms_from_payload(clear_json: str, *, received_ms: int) -> Optional[flo
         return None
     if "delay" in obj:
         try:
-            return float(obj["delay"])
+            delay = float(obj["delay"])
         except (TypeError, ValueError):
-            pass
+            delay = None
+        else:
+            if 0.0 <= delay <= _MAX_DELAY_MS:
+                return delay
     for key in ("ts_ms", "timestamp_ms", "sent_ms"):
-        if key in obj:
-            try:
-                return max(0.0, float(received_ms) - float(obj[key]))
-            except (TypeError, ValueError):
-                pass
+        if key not in obj:
+            continue
+        try:
+            ts = float(obj[key])
+        except (TypeError, ValueError):
+            continue
+        # Missing/zero timestamps produce wall-clock epoch delays — ignore them.
+        if ts <= 0:
+            continue
+        delay = float(received_ms) - ts
+        if 0.0 <= delay <= _MAX_DELAY_MS:
+            return delay
     for key in ("ts", "timestamp", "sent_at"):
         if key not in obj:
             continue
@@ -110,10 +124,16 @@ def _delay_ms_from_payload(clear_json: str, *, received_ms: int) -> Optional[flo
             ts = float(raw)
         except (TypeError, ValueError):
             continue
+        if ts <= 0:
+            continue
         if ts > 1e12:
-            return max(0.0, float(received_ms) - ts)
-        if ts > 1e9:
-            return max(0.0, float(received_ms) - ts * 1000.0)
+            delay = float(received_ms) - ts
+        elif ts > 1e9:
+            delay = float(received_ms) - ts * 1000.0
+        else:
+            continue
+        if 0.0 <= delay <= _MAX_DELAY_MS:
+            return delay
     return None
 
 

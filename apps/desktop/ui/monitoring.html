@@ -52,31 +52,87 @@
       <h3>Hardware charts</h3>
       <div class="chart-grid">
         <article class="chart-panel" data-chart="cpu_pct">
-          <header class="chart-head"><span class="chart-title">CPU busy</span><span class="chart-unit">%</span></header>
+          <header class="chart-head">
+            <span class="chart-title">CPU busy</span>
+            <span class="chart-unit">%</span>
+            <span class="chart-zoom" data-zoom-for="chart-cpu_pct">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-cpu_pct"></div>
         </article>
         <article class="chart-panel" data-chart="mem_used_pct">
-          <header class="chart-head"><span class="chart-title">Memory used</span><span class="chart-unit">%</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Memory used</span>
+            <span class="chart-unit">%</span>
+            <span class="chart-zoom" data-zoom-for="chart-mem_used_pct">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-mem_used_pct"></div>
         </article>
         <article class="chart-panel" data-chart="load1">
-          <header class="chart-head"><span class="chart-title">Load average (1m)</span><span class="chart-unit">load</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Load average (1m)</span>
+            <span class="chart-unit">load</span>
+            <span class="chart-zoom" data-zoom-for="chart-load1">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-load1"></div>
         </article>
         <article class="chart-panel" data-chart="fs_used_pct">
-          <header class="chart-head"><span class="chart-title">Root filesystem used</span><span class="chart-unit">%</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Root filesystem used</span>
+            <span class="chart-unit">%</span>
+            <span class="chart-zoom" data-zoom-for="chart-fs_used_pct">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-fs_used_pct"></div>
         </article>
         <article class="chart-panel" data-chart="net_rx_mbps">
-          <header class="chart-head"><span class="chart-title">Network receive</span><span class="chart-unit">Mbps</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Network receive</span>
+            <span class="chart-unit">Mbps</span>
+            <span class="chart-zoom" data-zoom-for="chart-net_rx_mbps">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-net_rx_mbps"></div>
         </article>
         <article class="chart-panel" data-chart="net_tx_mbps">
-          <header class="chart-head"><span class="chart-title">Network transmit</span><span class="chart-unit">Mbps</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Network transmit</span>
+            <span class="chart-unit">Mbps</span>
+            <span class="chart-zoom" data-zoom-for="chart-net_tx_mbps">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-net_tx_mbps"></div>
         </article>
         <article class="chart-panel chart-panel-wide" data-chart="temp_c">
-          <header class="chart-head"><span class="chart-title">Temperature</span><span class="chart-unit">°C</span></header>
+          <header class="chart-head">
+            <span class="chart-title">Temperature</span>
+            <span class="chart-unit">°C</span>
+            <span class="chart-zoom" data-zoom-for="chart-temp_c">
+              <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+              <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+            </span>
+          </header>
           <div class="chart-body" id="chart-temp_c"></div>
         </article>
       </div>
@@ -115,7 +171,15 @@
         <div class="metrics" id="gw-delay-metrics"></div>
         <div class="chart-grid chart-grid-1">
           <article class="chart-panel chart-panel-wide" data-chart="gw_delay">
-            <header class="chart-head"><span class="chart-title">Gateway delay</span><span class="chart-unit">s</span></header>
+            <header class="chart-head">
+              <span class="chart-title">Gateway delay</span>
+              <span class="chart-unit">ms</span>
+              <span class="chart-zoom" data-zoom-for="chart-gw_delay">
+                <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+                <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+                <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+              </span>
+            </header>
             <div class="chart-body" id="chart-gw_delay"></div>
           </article>
         </div>
@@ -134,7 +198,15 @@
           <div class="metrics" id="gw-sensor-kafka-meta"></div>
           <div class="chart-grid chart-grid-1">
             <article class="chart-panel chart-panel-wide" data-chart="sensor_kafka">
-              <header class="chart-head"><span class="chart-title">Topic activity</span><span class="chart-unit">msgs</span></header>
+              <header class="chart-head">
+                <span class="chart-title">Topic activity</span>
+                <span class="chart-unit">msgs/s</span>
+                <span class="chart-zoom" data-zoom-for="chart-sensor_kafka">
+                  <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+                  <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+                  <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+                </span>
+              </header>
               <div class="chart-body" id="chart-sensor_kafka"></div>
             </article>
           </div>
@@ -144,7 +216,15 @@
           <div class="metrics" id="gw-sensor-delay-metrics"></div>
           <div class="chart-grid chart-grid-1">
             <article class="chart-panel chart-panel-wide" data-chart="sensor_delay">
-              <header class="chart-head"><span class="chart-title">Sensor delay</span><span class="chart-unit">s</span></header>
+              <header class="chart-head">
+                <span class="chart-title">Sensor delay</span>
+                <span class="chart-unit">ms</span>
+                <span class="chart-zoom" data-zoom-for="chart-sensor_delay">
+                  <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+                  <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+                  <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+                </span>
+              </header>
               <div class="chart-body" id="chart-sensor_delay"></div>
             </article>
           </div>

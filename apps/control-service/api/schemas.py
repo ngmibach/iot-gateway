@@ -104,6 +104,8 @@ class FakeDeviceOut(BaseModel):
     unit: Optional[str] = None
     bridge: Optional[str] = None
     behaviors: Optional[FakeBehaviors] = None
+    # Last Apply payload (mirrored from gateway payload.json into registry meta).
+    payload: Optional[Any] = None
     cert_fed_at: Optional[int] = None
     cert_feed_fingerprint: Optional[str] = None
     last_error: Optional[str] = None
