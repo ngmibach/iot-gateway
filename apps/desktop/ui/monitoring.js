@@ -10,7 +10,9 @@
   let lastWarnings = [];
   let activitiesSensors = [];
   let selectedSensorId = null;
-  /** Per-chart zoom state for Activities line charts: { values, opts, window }. */
+  /** Active query window from the last summary response: { from, to, range }. */
+  let lastTimeWindow = null;
+  /** Per-chart zoom state: { values:[{t,v}], opts, window, sliced }. */
   const chartZoom = Object.create(null);
 
   function tabFromHash() {
@@ -136,35 +138,158 @@
     return (n / 60_000).toFixed(1) + " min";
   }
 
+  function pad2(n) {
+    return String(n).padStart(2, "0");
+  }
+
+  function parseRangeToSeconds(range) {
+    const raw = String(range || "1h").trim().toLowerCase();
+    const m = raw.match(/^(\d+)([smhd])$/);
+    if (!m) return 3600;
+    const n = Number(m[1]);
+    const u = m[2];
+    if (u === "s") return Math.max(n, 1);
+    if (u === "m") return Math.max(n * 60, 1);
+    if (u === "h") return Math.max(n * 3600, 1);
+    if (u === "d") return Math.max(n * 86400, 1);
+    return 3600;
+  }
+
+  function formatAxisTime(unixSec, spanSec) {
+    const d = new Date(Number(unixSec) * 1000);
+    if (Number.isNaN(d.getTime())) return "—";
+    const hm = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+    if (spanSec > 86400) {
+      return pad2(d.getMonth() + 1) + "/" + pad2(d.getDate()) + " " + hm;
+    }
+    if (spanSec <= 900) {
+      return hm + ":" + pad2(d.getSeconds());
+    }
+    return hm;
+  }
+
+  function formatHoverTime(unixSec, spanSec) {
+    const d = new Date(Number(unixSec) * 1000);
+    if (Number.isNaN(d.getTime())) return "—";
+    const hms =
+      pad2(d.getHours()) +
+      ":" +
+      pad2(d.getMinutes()) +
+      ":" +
+      pad2(d.getSeconds());
+    if (spanSec > 86400) {
+      return (
+        d.getFullYear() +
+        "-" +
+        pad2(d.getMonth() + 1) +
+        "-" +
+        pad2(d.getDate()) +
+        " " +
+        hms
+      );
+    }
+    return hms;
+  }
+
+  function formatTimeWindow(from, to) {
+    const span = Math.max(Number(to) - Number(from), 1);
+    return formatAxisTime(from, span) + " → " + formatAxisTime(to, span);
+  }
+
+  function setTimeWindow(meta, fallbackRange) {
+    const el = $("time-window");
+    const range =
+      (meta && meta.range) ||
+      fallbackRange ||
+      ($("range") && $("range").value) ||
+      "1h";
+    let from = meta && Number(meta.from);
+    let to = meta && Number(meta.to);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      to = Math.floor(Date.now() / 1000);
+      from = to - parseRangeToSeconds(range);
+    }
+    lastTimeWindow = { from: from, to: to, range: range };
+    if (el) el.textContent = formatTimeWindow(from, to);
+  }
+
+  /** Normalize API chart series to ``[{t,v}, ...]`` (accepts legacy float[]). */
+  function normalizeSeries(raw, timeMeta) {
+    if (!raw || !raw.length) return [];
+    const first = raw[0];
+    if (first && typeof first === "object" && "v" in first) {
+      return raw
+        .map((p) => ({ t: Number(p.t) || 0, v: Number(p.v) }))
+        .filter((p) => Number.isFinite(p.v));
+    }
+    const nums = raw.map((v) => Number(v)).filter((v) => Number.isFinite(v));
+    if (!nums.length) return [];
+    let to = timeMeta && Number(timeMeta.to);
+    let from = timeMeta && Number(timeMeta.from);
+    if (!Number.isFinite(from) || !Number.isFinite(to) || to <= from) {
+      to =
+        (lastTimeWindow && lastTimeWindow.to) ||
+        Math.floor(Date.now() / 1000);
+      from =
+        (lastTimeWindow && lastTimeWindow.from) ||
+        to -
+          parseRangeToSeconds(($("range") && $("range").value) || "1h");
+    }
+    const n = nums.length;
+    if (n === 1) return [{ t: to, v: nums[0] }];
+    return nums.map((v, i) => ({
+      t: Math.round(from + ((to - from) * i) / (n - 1)),
+      v: v,
+    }));
+  }
+
   function sanitizeDelaySeries(values) {
-    if (!values || !values.length) return [];
+    const pts = normalizeSeries(values, lastTimeWindow);
     const max = 24 * 60 * 60 * 1000;
-    return values.map((v) => {
-      const n = Number(v);
-      if (!Number.isFinite(n) || n < 0 || n > max) return 0;
-      return n;
+    return pts.map((p) => {
+      const n = Number(p.v);
+      if (!Number.isFinite(n) || n < 0 || n > max) return { t: p.t, v: 0 };
+      return { t: p.t, v: n };
     });
   }
 
-  function lineChartSvg(values, opts) {
+  function seriesSpanSec(points) {
+    if (!points || points.length < 2) {
+      if (lastTimeWindow) {
+        return Math.max(lastTimeWindow.to - lastTimeWindow.from, 1);
+      }
+      return 3600;
+    }
+    const a = Number(points[0].t);
+    const b = Number(points[points.length - 1].t);
+    if (Number.isFinite(a) && Number.isFinite(b) && b > a) return b - a;
+    if (lastTimeWindow) {
+      return Math.max(lastTimeWindow.to - lastTimeWindow.from, 1);
+    }
+    return 3600;
+  }
+
+  function lineChartSvg(points, opts) {
     const w = (opts && opts.w) || 360;
     const h = (opts && opts.h) || 140;
     const padL = 48;
     const padR = 14;
     const padT = 16;
-    const padB = 30;
+    const padB = 34;
     const unit = (opts && opts.unit) || "";
     const formatValue =
       (opts && opts.formatValue) || ((v) => fmtChartNum(v) + (unit ? " " + unit : ""));
-    if (!values || !values.length) {
+    if (!points || !points.length) {
       return chartEmptySvg(w, h, (opts && opts.empty) || "No data in range");
     }
+    const values = points.map((p) => Number(p.v));
     const min = Math.min(...values);
     const max = Math.max(...values);
     const span = max - min || 1;
     const plotW = w - padL - padR;
     const plotH = h - padT - padB;
     const n = values.length;
+    const timeSpan = seriesSpanSec(points);
     const xAt = (i) => padL + (i / Math.max(n - 1, 1)) * plotW;
     const yAt = (v) => padT + plotH - ((v - min) / span) * plotH;
     const pts = values
@@ -208,7 +333,9 @@
     const dots = values
       .map((v, i) => {
         if (i % step !== 0 && i !== n - 1) return "";
-        const tip = escapeHtml(formatValue(v));
+        const tip = escapeHtml(
+          formatHoverTime(points[i].t, timeSpan) + " · " + formatValue(v)
+        );
         return (
           `<circle class="chart-dot" data-i="${i}" cx="${xAt(i).toFixed(1)}" cy="${yAt(v).toFixed(1)}" ` +
           `r="3" fill="#4da3ff" stroke="#0b1118" stroke-width="1">` +
@@ -218,16 +345,19 @@
       .join("");
 
     const xLabelIdx = [];
-    for (let g = 0; g <= Math.min(4, xDivs); g++) {
-      const i = Math.round((g / Math.min(4, xDivs)) * (n - 1));
+    const tickCount = Math.min(5, Math.max(2, xDivs));
+    for (let g = 0; g <= tickCount; g++) {
+      const i = Math.round((g / tickCount) * (n - 1));
       if (!xLabelIdx.includes(i)) xLabelIdx.push(i);
     }
+    const seenLabels = Object.create(null);
     const xLabels = xLabelIdx
       .map((i, idx) => {
-        const label =
-          opts && opts.xLabels && opts.xLabels[i] != null
-            ? String(opts.xLabels[i])
-            : String(i + 1);
+        let label = formatAxisTime(points[i].t, timeSpan);
+        if (seenLabels[label] && idx !== 0 && idx !== xLabelIdx.length - 1) {
+          return "";
+        }
+        seenLabels[label] = 1;
         const anchor =
           idx === 0 ? "start" : idx === xLabelIdx.length - 1 ? "end" : "middle";
         return (
@@ -241,7 +371,7 @@
     return (
       `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" class="line-chart" ` +
       `data-pad-l="${padL}" data-pad-r="${padR}" data-pad-t="${padT}" data-pad-b="${padB}" ` +
-      `data-min="${min}" data-max="${max}" data-n="${n}">` +
+      `data-min="${min}" data-max="${max}" data-n="${n}" data-span="${timeSpan}">` +
       `<rect class="chart-plot-bg" x="${padL}" y="${padT}" width="${plotW}" height="${plotH}" fill="#0b1118"/>` +
       mesh +
       `<line x1="${padL}" y1="${padT + plotH}" x2="${padL + plotW}" y2="${padT + plotH}" stroke="#3a465c"/>` +
@@ -350,9 +480,10 @@
       const padL = Number(svg.getAttribute("data-pad-l") || 48);
       const padR = Number(svg.getAttribute("data-pad-r") || 14);
       const padT = Number(svg.getAttribute("data-pad-t") || 16);
-      const padB = Number(svg.getAttribute("data-pad-b") || 30);
+      const padB = Number(svg.getAttribute("data-pad-b") || 34);
       const min = Number(svg.getAttribute("data-min"));
       const max = Number(svg.getAttribute("data-max"));
+      const timeSpan = Number(svg.getAttribute("data-span")) || seriesSpanSec(sliced);
       const span = max - min || 1;
       const plotW = vb.width - padL - padR;
       const plotH = vb.height - padT - padB;
@@ -360,7 +491,8 @@
       const n = sliced.length;
       let i = Math.round(((localX - padL) / Math.max(plotW, 1)) * (n - 1));
       i = Math.max(0, Math.min(n - 1, i));
-      const v = sliced[i];
+      const pt = sliced[i];
+      const v = pt && typeof pt === "object" ? Number(pt.v) : Number(pt);
       const x = padL + (i / Math.max(n - 1, 1)) * plotW;
       const y = padT + plotH - ((v - min) / span) * plotH;
       const vLine = cross.querySelector(".chart-cross-v");
@@ -380,7 +512,11 @@
       }
       cross.style.display = "";
       readout.hidden = false;
-      readout.textContent = `#${i + 1}  ·  ${formatValue(v)}`;
+      const tLabel =
+        pt && typeof pt === "object" && Number.isFinite(Number(pt.t))
+          ? formatHoverTime(pt.t, timeSpan)
+          : "#" + (i + 1);
+      readout.textContent = tLabel + "  ·  " + formatValue(v);
       // Keep readout inside the chart body.
       const px = (x / sx);
       const py = (y / sy);
@@ -402,7 +538,7 @@
   function paintLineChart(id, values, opts) {
     const el = $(id);
     if (!el) return;
-    const series = values || [];
+    const series = normalizeSeries(values || [], lastTimeWindow);
     const baseOpts = { w: 560, h: 200, ...(opts || {}) };
     const prev = chartZoom[id];
     const keepWindow =
@@ -757,6 +893,7 @@
     let path = `/api/v1/query/summaries/gateway?range=${encodeURIComponent(range)}`;
     if (gid) path += `&gateway_id=${encodeURIComponent(gid)}`;
     const data = await control(path);
+    setTimeWindow(data.time, data.range || range);
     const m = data.metrics || {};
     const charts = data.charts || {};
 
@@ -801,6 +938,7 @@
       `/api/v1/query/summaries/raspi?range=${encodeURIComponent(range)}` +
         `&node=gateway&job=iot-gateway-agent`
     );
+    setTimeWindow(data.time, data.range || range);
     const m = data.metrics || {};
     const charts = data.charts || {};
     const applications = data.applications || {};

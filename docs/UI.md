@@ -34,7 +34,7 @@ App data:
 
 ## Monitoring
 
-Shared toolbar on Metric / Activities: gateway select, time range, Refresh, optional auto-refresh.
+Shared toolbar on Metric / Activities: gateway select, time range (Last 5m–7d), active from→to window, Refresh, optional auto-refresh. Hardware and delay charts use a real clock X-axis (Grafana-style); hover shows time · value.
 
 ### Gateway Metric
 
