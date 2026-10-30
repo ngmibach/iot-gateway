@@ -160,33 +160,57 @@ jobs:
           echo "branch=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
           echo "Publishing release tag: $TAG (from ${GITHUB_REF_NAME})"
 
+      # softprops/action-gh-release fails updating the existing desktop-latest
+      # release from non-default branches (windows/linux) with a bare HttpError
+      # while rewriting release metadata / generate_release_notes. Asset replace
+      # via `gh release upload --clobber` is enough for this floating tag.
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.tag.outputs.tag }}
-          name: IoT Gateway Monitor ${{ steps.tag.outputs.tag }}
-          draft: false
-          prerelease: ${{ steps.tag.outputs.tag == 'desktop-latest' }}
-          generate_release_notes: true
-          body: |
-            ## Download & run
-
-            | Platform | File | How to run |
-            |----------|------|------------|
-            | **Windows** | `IoTGatewayMonitor.exe` | Download → double-click |
-            | **Ubuntu / Linux** | `IoTGatewayMonitor-x86_64.AppImage` | Download → `chmod +x` once → double-click |
-
-            Built from branch `${{ steps.tag.outputs.branch }}`.
-            Push to **`linux`** rebuilds the AppImage; push to **`windows`** rebuilds the `.exe`.
-            Same-named assets on this release are replaced on each successful build.
-
-            Windows builds are Authenticode-signed in CI when the
-            `WINDOWS_CODE_SIGN_PFX_*` repository secrets are configured.
-            Unsigned PyInstaller EXEs are often blocked by Chrome Safe Browsing
-            and Defender (`Trojan:Win32/Wacatac.*` false positives).
-
-            No Python, Rust, or CLI setup required. Day-to-day work is done in the app UI.
-          files: |
-            dist/*
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.tag.outputs.tag }}
+          RELEASE_BRANCH: ${{ steps.tag.outputs.branch }}
+          RELEASE_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          TITLE="IoT Gateway Monitor ${RELEASE_TAG}"
+          NOTES_FILE="$(mktemp)"
+          {
+            echo "## Download & run"
+            echo
+            echo "| Platform | File | How to run |"
+            echo "|----------|------|------------|"
+            echo "| **Windows** | \`IoTGatewayMonitor.exe\` | Download → double-click |"
+            echo "| **Ubuntu / Linux** | \`IoTGatewayMonitor-x86_64.AppImage\` | Download → \`chmod +x\` once → double-click |"
+            echo
+            echo "Built from branch \`${RELEASE_BRANCH}\`."
+            echo "Push to **\`linux\`** rebuilds the AppImage; push to **\`windows\`** rebuilds the \`.exe\`."
+            echo "Same-named assets on this release are replaced on each successful build."
+            echo
+            echo "Windows builds are Authenticode-signed in CI when the"
+            echo "\`WINDOWS_CODE_SIGN_PFX_*\` repository secrets are configured."
+            echo "Unsigned PyInstaller EXEs are often blocked by Chrome Safe Browsing"
+            echo "and Defender (\`Trojan:Win32/Wacatac.*\` false positives)."
+            echo
+            echo "No Python, Rust, or CLI setup required. Day-to-day work is done in the app UI."
+          } >"$NOTES_FILE"
+          shopt -s nullglob
+          assets=(dist/*)
+          if [[ ${#assets[@]} -eq 0 ]]; then
+            echo "No files under dist/ to publish" >&2
+            exit 1
+          fi
+          ls -lh "${assets[@]}"
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$TITLE" --notes-file "$NOTES_FILE" || \
+              echo "Release metadata edit skipped (non-fatal on non-default branch)"
+          else
+            prerelease_args=()
+            if [[ "$RELEASE_TAG" == "desktop-latest" ]]; then
+              prerelease_args+=(--prerelease)
+            fi
+            gh release create "$RELEASE_TAG" "${prerelease_args[@]}" \
+              --title "$TITLE" --notes-file "$NOTES_FILE" \
+              --target "$RELEASE_SHA"
+          fi
+          gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+          echo "Published ${#assets[@]} asset(s) to $RELEASE_TAG"
