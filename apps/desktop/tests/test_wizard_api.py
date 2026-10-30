@@ -169,8 +169,7 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("simStartStop", ajs)
         self.assertIn("omit_client_cert", ajs)
         self.assertIn("withCaRetry", ajs)
-        self.assertIn("Certs are managed by this app", ajs)
-        self.assertIn("press Start to activate", ajs)
+        self.assertIn("Fake sensor successfully created", ajs)
         self.assertIn('view-fp-row', ajs)
         self.assertIn(
             "Fake sensor certificates are renewed automatically by this app.",

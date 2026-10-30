@@ -613,11 +613,13 @@ def post_create_fake_device(
         )
 
     status_str = result.status if unit_ok else "degraded"
-    message = result.message or "Fake sensor created (stopped). Start it from Simulate."
     if unit_ok:
-        message = "Fake sensor created (stopped). Start it from Simulate."
+        message = "Fake sensor successfully created."
     else:
-        message = f"{message} Leave-stopped failed: {unit_msg}".strip()
+        message = (
+            (result.message or "Fake sensor created.")
+            + f" Leave-stopped failed: {unit_msg}"
+        ).strip()
 
     return RegisterDeviceResponse(
         device=_device_out(device),
