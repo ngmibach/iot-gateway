@@ -484,6 +484,48 @@ class QueryApiTests(unittest.TestCase):
                     "status": "success",
                     "data": {"result": [{"metric": {}, "value": [1, "3"]}]},
                 }
+            if "iotgw_device_delay_ms_sum" in q:
+                return {
+                    "status": "success",
+                    "data": {
+                        "result": [
+                            {
+                                "metric": {"device_id": "sensor_a"},
+                                "value": [1, "125.5"],
+                            }
+                        ]
+                    },
+                }
+            if "iotgw_device_delay_samples_total" in q:
+                return {
+                    "status": "success",
+                    "data": {
+                        "result": [
+                            {
+                                "metric": {"device_id": "sensor_a"},
+                                "value": [1, "10"],
+                            }
+                        ]
+                    },
+                }
+            if "iotgw_device_delay_ms" in q and "avg(" in q:
+                return {
+                    "status": "success",
+                    "data": {"result": [{"metric": {}, "value": [1, "12.5"]}]},
+                }
+            if "iotgw_device_delay_ms" in q:
+                return {
+                    "status": "success",
+                    "data": {
+                        "result": [
+                            {
+                                "metric": {"device_id": "sensor_a"},
+                                "value": [1, "12.5"],
+                                "values": [[1, "10"], [2, "12.5"]],
+                            }
+                        ]
+                    },
+                }
             if "unwrap delay" in q:
                 return {
                     "status": "success",
@@ -512,6 +554,9 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(m["total_sensor_messages"], 42)
         self.assertEqual(m["messages_per_sec"], 0.5)
         self.assertEqual(m["allowed_ips"], 3)
+        self.assertEqual(m["delay_latest"], 12.5)
+        self.assertEqual(m["delay_total"], 125.5)
+        self.assertEqual(m["delay_samples"], 10)
         self.assertEqual(body["gateway_id"], "gw1")
         by_id = {s["device_id"]: s for s in body["connected_sensors"]}
         self.assertIn("sensor_a", by_id)
@@ -519,8 +564,10 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(by_id["sensor_a"]["kafka_retention_bytes"], 1073741824)
         self.assertEqual(by_id["sensor_a"]["client_id"], "c1")
         self.assertFalse(by_id["sensor_a"]["is_fake"])
-        self.assertEqual(body["delay_by_device"][0]["sparkline"], [0.01, 0.02])
+        self.assertEqual(by_id["sensor_a"]["metrics"]["delay_latest"], 12.5)
+        self.assertEqual(by_id["sensor_a"]["metrics"]["delay_total"], 125.5)
         self.assertIn("delay", body["charts"])
+        self.assertIn("messages", body["charts"])
 
     def test_summary_gateway_connected_sensors_is_fake(self) -> None:
         """Activities connected_sensors carries registry is_fake for Fake/Real UI."""

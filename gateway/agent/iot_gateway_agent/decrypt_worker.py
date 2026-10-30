@@ -279,8 +279,21 @@ class DecryptWorker:
         logger.warning("decrypt deny device=%s reason=%s", device_id, reason)
 
     def _accept_clear(
-        self, device_id: str, clear: str, *, received_ms: int, path: str
+        self,
+        device_id: str,
+        clear: str,
+        *,
+        received_ms: int,
+        path: str,
+        process_t0: float | None = None,
     ) -> None:
+        """Accept cleartext, optional Kafka produce, and record processing delay.
+
+        ``process_t0`` is ``time.perf_counter()`` at the start of decrypt/unwrap
+        when available. Delay includes Kafka handoff only when produce succeeds
+        so a down broker (``max_block_ms``) does not inflate the gauge.
+        """
+        t0 = float(process_t0) if process_t0 is not None else time.perf_counter()
         line = f"{received_ms}: {clear}\n"
         try:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -291,12 +304,8 @@ class DecryptWorker:
                 self.envelope_ok += 1
             else:
                 self.legacy_ok += 1
-            delay = _delay_ms_from_payload(clear, received_ms=received_ms)
             with self._lock:
-                ctr = self._by_device[device_id]
-                ctr.messages_ok += 1
-                if delay is not None:
-                    ctr.observe_delay(delay)
+                self._by_device[device_id].messages_ok += 1
         except OSError as e:
             logger.warning("sensor_data.log write failed: %s", e)
             self.messages_fail += 1
@@ -304,8 +313,15 @@ class DecryptWorker:
                 self._by_device[device_id].messages_fail += 1
             return
 
+        t_pre_kafka = time.perf_counter()
+        kafka_ok = True
         if self.kafka is not None:
-            self.kafka.produce(kafka_topic_name(device_id), clear)
+            kafka_ok = bool(self.kafka.produce(kafka_topic_name(device_id), clear))
+        t_done = time.perf_counter() if kafka_ok else t_pre_kafka
+        proc_delay = (t_done - t0) * 1000.0
+        if 0.0 <= proc_delay <= _MAX_DELAY_MS:
+            with self._lock:
+                self._by_device[device_id].observe_delay(proc_delay)
 
     def _replay_seen(self, device_id: str, msg_id: str) -> bool:
         if self.replay_cache_size <= 0:
@@ -331,6 +347,7 @@ class DecryptWorker:
         *,
         received_ms: int,
     ) -> None:
+        process_t0 = time.perf_counter()
         msg_id = str(key_part.get("msg_id") or "")
         if msg_id and self._replay_seen(device_id, msg_id):
             self._fail(device_id, "replay")
@@ -399,7 +416,13 @@ class DecryptWorker:
             self._fail(device_id, "schema")
             return
 
-        self._accept_clear(device_id, text, received_ms=received_ms, path="envelope")
+        self._accept_clear(
+            device_id,
+            text,
+            received_ms=received_ms,
+            path="envelope",
+            process_t0=process_t0,
+        )
 
     def _handle_envelope_half(
         self, device_id: str, kind: str, payload: bytes, *, received_ms: int
@@ -447,6 +470,7 @@ class DecryptWorker:
         if self.envelope_require:
             self._fail(device_id, "legacy")
             return
+        process_t0 = time.perf_counter()
         clear = decrypt_wrapper_payload(payload)
         if clear is None:
             self.messages_fail += 1
@@ -456,7 +480,13 @@ class DecryptWorker:
                     self._by_device[device_id].deny_reasons.get("fernet", 0) + 1
                 )
             return
-        self._accept_clear(device_id, clear, received_ms=received_ms, path="legacy")
+        self._accept_clear(
+            device_id,
+            clear,
+            received_ms=received_ms,
+            path="legacy",
+            process_t0=process_t0,
+        )
 
     def _handle_message(self, topic: str, payload: bytes) -> None:
         device_id = device_id_from_mqtt_topic(topic)

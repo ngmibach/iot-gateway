@@ -353,6 +353,8 @@ Create leaves the unit **stopped**. Start/stop and interval/topic/payload/behavi
 
 **Persistence:** Applied Simulate fields are stored in monitoring-app `registry.sqlite` (`meta.fake`: interval, topic, payload, behaviors) before the gateway unit restart; gateway `payload.json` + unit env are updated over SSH. Unapplied UI drafts use `%APPDATA%\IoTGatewayMonitor\ui-state.json` (Linux: `~/.local/share/iot-gateway-monitor/ui-state.json`) via `GET`/`PUT /api/wizard/ui-state`, mirrored in browser `localStorage`.
 
+**Activities transmission delay:** Agent records gateway processing time (envelope decrypt/validate → log → Kafka produce) as `iotgw_device_delay_ms` (latest), `iotgw_device_delay_ms_sum` (cumulative Total), and `iotgw_device_delay_samples_total`. Kafka handoff time is included only when produce succeeds so a down broker does not inflate the gauge. General Information also charts avg messages/sec from `rate(iotgw_decrypt_messages_total)`.
+
 ### Cert lifecycle
 
 - Fakes: monitoring app **auto-renews and feeds** mTLS (`FakeCertRenewer`); no operator cert zip / fingerprint / Re-issue UI
