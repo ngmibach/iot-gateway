@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_BOOTSTRAP = "127.0.0.1:9092"
+# Keep connect attempts short so a missing broker cannot stall decrypt/metrics.
+_CONNECT_MAX_BLOCK_MS = 250
+_CONNECT_COOLDOWN_S = 30.0
 
 
 class SensorKafkaProducer:
@@ -24,6 +28,7 @@ class SensorKafkaProducer:
         self._producer: Any = None
         self._lock = threading.Lock()
         self._disabled_reason: Optional[str] = None
+        self._disabled_until: float = 0.0
         self.produced_ok = 0
         self.produced_fail = 0
         self.up = False
@@ -45,10 +50,15 @@ class SensorKafkaProducer:
             return None
         if self._producer is not None:
             return self._producer
+        now = time.monotonic()
+        if now < self._disabled_until:
+            return None
         with self._lock:
             if self._producer is not None:
                 return self._producer
             if self._disabled_reason:
+                return None
+            if now < self._disabled_until:
                 return None
             try:
                 from kafka import KafkaProducer  # type: ignore[import-untyped]
@@ -64,22 +74,22 @@ class SensorKafkaProducer:
                     if isinstance(v, (bytes, bytearray))
                     else str(v).encode("utf-8"),
                     acks=1,
-                    retries=1,
-                    request_timeout_ms=5000,
-                    max_block_ms=3000,
+                    retries=0,
+                    request_timeout_ms=2000,
+                    max_block_ms=_CONNECT_MAX_BLOCK_MS,
                     linger_ms=50,
                 )
                 self.up = True
+                self._disabled_until = 0.0
                 logger.info("Kafka producer connected to %s", self.bootstrap)
             except Exception as exc:  # noqa: BLE001
-                self._disabled_reason = f"connect failed: {exc}"
                 self.up = False
+                self._disabled_until = time.monotonic() + _CONNECT_COOLDOWN_S
                 logger.warning(
-                    "Kafka producer unavailable (%s) — will retry later",
-                    self._disabled_reason,
+                    "Kafka producer unavailable (%s) — retry in %.0fs",
+                    exc,
+                    _CONNECT_COOLDOWN_S,
                 )
-                # Allow retry on next message.
-                self._disabled_reason = None
                 return None
             return self._producer
 
