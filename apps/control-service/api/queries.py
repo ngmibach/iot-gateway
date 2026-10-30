@@ -251,12 +251,46 @@ def filter_series_by_device(
     return out
 
 
-def sparkline_floats(values: list, *, limit: int = 30) -> list[float]:
-    """Convert Loki/Prom value pairs to floats; skip non-numeric points."""
-    spark: list[float] = []
+def _pair_unix_sec(raw_ts: object) -> int:
+    """Normalize Prom (unix sec) or Loki (ns) timestamps to unix seconds."""
+    t = float(raw_ts)
+    if t > 1e12:  # nanoseconds
+        t = t / 1_000_000_000.0
+    return int(t)
+
+
+def sparkline_points(
+    values: list, *, limit: int = 360
+) -> list[dict[str, float | int]]:
+    """Convert Loki/Prom ``[ts, value]`` pairs to ``{t, v}`` points."""
+    points: list[dict[str, float | int]] = []
     for pair in values[-limit:]:
         try:
-            spark.append(float(pair[1]))
+            points.append(
+                {"t": _pair_unix_sec(pair[0]), "v": float(pair[1])}
+            )
         except (TypeError, ValueError, IndexError):
             continue
-    return spark
+    return points
+
+
+def sparkline_floats(values: list, *, limit: int = 30) -> list[float]:
+    """Convert Loki/Prom value pairs to floats; skip non-numeric points."""
+    return [float(p["v"]) for p in sparkline_points(values, limit=limit)]
+
+
+def point_values(points: list) -> list[float]:
+    """Extract ``v`` from ``{t,v}`` points; pass bare floats through."""
+    out: list[float] = []
+    for p in points or []:
+        if isinstance(p, dict):
+            try:
+                out.append(float(p["v"]))
+            except (TypeError, ValueError, KeyError):
+                continue
+        else:
+            try:
+                out.append(float(p))
+            except (TypeError, ValueError):
+                continue
+    return out

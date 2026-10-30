@@ -274,16 +274,20 @@ def summary_gateway(
             warnings.append(f"prometheus: {e.detail}")
             return 0.0
 
-    def prom_spark(expr: str, *, label: str = "spark") -> list[float]:
+    spark_limit = _spark_limit(start, end, step)
+
+    def prom_spark(expr: str, *, label: str = "spark") -> list[dict[str, float | int]]:
         try:
             data = _proxy_get(
                 f"{prom}/api/v1/query_range",
                 {"query": expr, "start": start, "end": end, "step": step},
             )
             for r in data.get("data", {}).get("result", []) or []:
-                vals = Q.sparkline_floats(r.get("values") or [], limit=60)
-                if vals:
-                    return vals
+                pts = Q.sparkline_points(
+                    r.get("values") or [], limit=spark_limit
+                )
+                if pts:
+                    return pts
         except HTTPException as e:
             warnings.append(f"{label}: {e.detail}")
         return []
@@ -338,8 +342,10 @@ def summary_gateway(
             warnings.append(f"prom_by_device: {e.detail}")
         return out
 
-    def _prom_spark_by_device(expr: str) -> dict[str, list[float]]:
-        out: dict[str, list[float]] = {}
+    def _prom_spark_by_device(
+        expr: str,
+    ) -> dict[str, list[dict[str, float | int]]]:
+        out: dict[str, list[dict[str, float | int]]] = {}
         try:
             data = _proxy_get(
                 f"{prom}/api/v1/query_range",
@@ -350,7 +356,9 @@ def summary_gateway(
                 did = m.get("device_id") or m.get("deviceId")
                 if not did:
                     continue
-                spark = Q.sparkline_floats(r.get("values") or [], limit=60)
+                spark = Q.sparkline_points(
+                    r.get("values") or [], limit=spark_limit
+                )
                 if spark:
                     out[str(did)] = spark
         except HTTPException as e:
@@ -408,22 +416,35 @@ def summary_gateway(
             return None
         return n
 
-    def _sane_delay_spark(vals: list[float]) -> list[float]:
-        out: list[float] = []
-        for v in vals:
-            n = _sane_delay_ms(v)
-            out.append(0.0 if n is None else n)
+    def _sane_delay_points(
+        pts: list[dict[str, float | int]],
+    ) -> list[dict[str, float | int]]:
+        out: list[dict[str, float | int]] = []
+        for p in pts:
+            n = _sane_delay_ms(p.get("v"))
+            out.append(
+                {
+                    "t": int(p.get("t") or 0),
+                    "v": 0.0 if n is None else float(n),
+                }
+            )
         return out
 
     delay_by_id: dict[str, dict[str, Any]] = {}
     delay_series_legacy: list[dict[str, Any]] = []
     for did, latest in delay_latest_by_id.items():
         latest_sane = _sane_delay_ms(latest)
-        raw_spark = delay_chart_by_id.get(did) or (
-            [latest] if latest is not None else []
+        raw_pts = delay_chart_by_id.get(did) or (
+            [{"t": end, "v": float(latest)}] if latest is not None else []
         )
-        spark = _sane_delay_spark([float(x) for x in raw_spark])
-        entry = {"device_id": did, "latest": latest_sane, "sparkline": spark}
+        points = _sane_delay_points(raw_pts)
+        spark = Q.point_values(points)
+        entry = {
+            "device_id": did,
+            "latest": latest_sane,
+            "sparkline": spark,
+            "points": points,
+        }
         delay_by_id[did] = entry
         delay_series_legacy.append(entry)
 
@@ -444,11 +465,17 @@ def summary_gateway(
             for stream in data.get("data", {}).get("result", []) or []:
                 metric = stream.get("metric") or {}
                 did = str(metric.get("deviceId") or metric.get("device_id") or "?")
-                spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
+                points = _sane_delay_points(
+                    Q.sparkline_points(
+                        stream.get("values") or [], limit=spark_limit
+                    )
+                )
+                spark = Q.point_values(points)
                 entry = {
                     "device_id": did,
                     "latest": spark[-1] if spark else None,
                     "sparkline": spark,
+                    "points": points,
                 }
                 delay_by_id[did] = entry
                 delay_series_legacy.append(entry)
@@ -474,10 +501,12 @@ def summary_gateway(
                 did = str(metric.get("deviceId") or metric.get("device_id") or "")
                 if not did:
                     continue
-                spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
-                if spark:
-                    msgs_count_by_id[did] = spark[-1]
-                    msgs_chart_by_id[did] = spark
+                points = Q.sparkline_points(
+                    stream.get("values") or [], limit=spark_limit
+                )
+                if points:
+                    msgs_count_by_id[did] = float(points[-1]["v"])
+                    msgs_chart_by_id[did] = points
         except HTTPException as e:
             warnings.append(f"msgs_by_device: {e.detail}")
         try:
@@ -497,31 +526,46 @@ def summary_gateway(
                 did = str(metric.get("deviceId") or metric.get("device_id") or "")
                 if not did:
                     continue
-                spark = Q.sparkline_floats(stream.get("values") or [], limit=60)
-                if spark:
-                    msgs_rate_by_id[did] = spark[-1]
-                    msgs_chart_by_id.setdefault(did, spark)
+                points = Q.sparkline_points(
+                    stream.get("values") or [], limit=spark_limit
+                )
+                if points:
+                    msgs_rate_by_id[did] = float(points[-1]["v"])
+                    msgs_chart_by_id.setdefault(did, points)
         except HTTPException as e:
             warnings.append(f"msgs_rate_by_device: {e.detail}")
 
     gateway_delay_spark: list[float] = []
+    gateway_delay_points: list[dict[str, float | int]] = []
     gateway_delay_latest: float | None = None
     avg_delay = prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_AVG_PROM, node="gateway"))
     avg_sane = _sane_delay_ms(avg_delay)
     if avg_sane is not None and avg_sane > 0:
         gateway_delay_latest = avg_sane
     if delay_series_legacy:
-        lengths = [len(e.get("sparkline") or []) for e in delay_series_legacy]
+        lengths = [
+            len(e.get("points") or e.get("sparkline") or [])
+            for e in delay_series_legacy
+        ]
         n = min(lengths) if lengths and min(lengths) > 0 else 0
         if n > 0:
             gateway_delay_spark = []
+            gateway_delay_points = []
             for i in range(n):
                 vals = [
                     (e.get("sparkline") or [])[i]
                     for e in delay_series_legacy
                     if len(e.get("sparkline") or []) > i
                 ]
-                gateway_delay_spark.append(sum(vals) / len(vals) if vals else 0.0)
+                avg_v = sum(vals) / len(vals) if vals else 0.0
+                gateway_delay_spark.append(avg_v)
+                ts = end
+                for e in delay_series_legacy:
+                    pts = e.get("points") or []
+                    if len(pts) > i and isinstance(pts[i], dict):
+                        ts = int(pts[i].get("t") or end)
+                        break
+                gateway_delay_points.append({"t": ts, "v": avg_v})
         if gateway_delay_latest is None:
             gateway_delay_latest = (
                 gateway_delay_spark[-1] if gateway_delay_spark else None
@@ -609,7 +653,7 @@ def summary_gateway(
                     },
                     "charts": {
                         "kafka_messages": kafka_chart,
-                        "delay": delay.get("sparkline")
+                        "delay": delay.get("points")
                         or delay_chart_by_id.get(did)
                         or [],
                     },
@@ -640,13 +684,18 @@ def summary_gateway(
                     },
                     "charts": {
                         "kafka_messages": msgs_chart_by_id.get(did) or [],
-                        "delay": delay.get("sparkline") or [],
+                        "delay": delay.get("points") or [],
                     },
                 }
             )
 
+    delay_chart_out = gateway_delay_points or [
+        {"t": start + i, "v": v}
+        for i, v in enumerate(gateway_delay_spark[-spark_limit:])
+    ]
     return {
         "range": time_range,
+        "time": _time_window_meta(time_range, start, end),
         "gateway_id": gid,
         "metrics": {
             "total_sensor_messages": total,
@@ -657,10 +706,10 @@ def summary_gateway(
             "ids_detections": ids_alerts,
             "allowed_ips": allowed_ips,
             "delay_latest": gateway_delay_latest,
-            "delay_sparkline": gateway_delay_spark[-60:],
+            "delay_sparkline": Q.point_values(delay_chart_out)[-spark_limit:],
         },
         "charts": {
-            "delay": gateway_delay_spark[-60:],
+            "delay": delay_chart_out[-spark_limit:],
             "messages": decrypt_chart,
         },
         "connected_sensors": connected,
@@ -670,21 +719,55 @@ def summary_gateway(
     }
 
 
+def _parse_step_s(step: str) -> int:
+    """Parse a Prometheus step string like ``15s`` / ``2m`` into seconds."""
+    raw = str(step).strip().lower()
+    try:
+        if raw.endswith("ms"):
+            return max(1, int(raw[:-2]) // 1000 or 1)
+        if raw.endswith("s"):
+            return max(1, int(raw[:-1]))
+        if raw.endswith("m"):
+            return max(1, int(raw[:-1]) * 60)
+        if raw.endswith("h"):
+            return max(1, int(raw[:-1]) * 3600)
+        return max(1, int(raw))
+    except ValueError:
+        return 60
+
+
 def _range_window_s(range_s: str) -> tuple[int, int, str]:
     """Return (start_unix, end_unix, step) for Prometheus range queries."""
     start_ns, end_ns = _ns_window(range_s)
     start = start_ns // 1_000_000_000
     end = end_ns // 1_000_000_000
     span = max(end - start, 60)
-    if span <= 900:
+    if span <= 300:  # 5m
+        step = "5s"
+    elif span <= 900:  # 15m
         step = "15s"
-    elif span <= 3600:
+    elif span <= 3600:  # 1h
         step = "30s"
-    elif span <= 21600:
+    elif span <= 10800:  # 3h
         step = "60s"
-    else:
-        step = "120s"
+    elif span <= 21600:  # 6h
+        step = "60s"
+    elif span <= 86400:  # 12h–24h
+        step = "2m"
+    else:  # multi-day (e.g. 7d)
+        step = "5m"
     return start, end, step
+
+
+def _spark_limit(start: int, end: int, step: str) -> int:
+    """Point budget for chart series (~2–6 minutes of wall for long ranges)."""
+    step_s = _parse_step_s(step)
+    span = max(int(end) - int(start), 1)
+    return max(24, min(360, span // step_s + 2))
+
+
+def _time_window_meta(range_s: str, start: int, end: int) -> dict[str, Any]:
+    return {"range": range_s, "from": int(start), "to": int(end)}
 
 
 def _container_label(metric: dict[str, Any]) -> str:
@@ -722,6 +805,8 @@ def summary_raspi(
     """Host (Raspi) metrics + chart series for native Monitoring Gateway Metric."""
     _, prom = _backend_urls(state)
     warnings: list[str] = []
+    start, end, step = _range_window_s(range)
+    spark_limit = _spark_limit(start, end, step)
 
     def prom_scalar(expr: str) -> float:
         try:
@@ -758,7 +843,9 @@ def summary_raspi(
             warnings.append(f"prometheus: {e.detail}")
             return 0.0
 
-    def prom_spark(expr: str, *, scale: float = 1.0, label: str = "spark") -> list[float]:
+    def prom_spark(
+        expr: str, *, scale: float = 1.0, label: str = "spark"
+    ) -> list[dict[str, float | int]]:
         try:
             q = Q.prep_prom(expr, node=node, job=job)
             data = _proxy_get(
@@ -766,10 +853,15 @@ def summary_raspi(
                 {"query": q, "start": start, "end": end, "step": step},
             )
             for r in data.get("data", {}).get("result", []) or []:
-                vals = Q.sparkline_floats(r.get("values") or [], limit=60)
+                pts = Q.sparkline_points(
+                    r.get("values") or [], limit=spark_limit
+                )
                 if scale != 1.0:
-                    vals = [v * scale for v in vals]
-                return vals
+                    pts = [
+                        {"t": int(p["t"]), "v": float(p["v"]) * scale}
+                        for p in pts
+                    ]
+                return pts
         except HTTPException as e:
             warnings.append(f"{label}: {e.detail}")
         return []
@@ -807,7 +899,6 @@ def summary_raspi(
     procs_run = prom_scalar(Q.RASPI_PROCS_RUNNING)
     procs_blk = prom_scalar(Q.RASPI_PROCS_BLOCKED)
 
-    start, end, step = _range_window_s(range)
     cpu_spark = prom_spark(Q.RASPI_CPU_BUSY_PCT_RANGE, label="cpu_sparkline")
     mem_spark = prom_spark(Q.RASPI_MEM_USED_PCT_RANGE, label="mem_sparkline")
     load_spark = prom_spark(Q.RASPI_LOAD1, label="load_sparkline")
@@ -885,6 +976,7 @@ def summary_raspi(
         "node": node,
         "job": job,
         "range": range,
+        "time": _time_window_meta(range, start, end),
         "up": bool(up),
         "metrics": {
             "cpu_cores_busy": round(cpu, 3),
@@ -908,7 +1000,8 @@ def summary_raspi(
             "procs_running": int(procs_run) if procs_run else 0,
             "procs_blocked": int(procs_blk) if procs_blk else 0,
         },
-        "cpu_sparkline_pct": cpu_spark,
+        # Legacy float sparkline for older UI builds.
+        "cpu_sparkline_pct": Q.point_values(cpu_spark),
         "charts": {
             "cpu_pct": cpu_spark,
             "mem_used_pct": mem_spark,

@@ -110,6 +110,17 @@ class QueryApiTests(unittest.TestCase):
             [1.5, 2.0],
         )
 
+    def test_sparkline_points_keeps_timestamps(self) -> None:
+        self.assertEqual(
+            Q.sparkline_points([["1700000000", "1.5"], ["2", "nope"], ["1700000060", "2"]]),
+            [{"t": 1700000000, "v": 1.5}, {"t": 1700000060, "v": 2.0}],
+        )
+        # Loki-style nanosecond timestamps normalize to unix seconds.
+        self.assertEqual(
+            Q.sparkline_points([["1700000000000000000", "9"]]),
+            [{"t": 1700000000, "v": 9.0}],
+        )
+
     def test_sensors_filter_empty_registry_shows_all(self) -> None:
         db = Path(self._tmp.name) / "empty.sqlite"
         reg = Registry(str(db))
@@ -671,8 +682,15 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(body["metrics"]["mem_used_pct"], 50.0)
         self.assertEqual(body["metrics"]["temp_c"], 48.2)
         self.assertIn("cpu_pct", body["charts"])
-        self.assertEqual(body["charts"]["cpu_pct"], [10.0, 20.0])
+        self.assertEqual(
+            body["charts"]["cpu_pct"],
+            [{"t": 1, "v": 10.0}, {"t": 2, "v": 20.0}],
+        )
         self.assertEqual(body["cpu_sparkline_pct"], [10.0, 20.0])
+        self.assertEqual(body["time"]["range"], "15m")
+        self.assertIn("from", body["time"])
+        self.assertIn("to", body["time"])
+        self.assertGreaterEqual(body["time"]["to"], body["time"]["from"])
         self.assertEqual(body["applications"]["status"][0]["name"], "Agent")
         self.assertTrue(body["applications"]["status"][0]["up"])
         status_by_id = {s["id"]: s for s in body["applications"]["status"]}
