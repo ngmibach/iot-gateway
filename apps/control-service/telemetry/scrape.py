@@ -13,8 +13,9 @@ global:
 
 scrape_configs:
   - job_name: 'iot-gateway-agent'
+    # Prometheus requires scrape_timeout <= scrape_interval or it refuses to start.
     scrape_interval: 5s
-    scrape_timeout: 10s
+    scrape_timeout: 4s
     metrics_path: /metrics
     static_configs:
       - targets: ['{{GATEWAY_IP}}:9139']
