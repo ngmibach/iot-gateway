@@ -832,6 +832,46 @@ class ApiDeviceTests(unittest.TestCase):
         self.assertEqual(st.status_code, 200, st.text)
         self.assertEqual(st.json()["device"]["fake"]["status"], "stopped")
 
+    def test_patch_fake_keeps_registry_when_restart_fails(self) -> None:
+        from actions.fake_sensors import FakePlaybookResult
+
+        self._seed_fake()
+        with (
+            patch(
+                "api.devices.update_fake_config",
+                return_value=FakePlaybookResult(ok=True),
+            ),
+            patch(
+                "api.devices.restart_fake_unit",
+                return_value=FakePlaybookResult(
+                    ok=False, status="failed", message="unit missing"
+                ),
+            ),
+        ):
+            p = self.client.patch(
+                "/api/v1/gateways/gw1/devices/fake1/fake",
+                json={
+                    "send_interval_ms": 3333,
+                    "behaviors": {"skip_encryption": True},
+                },
+            )
+        self.assertEqual(p.status_code, 502, p.text)
+        self.assertIn("Config saved", p.json()["detail"])
+        import json as _json
+
+        row = self.registry.get_device("gw1", "fake1")
+        assert row is not None
+        raw_meta = row["meta_json"]
+        meta = (
+            raw_meta
+            if isinstance(raw_meta, dict)
+            else _json.loads(raw_meta or "{}")
+        )
+        fake = meta.get("fake") or {}
+        self.assertEqual(fake.get("send_interval_ms"), 3333)
+        self.assertTrue(fake.get("behaviors", {}).get("skip_encryption"))
+        self.assertEqual(fake.get("status"), "error")
+
     def test_feed_cert_rejects_real_device(self) -> None:
         self.registry.upsert_device("gw1", "sensor1", ip="10.0.0.2")
         r = self.client.post(

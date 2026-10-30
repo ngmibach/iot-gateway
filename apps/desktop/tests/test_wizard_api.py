@@ -167,6 +167,10 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("refreshFakeDevices", ajs)
         self.assertIn("applySimConfig", ajs)
         self.assertIn("simStartStop", ajs)
+        self.assertIn("/api/wizard/ui-state", ajs)
+        self.assertIn("simDrafts", ajs)
+        self.assertIn("snapshotSimDraft", ajs)
+        self.assertIn("iotgw.ui.simulateDrafts", ajs)
         self.assertIn("omit_client_cert", ajs)
         self.assertIn("withCaRetry", ajs)
         self.assertIn("Fake sensor successfully created", ajs)
@@ -326,6 +330,53 @@ class WizardApiTests(unittest.TestCase):
         env2 = self._get("/api/wizard/env")
         self.assertTrue(env2.get("setup_complete"))
         self.assertEqual(env2.get("entry"), "app")
+
+    def test_ui_state_persists_simulate_drafts(self) -> None:
+        from shell.paths import load_ui_state, ui_state_path
+
+        empty = self._get("/api/wizard/ui-state")
+        self.assertEqual(empty, {})
+
+        draft = {
+            "selected_gateway_id": "gw1",
+            "simulate": {
+                "gw1:fake1": {
+                    "send_interval_ms": 2500,
+                    "topic": "sensors/fake1/process",
+                    "payload": {"hello": 42},
+                    "behaviors": {"omit_client_cert": True},
+                }
+            },
+        }
+        req = urllib.request.Request(
+            self.base + "/api/wizard/ui-state",
+            data=json.dumps(draft).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            put_body = json.loads(resp.read().decode("utf-8"))
+        self.assertEqual(put_body.get("selected_gateway_id"), "gw1")
+        self.assertEqual(
+            put_body["simulate"]["gw1:fake1"]["send_interval_ms"], 2500
+        )
+        self.assertTrue(ui_state_path().is_file())
+        self.assertEqual(load_ui_state()["simulate"]["gw1:fake1"]["payload"]["hello"], 42)
+
+        got = self._get("/api/wizard/ui-state")
+        self.assertEqual(got["simulate"]["gw1:fake1"]["topic"], "sensors/fake1/process")
+
+        # Merge: clear one draft key with null; keep selected_gateway_id.
+        clear_req = urllib.request.Request(
+            self.base + "/api/wizard/ui-state",
+            data=json.dumps({"simulate": {"gw1:fake1": None}}).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="PUT",
+        )
+        with urllib.request.urlopen(clear_req, timeout=10) as resp:
+            cleared = json.loads(resp.read().decode("utf-8"))
+        self.assertNotIn("gw1:fake1", cleared.get("simulate") or {})
+        self.assertEqual(cleared.get("selected_gateway_id"), "gw1")
 
     def test_settings_gateway_persists_ssh(self) -> None:
         from shell.paths import load_settings

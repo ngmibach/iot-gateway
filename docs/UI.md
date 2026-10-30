@@ -107,6 +107,8 @@ Lists `is_fake` devices only.
 
 TLS attack toggles pause auto-renew until cleared. Apply changes after editing interval/topic/payload/behaviors as prompted by the UI.
 
+**Persistence (Windows):** Form edits are kept when you switch Registration ↔ View ↔ Simulate, and across app restart / reboot. Unapplied drafts live in `%APPDATA%\IoTGatewayMonitor\ui-state.json` (and browser `localStorage`). **Apply** writes interval/topic/payload/behaviors into local `registry.sqlite` first, then pushes them to the gateway unit — so a failed unit restart still leaves the last Apply on this PC. Settings → Remove wipes app data including these files.
+
 ### Grafana
 
 Left-nav **Grafana** opens `https://127.0.0.1:9140/` in the **system browser** (not an in-app tab). Trust the cert first under Settings → Certificates if the browser warns.

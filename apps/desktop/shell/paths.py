@@ -135,6 +135,34 @@ def settings_path() -> Path:
     return ensure_data_dir() / "settings.json"
 
 
+def ui_state_path() -> Path:
+    """Persistent Control Plane UI drafts (Simulate form, selected gateway, …)."""
+    return ensure_data_dir() / "ui-state.json"
+
+
+def load_ui_state() -> dict[str, Any]:
+    path = ui_state_path()
+    if not path.is_file():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_ui_state(data: dict[str, Any]) -> None:
+    path = ui_state_path()
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass
+
+
 def known_hosts_path() -> Path:
     return ensure_data_dir() / "known_hosts"
 

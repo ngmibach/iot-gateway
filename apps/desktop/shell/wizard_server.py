@@ -37,7 +37,9 @@ from .paths import (
     desktop_ui_dir,
     ensure_data_dir,
     load_settings,
+    load_ui_state,
     save_settings,
+    save_ui_state,
 )
 
 logger = logging.getLogger(__name__)
@@ -280,6 +282,41 @@ def _handle_api(
             snap["setup_complete"] = setup_complete or tel_ready
             snap["entry"] = "app" if snap["setup_complete"] else "wizard"
             _json_response(handler, 200, snap)
+            return
+
+        if method == "GET" and path == "/api/wizard/ui-state":
+            _json_response(handler, 200, load_ui_state())
+            return
+
+        if method == "PUT" and path == "/api/wizard/ui-state":
+            length = int(handler.headers.get("Content-Length") or 0)
+            raw = handler.rfile.read(length) if length > 0 else b"{}"
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except json.JSONDecodeError:
+                _json_response(handler, 400, {"error": "invalid JSON"})
+                return
+            if not isinstance(body, dict):
+                _json_response(handler, 400, {"error": "ui-state must be an object"})
+                return
+            current = load_ui_state()
+            # Shallow merge top-level keys; simulate drafts replace per key.
+            merged = dict(current)
+            for key, value in body.items():
+                if key == "simulate" and isinstance(value, dict):
+                    sim = dict(merged.get("simulate") or {})
+                    if not isinstance(sim, dict):
+                        sim = {}
+                    for draft_key, draft_val in value.items():
+                        if draft_val is None:
+                            sim.pop(str(draft_key), None)
+                        else:
+                            sim[str(draft_key)] = draft_val
+                    merged["simulate"] = sim
+                else:
+                    merged[key] = value
+            save_ui_state(merged)
+            _json_response(handler, 200, merged)
             return
 
         if method == "POST" and path == "/api/wizard/setup/complete":
