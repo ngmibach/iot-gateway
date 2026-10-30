@@ -190,9 +190,20 @@ class TestFakeSensorsPlaybooks(unittest.TestCase):
         self.assertFalse(cfg["behaviors"]["wrong_password"])
 
     def test_enable_and_start_unit(self) -> None:
-        ssh = FakeSSH()
+        def handler(command: str) -> CommandResult:
+            if "systemctl is-active" in command:
+                return CommandResult(
+                    argv=command, exit_code=0, stdout="active\n", stderr=""
+                )
+            return CommandResult(argv=command, exit_code=0, stdout="", stderr="")
+
+        ssh = FakeSSH(run_handler=handler)
         result = enable_and_start_unit(ssh, "fake1", sudo_password="pw")  # type: ignore[arg-type]
-        self.assertTrue(result.ok)
+        self.assertTrue(result.ok, result.message)
+        joined = "\n".join(ssh.commands)
+        # Reboot drops /run/netns — start must recreate it and refresh the unit.
+        self.assertIn("ip netns add", joined)
+        self.assertIn(FAKE_UNIT_TEMPLATE, joined)
         self.assertTrue(
             any(
                 "systemctl enable" in c and "iotgw-fake@fake1" in c for c in ssh.commands

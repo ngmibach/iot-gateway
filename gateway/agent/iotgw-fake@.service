@@ -6,11 +6,13 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-NetworkNamespacePath=/run/netns/iotgw-fake-%i
 Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
 Environment=PYTHONPATH=/opt/iot-gateway-agent
 EnvironmentFile=-/etc/iot-gateway-agent.env
-ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id %i
+# /run/netns is tmpfs — recreate before every start (survives reboot).
+# Avoid NetworkNamespacePath: missing path fails with 225/NETWORK before ExecStartPre.
+ExecStartPre=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_netns ensure %i
+ExecStart=/bin/sh -c 'PATH=/usr/sbin:/sbin:/usr/bin:/bin; exec ip netns exec "iotgw-fake-$1" /opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id "$1"' _ %i
 Restart=on-failure
 RestartSec=3
 # Package lives under /opt/iot-gateway-agent (same as the agent unit). Device

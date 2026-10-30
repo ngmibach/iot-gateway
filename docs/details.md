@@ -343,9 +343,9 @@ Gateway uninstall runs `teardown_all_fakes` (units, netns, bridge, fake data dir
 | Piece | Value |
 |-------|-------|
 | Bridge | `iotgw-fake` on `10.255.0.0/24`, gateway `10.255.0.1` |
-| Netns | `iotgw-fake-<device_id>` |
+| Netns | `iotgw-fake-<device_id>` under `/run/netns` (tmpfs — recreated on every unit start from `ip-map.json` via `python -m iot_gateway_agent.fake_netns ensure`) |
 | IP map | `/var/lib/iot-gateway-agent/fake/ip-map.json` |
-| Unit | `iotgw-fake@<device_id>.service` |
+| Unit | `iotgw-fake@<device_id>.service` (`ExecStartPre` ensures netns; `ip netns exec` runs the simulator — avoids `NetworkNamespacePath` / `225/NETWORK` after reboot) |
 | Payload file | `fake/<device_id>/payload.json` (default `{"device_id","hello":1}`) |
 | Publish topic | `sensors/<device_id>/process` (envelope uses env/key + env/data) |
 

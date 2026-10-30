@@ -50,6 +50,9 @@ DEFAULT_BEHAVIORS: dict[str, bool] = {
 }
 
 # Installed under /etc/systemd/system/iotgw-fake@.service
+# Do not use NetworkNamespacePath: /run/netns is tmpfs and disappears on reboot,
+# which yields status=225/NETWORK before any ExecStartPre can recreate it.
+# ExecStartPre rebuilds bridge+netns from ip-map.json; ExecStart joins via ip netns exec.
 FAKE_UNIT_BODY = """[Unit]
 Description=IoT Gateway fake sensor %i
 Documentation=file:///opt/iot-gateway-agent
@@ -58,11 +61,11 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-NetworkNamespacePath=/run/netns/iotgw-fake-%i
 Environment=IOTGW_AGENT_DATA=/var/lib/iot-gateway-agent
 Environment=PYTHONPATH=/opt/iot-gateway-agent
 EnvironmentFile=-/etc/iot-gateway-agent.env
-ExecStart=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id %i
+ExecStartPre=/opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_netns ensure %i
+ExecStart=/bin/sh -c 'PATH=/usr/sbin:/sbin:/usr/bin:/bin; exec ip netns exec "iotgw-fake-$1" /opt/iot-gateway-agent/venv/bin/python -m iot_gateway_agent.fake_sensor --device-id "$1"' _ %i
 Restart=on-failure
 RestartSec=3
 # Package lives under /opt/iot-gateway-agent (same as the agent unit). Device
@@ -702,9 +705,27 @@ def enable_and_start_unit(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> FakePlaybookResult:
-    """Enable and start ``iotgw-fake@<device_id>``; verify it stays active."""
-    del install_root, data_dir
+    """Enable and start ``iotgw-fake@<device_id>``; verify it stays active.
+
+    Recreates the ephemeral ``/run/netns`` path (lost on reboot) and refreshes
+    the unit template so boot starts no longer depend on NetworkNamespacePath.
+    """
+    del install_root
     device_id = validate_user_id(device_id)
+    paths = _paths(DEFAULT_INSTALL_ROOT, data_dir)
+    netns = create_netns(
+        ssh,
+        device_id,
+        sudo_password=sudo_password,
+        data_dir=paths.data_dir,
+    )
+    if not netns.ok:
+        return netns
+    unit_install = ensure_fake_unit_installed(
+        ssh, sudo_password=sudo_password
+    )
+    if not unit_install.ok:
+        return unit_install
     unit = unit_instance(device_id)
     result = _sudo(
         ssh,
@@ -791,8 +812,18 @@ def restart_fake_unit(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> FakePlaybookResult:
-    del install_root, data_dir
+    del install_root
     device_id = validate_user_id(device_id)
+    paths = _paths(DEFAULT_INSTALL_ROOT, data_dir)
+    # Reboot drops /run/netns; recreate before systemctl restart.
+    netns = create_netns(
+        ssh,
+        device_id,
+        sudo_password=sudo_password,
+        data_dir=paths.data_dir,
+    )
+    if not netns.ok:
+        return netns
     unit = unit_instance(device_id)
     result = _sudo(
         ssh,
