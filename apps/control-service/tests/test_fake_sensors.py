@@ -203,6 +203,7 @@ class TestFakeSensorsPlaybooks(unittest.TestCase):
         joined = "\n".join(ssh.commands)
         # Reboot drops /run/netns — start must recreate it and refresh the unit.
         self.assertIn("ip netns add", joined)
+        self.assertIn("fake_netns.py", joined)
         self.assertIn(FAKE_UNIT_TEMPLATE, joined)
         self.assertTrue(
             any(

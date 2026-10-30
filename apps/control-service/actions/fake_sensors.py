@@ -9,7 +9,9 @@ from __future__ import annotations
 
 import json
 import ipaddress
+import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional
 
 from .paths import DEFAULT_AGENT_DATA, DEFAULT_INSTALL_ROOT, GatewayPaths
@@ -697,6 +699,74 @@ def update_fake_config(
     return FakePlaybookResult(ok=True, message=f"updated config for {device_id}", details=details)
 
 
+def _local_fake_netns_py() -> Path | None:
+    """Locate bundled or checkout ``fake_netns.py`` for day-2 Start uploads."""
+    candidates: list[Path] = []
+    if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+        candidates.append(
+            Path(sys._MEIPASS) / "gateway" / "agent" / "iot_gateway_agent" / "fake_netns.py"  # type: ignore[attr-defined]
+        )
+    here = Path(__file__).resolve()
+    # apps/control-service/actions → repo/gateway/agent/...
+    candidates.append(
+        here.parents[3] / "gateway" / "agent" / "iot_gateway_agent" / "fake_netns.py"
+    )
+    candidates.append(
+        here.parents[2] / "gateway" / "agent" / "iot_gateway_agent" / "fake_netns.py"
+    )
+    for path in candidates:
+        if path.is_file():
+            return path
+    return None
+
+
+def ensure_fake_netns_module(
+    ssh: "SSHClient",
+    *,
+    sudo_password: str | None = None,
+    install_root: str = DEFAULT_INSTALL_ROOT,
+) -> FakePlaybookResult:
+    """Upload ``fake_netns.py`` into the remote agent package (for ExecStartPre)."""
+    src = _local_fake_netns_py()
+    if src is None:
+        return FakePlaybookResult(
+            ok=True,
+            status="degraded",
+            message="fake_netns.py not bundled locally; skip module upload",
+            details={"uploaded": False},
+        )
+    remote_tmp = "/tmp/iotgw-fake_netns.py"
+    dest = f"{install_root.rstrip('/')}/iot_gateway_agent/fake_netns.py"
+    ssh.write_text(
+        remote_tmp,
+        src.read_text(encoding="utf-8"),
+        mode=0o644,
+    )
+    result = _sudo(
+        ssh,
+        f"cp {shell_quote(remote_tmp)} {shell_quote(dest)} && "
+        f"chmod 644 {shell_quote(dest)}",
+        sudo_password=sudo_password,
+        timeout=60.0,
+    )
+    ssh.run(f"rm -f {shell_quote(remote_tmp)}")
+    if result.exit_code != 0:
+        return FakePlaybookResult(
+            ok=False,
+            status="failed",
+            message=(
+                "failed to upload fake_netns.py: "
+                + (result.stderr or result.stdout or "").strip()[:300]
+            ),
+            details={"uploaded": False, "dest": dest},
+        )
+    return FakePlaybookResult(
+        ok=True,
+        message=f"uploaded {dest}",
+        details={"uploaded": True, "dest": dest},
+    )
+
+
 def enable_and_start_unit(
     ssh: "SSHClient",
     device_id: str,
@@ -707,10 +777,10 @@ def enable_and_start_unit(
 ) -> FakePlaybookResult:
     """Enable and start ``iotgw-fake@<device_id>``; verify it stays active.
 
-    Recreates the ephemeral ``/run/netns`` path (lost on reboot) and refreshes
-    the unit template so boot starts no longer depend on NetworkNamespacePath.
+    Recreates the ephemeral ``/run/netns`` path (lost on reboot). When the
+    bundled ``fake_netns.py`` is available, also refreshes the unit template so
+    boot starts no longer depend on NetworkNamespacePath.
     """
-    del install_root
     device_id = validate_user_id(device_id)
     paths = _paths(DEFAULT_INSTALL_ROOT, data_dir)
     netns = create_netns(
@@ -721,11 +791,17 @@ def enable_and_start_unit(
     )
     if not netns.ok:
         return netns
-    unit_install = ensure_fake_unit_installed(
-        ssh, sudo_password=sudo_password
+    module = ensure_fake_netns_module(
+        ssh, sudo_password=sudo_password, install_root=install_root
     )
-    if not unit_install.ok:
-        return unit_install
+    if not module.ok:
+        return module
+    if module.details.get("uploaded"):
+        unit_install = ensure_fake_unit_installed(
+            ssh, sudo_password=sudo_password
+        )
+        if not unit_install.ok:
+            return unit_install
     unit = unit_instance(device_id)
     result = _sudo(
         ssh,
