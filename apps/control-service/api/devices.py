@@ -688,6 +688,33 @@ def patch_fake_device(
         )
 
     install_root = gw["install_root"]
+    payload_obj: Any | None = None
+    if body.payload is not None:
+        if isinstance(body.payload, (bytes, bytearray)):
+            payload_obj = json.loads(body.payload.decode("utf-8"))
+        elif isinstance(body.payload, str):
+            payload_obj = (
+                json.loads(body.payload) if body.payload.strip() else {"hello": 1}
+            )
+        else:
+            payload_obj = body.payload
+
+    # Persist Simulate fields to local registry.sqlite first so tab switches and
+    # reboots keep the last Apply even when unit restart fails.
+    prev = _meta_dict(row)
+    fake_update: dict[str, Any] = {"last_error": None}
+    if "send_interval_ms" in updates:
+        fake_update["send_interval_ms"] = updates["send_interval_ms"]
+    if "topic" in updates:
+        fake_update["topic"] = updates["topic"]
+    if "behaviors" in updates:
+        fake_update["behaviors"] = updates["behaviors"]
+    if payload_obj is not None:
+        fake_update["payload"] = payload_obj
+    meta = merge_device_meta(prev, is_fake=True, fake=fake_update)
+    device = registry.upsert_device(gid, device_id, meta_json=meta)
+
+    restart_error: str | None = None
     try:
         with open_ssh_for(state, gw) as ssh:
             if updates:
@@ -704,19 +731,11 @@ def patch_fake_device(
                         status_code=status.HTTP_502_BAD_GATEWAY,
                         detail=updated.message or "failed to update fake config",
                     )
-            if body.payload is not None:
+            if payload_obj is not None:
                 from actions.fake_sensors import _paths as _fake_paths
                 from actions.shellutil import shell_quote
 
                 paths = _fake_paths(install_root)
-                if isinstance(body.payload, (bytes, bytearray)):
-                    payload_obj: Any = json.loads(body.payload.decode("utf-8"))
-                elif isinstance(body.payload, str):
-                    payload_obj = (
-                        json.loads(body.payload) if body.payload.strip() else {"hello": 1}
-                    )
-                else:
-                    payload_obj = body.payload
                 ssh.run(f"mkdir -p {shell_quote(paths.fake_device_dir(device_id))}")
                 ssh.write_text(
                     paths.fake_payload_path(device_id),
@@ -730,11 +749,7 @@ def patch_fake_device(
                 install_root=install_root,
             )
             if not restarted.ok:
-                _mark_fake_error(registry, gid, device_id, message=restarted.message)
-                raise HTTPException(
-                    status_code=status.HTTP_502_BAD_GATEWAY,
-                    detail=restarted.message or "restart failed after fake update",
-                )
+                restart_error = restarted.message or "restart failed after fake update"
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
@@ -743,31 +758,39 @@ def patch_fake_device(
             detail=f"SSH/fake update failed: {exc}",
         ) from exc
 
-    prev = _meta_dict(row)
-    fake_update: dict[str, Any] = {"last_error": None, "status": "running"}
-    if "send_interval_ms" in updates:
-        fake_update["send_interval_ms"] = updates["send_interval_ms"]
-    if "topic" in updates:
-        fake_update["topic"] = updates["topic"]
-    if "behaviors" in updates:
-        fake_update["behaviors"] = updates["behaviors"]
-    if body.payload is not None:
-        # Keep registry copy in sync with gateway payload.json for Simulate restore.
-        if isinstance(body.payload, (bytes, bytearray)):
-            fake_update["payload"] = json.loads(body.payload.decode("utf-8"))
-        elif isinstance(body.payload, str):
-            fake_update["payload"] = (
-                json.loads(body.payload) if body.payload.strip() else {"hello": 1}
-            )
-        else:
-            fake_update["payload"] = body.payload
-    meta = merge_device_meta(prev, is_fake=True, fake=fake_update)
+    if restart_error:
+        device = _mark_fake_error(registry, gid, device_id, message=restart_error)
+        registry.audit(
+            "update_fake_device",
+            gateway_id=gid,
+            device_id=device_id,
+            detail={
+                "keys": sorted(updates.keys())
+                + (["payload"] if payload_obj is not None else []),
+                "restart_ok": False,
+            },
+        )
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=(
+                "Config saved on this PC and the gateway, but the fake unit "
+                f"did not restart: {restart_error}"
+            ),
+        )
+
+    meta = merge_device_meta(
+        _meta_dict(device), is_fake=True, fake={"status": "running", "last_error": None}
+    )
     device = registry.upsert_device(gid, device_id, meta_json=meta)
     registry.audit(
         "update_fake_device",
         gateway_id=gid,
         device_id=device_id,
-        detail={"keys": sorted(updates.keys()) + (["payload"] if body.payload is not None else [])},
+        detail={
+            "keys": sorted(updates.keys())
+            + (["payload"] if payload_obj is not None else []),
+            "restart_ok": True,
+        },
     )
     return PatchFakeDeviceResponse(
         device=_device_out(device),

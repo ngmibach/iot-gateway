@@ -9,6 +9,10 @@
   let caWaiters = null;
   let pendingSimDeviceId = "";
   let sudoPresentCached = false;
+  /** In-memory Simulate drafts; mirrored to localStorage + APPDATA ui-state.json. */
+  let simDrafts = Object.create(null);
+  let simDraftSaveTimer = null;
+  let uiStateLoaded = false;
 
   const SIM_BEHAVIOR_IDS = {
     omit_client_cert: "sim-omit-cert",
@@ -130,7 +134,119 @@
     return gid;
   }
 
+  function activeActionTab() {
+    const active = document.querySelector("#action-tabs button.active");
+    return (active && active.dataset.action) || "";
+  }
+
+  function simDraftKey(gid, deviceId) {
+    return String(gid || "") + ":" + String(deviceId || "");
+  }
+
+  function persistSimDraftsSoon() {
+    if (simDraftSaveTimer) clearTimeout(simDraftSaveTimer);
+    simDraftSaveTimer = setTimeout(() => {
+      simDraftSaveTimer = null;
+      persistSimDrafts().catch(() => {});
+    }, 250);
+  }
+
+  async function persistSimDrafts() {
+    try {
+      localStorage.setItem(
+        "iotgw.ui.simulateDrafts",
+        JSON.stringify(simDrafts || {})
+      );
+    } catch {
+      /* ignore quota / private mode */
+    }
+    const gid = selectedGateway();
+    const body = {
+      selected_gateway_id: gid || undefined,
+      simulate: simDrafts,
+    };
+    try {
+      await wizardApi("PUT", "/api/wizard/ui-state", { body });
+    } catch {
+      /* wizard may be restarting; localStorage still has the draft */
+    }
+  }
+
+  async function loadUiState() {
+    if (uiStateLoaded) return;
+    uiStateLoaded = true;
+    try {
+      const raw = localStorage.getItem("iotgw.ui.simulateDrafts");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed && typeof parsed === "object") simDrafts = parsed;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const data = await wizardApi("GET", "/api/wizard/ui-state");
+      if (data && typeof data.simulate === "object" && data.simulate) {
+        simDrafts = { ...simDrafts, ...data.simulate };
+      }
+      if (data && data.selected_gateway_id && $("gw-select")) {
+        const sel = $("gw-select");
+        const want = String(data.selected_gateway_id);
+        if ([...sel.options].some((o) => o.value === want)) {
+          sel.value = want;
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  function snapshotSimDraft(explicitDeviceId) {
+    const gid = selectedGateway();
+    const device_id =
+      explicitDeviceId ||
+      (($("sim-device") && $("sim-device").value) || "");
+    if (!gid || !device_id) return;
+    // Form fields still hold the previous device's edits when called from
+    // the device <select> change handler with explicitDeviceId.
+    if (
+      !explicitDeviceId &&
+      (!$("sim-form") || $("sim-form").classList.contains("hidden"))
+    ) {
+      return;
+    }
+    let payload = null;
+    try {
+      payload = parseFakePayload(($("sim-payload") && $("sim-payload").value) || "");
+    } catch {
+      payload = ($("sim-payload") && $("sim-payload").value) || "";
+    }
+    const intervalRaw = ($("sim-interval") && $("sim-interval").value) || "";
+    const send_interval_ms = intervalRaw ? Number(intervalRaw) : 1000;
+    simDrafts[simDraftKey(gid, device_id)] = {
+      send_interval_ms: Number.isFinite(send_interval_ms)
+        ? Math.floor(send_interval_ms)
+        : 1000,
+      topic: (($("sim-topic") && $("sim-topic").value) || "").trim(),
+      payload,
+      behaviors: readSimBehaviors(),
+      updated_at: Date.now(),
+    };
+    persistSimDraftsSoon();
+  }
+
+  function clearSimDraft(gid, deviceId) {
+    const key = simDraftKey(gid, deviceId);
+    if (Object.prototype.hasOwnProperty.call(simDrafts, key)) {
+      delete simDrafts[key];
+      persistSimDraftsSoon();
+    }
+  }
+
   function showTab(id) {
+    if (activeActionTab() === "simulate" && id !== "simulate") {
+      snapshotSimDraft();
+    }
     document.querySelectorAll(".action-panel").forEach((el) => {
       el.classList.toggle("hidden", el.dataset.action !== id);
     });
@@ -987,24 +1103,27 @@
     $("sim-empty").classList.add("hidden");
     $("sim-form").classList.remove("hidden");
     const fake = device.fake || {};
+    const draft =
+      simDrafts[simDraftKey(selectedGateway(), device.id)] || null;
+    const src = draft ? { ...fake, ...draft } : fake;
     const status = fake.status || "unknown";
     const badge = $("sim-status-badge");
     badge.textContent = status;
     badge.className = `badge ${statusBadgeClass(status)}`;
     $("sim-interval").value =
-      fake.send_interval_ms != null ? String(fake.send_interval_ms) : "1000";
-    $("sim-topic").value = fake.topic || "";
-    // Always restore the last Apply payload from registry meta (persists across tabs).
-    if (fake.payload != null) {
+      src.send_interval_ms != null ? String(src.send_interval_ms) : "1000";
+    $("sim-topic").value = src.topic || "";
+    // Prefer draft, then registry payload (survives tab switch + reboot).
+    if (src.payload != null) {
       try {
-        $("sim-payload").value = JSON.stringify(fake.payload, null, 2);
+        $("sim-payload").value = JSON.stringify(src.payload, null, 2);
       } catch {
-        $("sim-payload").value = String(fake.payload);
+        $("sim-payload").value = String(src.payload);
       }
     } else if (!$("sim-payload").value.trim()) {
       $("sim-payload").value = '{\n  "hello": 1\n}';
     }
-    writeSimBehaviors(fake.behaviors);
+    writeSimBehaviors(src.behaviors || fake.behaviors);
     fillSimCertLine(device, fake);
     if ($("sim-msg")) $("sim-msg").innerHTML = "";
     const running = String(status).toLowerCase() === "running";
@@ -1094,6 +1213,7 @@
         `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/fake`,
         { body }
       );
+      clearSimDraft(gid, device_id);
       $("sim-msg").innerHTML = `<div class="okmsg">${escapeHtml(
         data.message || "Applied."
       )}</div>`;
@@ -1101,6 +1221,11 @@
       if ($("sim-device")) $("sim-device").value = device_id;
       const still = (fakeDevices || []).find((d) => d.id === device_id);
       if (still) fillSimForm(still);
+    } catch (err) {
+      // Keep the form draft even when unit restart fails — config may already
+      // be saved in registry.sqlite on this PC.
+      snapshotSimDraft();
+      throw err;
     } finally {
       $("btn-sim-apply").disabled = false;
     }
@@ -1138,18 +1263,25 @@
   function wire() {
     wireTabs();
     showTab("register");
+    loadUiState()
+      .then(() => refreshGateways())
+      .then(() => {
+        if (activeActionTab() === "simulate") return refreshFakeDevices();
+        return null;
+      })
+      .catch(showErr);
 
     $("btn-load-gw").addEventListener("click", () =>
       refreshGateways()
         .then(() => {
-          const active = document.querySelector("#action-tabs button.active");
-          const tab = active && active.dataset.action;
+          const tab = activeActionTab();
           if (tab === "view") return refreshDevices();
           if (tab === "simulate") return refreshFakeDevices();
         })
         .catch(showErr)
     );
     $("gw-select").addEventListener("change", () => {
+      if (activeActionTab() === "simulate") snapshotSimDraft();
       hideRegForm();
       hideFakeForm();
       $("reg-results").classList.add("hidden");
@@ -1157,8 +1289,8 @@
       $("scan-badge").innerHTML = "";
       clearScanMsg();
       refreshCaBlocks().catch(() => {});
-      const active = document.querySelector("#action-tabs button.active");
-      const tab = active && active.dataset.action;
+      persistSimDraftsSoon();
+      const tab = activeActionTab();
       if (tab === "view") {
         refreshDevices().catch(showErr);
       } else if (tab === "simulate") {
@@ -1257,9 +1389,38 @@
     $("btn-refresh-sim").addEventListener("click", () =>
       refreshFakeDevices().catch(showErr)
     );
+    let lastSimDeviceId = ($("sim-device") && $("sim-device").value) || "";
+    $("sim-device").addEventListener("focus", () => {
+      lastSimDeviceId = ($("sim-device") && $("sim-device").value) || "";
+    });
     $("sim-device").addEventListener("change", () => {
-      const d = (fakeDevices || []).find((x) => x.id === $("sim-device").value);
+      const next = ($("sim-device") && $("sim-device").value) || "";
+      if (lastSimDeviceId && lastSimDeviceId !== next) {
+        snapshotSimDraft(lastSimDeviceId);
+      }
+      lastSimDeviceId = next;
+      const d = (fakeDevices || []).find((x) => x.id === next);
       fillSimForm(d || null);
+    });
+    ["sim-interval", "sim-topic", "sim-payload"].forEach((id) => {
+      const el = $(id);
+      if (!el) return;
+      el.addEventListener("input", () => {
+        snapshotSimDraft();
+      });
+      el.addEventListener("change", () => {
+        snapshotSimDraft();
+      });
+    });
+    Object.keys(SIM_BEHAVIOR_IDS).forEach((key) => {
+      const el = $(SIM_BEHAVIOR_IDS[key]);
+      if (!el) return;
+      el.addEventListener("change", () => {
+        snapshotSimDraft();
+      });
+    });
+    window.addEventListener("beforeunload", () => {
+      if (activeActionTab() === "simulate") snapshotSimDraft();
     });
     $("btn-sim-start").addEventListener("click", () =>
       simStartStop("start").catch(showErr)
@@ -1292,8 +1453,6 @@
         $("btn-ca-save").click();
       }
     });
-
-    refreshGateways().catch(() => {});
   }
 
   wire();

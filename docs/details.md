@@ -351,6 +351,8 @@ Gateway uninstall runs `teardown_all_fakes` (units, netns, bridge, fake data dir
 
 Create leaves the unit **stopped**. Start/stop and interval/topic/payload/behaviors are on **Simulate**.
 
+**Persistence:** Applied Simulate fields are stored in monitoring-app `registry.sqlite` (`meta.fake`: interval, topic, payload, behaviors) before the gateway unit restart; gateway `payload.json` + unit env are updated over SSH. Unapplied UI drafts use `%APPDATA%\IoTGatewayMonitor\ui-state.json` (Linux: `~/.local/share/iot-gateway-monitor/ui-state.json`) via `GET`/`PUT /api/wizard/ui-state`, mirrored in browser `localStorage`.
+
 ### Cert lifecycle
 
 - Fakes: monitoring app **auto-renews and feeds** mTLS (`FakeCertRenewer`); no operator cert zip / fingerprint / Re-issue UI

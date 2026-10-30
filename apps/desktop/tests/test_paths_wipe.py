@@ -24,15 +24,30 @@ class WipeAppDataTests(unittest.TestCase):
         (root / "telemetry").mkdir()
         (root / "telemetry" / "bin").mkdir()
         (root / "settings.json").write_text("{}", encoding="utf-8")
+        (root / "ui-state.json").write_text('{"simulate":{}}', encoding="utf-8")
         (root / "chromium-profile").mkdir()
         (root / "chromium-profile" / "SingletonLock").write_text("x", encoding="utf-8")
         out = paths.wipe_app_data()
         self.assertTrue(out["ok"])
         self.assertIn("telemetry", out["removed"])
         self.assertIn("settings.json", out["removed"])
+        self.assertIn("ui-state.json", out["removed"])
         self.assertTrue(root.is_dir())
         self.assertFalse((root / "settings.json").exists())
+        self.assertFalse((root / "ui-state.json").exists())
         self.assertFalse((root / "telemetry").exists())
+
+    def test_ui_state_roundtrip(self) -> None:
+        paths.save_ui_state(
+            {
+                "selected_gateway_id": "gw1",
+                "simulate": {"gw1:fake1": {"send_interval_ms": 1500}},
+            }
+        )
+        data = paths.load_ui_state()
+        self.assertEqual(data["selected_gateway_id"], "gw1")
+        self.assertEqual(data["simulate"]["gw1:fake1"]["send_interval_ms"], 1500)
+        self.assertTrue(paths.ui_state_path().is_file())
 
     def test_wipe_preserves_named_entries(self) -> None:
         root = Path(self._td.name)
