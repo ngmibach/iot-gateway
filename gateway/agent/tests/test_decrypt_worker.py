@@ -67,7 +67,12 @@ class DecryptWorkerKafkaTests(unittest.TestCase):
             self.assertEqual(args[0], "sensor.sensor9")
             snap = worker.device_snapshot()
             self.assertEqual(snap["sensor9"].messages_ok, 1)
-            self.assertEqual(snap["sensor9"].last_delay_ms, 3.0)
+            # Processing delay is measured on the gateway (receive → Kafka),
+            # not from payload delay/ts_ms fields (may be 0.0 in the same ms).
+            self.assertIsNotNone(snap["sensor9"].last_delay_ms)
+            self.assertGreaterEqual(float(snap["sensor9"].last_delay_ms), 0.0)
+            self.assertEqual(snap["sensor9"].delay_ms_count, 1)
+            self.assertGreaterEqual(snap["sensor9"].delay_ms_sum, 0.0)
 
 
 class DecryptWorkerTlsTests(unittest.TestCase):

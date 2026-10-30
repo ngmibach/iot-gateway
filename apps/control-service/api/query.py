@@ -399,6 +399,12 @@ def summary_gateway(
     delay_latest_by_id = _prom_by_device(
         Q.prep_prom(Q.GATEWAY_DELAY_BY_DEVICE_PROM, node="gateway")
     )
+    delay_sum_by_id = _prom_by_device(
+        Q.prep_prom(Q.GATEWAY_DELAY_SUM_BY_DEVICE_PROM, node="gateway")
+    )
+    delay_samples_by_id = _prom_by_device(
+        Q.prep_prom(Q.GATEWAY_DELAY_SAMPLES_BY_DEVICE_PROM, node="gateway")
+    )
     msgs_chart_by_id = _prom_spark_by_device(
         Q.prep_prom(Q.GATEWAY_MSGS_BY_DEVICE_RATE_PROM, node="gateway")
     )
@@ -413,6 +419,16 @@ def summary_gateway(
         except (TypeError, ValueError):
             return None
         if n < 0 or n > 24 * 60 * 60 * 1000:
+            return None
+        return n
+
+    def _sane_delay_total_ms(v: Any) -> float | None:
+        """Cumulative processing delay may exceed 24h; reject only nonsense."""
+        try:
+            n = float(v)
+        except (TypeError, ValueError):
+            return None
+        if n < 0 or n > 365 * 24 * 60 * 60 * 1000:
             return None
         return n
 
@@ -538,9 +554,15 @@ def summary_gateway(
     gateway_delay_spark: list[float] = []
     gateway_delay_points: list[dict[str, float | int]] = []
     gateway_delay_latest: float | None = None
+    gateway_delay_total = _sane_delay_total_ms(
+        prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_SUM_PROM, node="gateway"))
+    )
+    gateway_delay_samples = int(
+        prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_SAMPLES_PROM, node="gateway"))
+    )
     avg_delay = prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_AVG_PROM, node="gateway"))
     avg_sane = _sane_delay_ms(avg_delay)
-    if avg_sane is not None and avg_sane > 0:
+    if avg_sane is not None:
         gateway_delay_latest = avg_sane
     if delay_series_legacy:
         lengths = [
@@ -631,7 +653,9 @@ def summary_gateway(
                 kafka_chart = decrypt_chart
             delay_latest = delay.get("latest")
             if delay_latest is None and did in delay_latest_by_id:
-                delay_latest = delay_latest_by_id[did]
+                delay_latest = _sane_delay_ms(delay_latest_by_id[did])
+            delay_total = _sane_delay_total_ms(delay_sum_by_id.get(did))
+            delay_samples = int(delay_samples_by_id.get(did) or 0)
             connected.append(
                 {
                     "device_id": did,
@@ -650,6 +674,8 @@ def summary_gateway(
                         "denied_publishes": int(denied_by_id.get(did) or 0),
                         "ids_detections": int(ids_by_id.get(did) or 0),
                         "delay_latest": delay_latest,
+                        "delay_total": delay_total,
+                        "delay_samples": delay_samples,
                     },
                     "charts": {
                         "kafka_messages": kafka_chart,
@@ -681,6 +707,10 @@ def summary_gateway(
                         "denied_publishes": int(denied_by_id.get(did) or 0),
                         "ids_detections": int(ids_by_id.get(did) or 0),
                         "delay_latest": delay.get("latest"),
+                        "delay_total": _sane_delay_total_ms(
+                            delay_sum_by_id.get(did)
+                        ),
+                        "delay_samples": int(delay_samples_by_id.get(did) or 0),
                     },
                     "charts": {
                         "kafka_messages": msgs_chart_by_id.get(did) or [],
@@ -693,6 +723,10 @@ def summary_gateway(
         {"t": start + i, "v": v}
         for i, v in enumerate(gateway_delay_spark[-spark_limit:])
     ]
+    if gateway_delay_total is None and delay_sum_by_id:
+        gateway_delay_total = _sane_delay_total_ms(sum(delay_sum_by_id.values()))
+    if gateway_delay_samples <= 0 and delay_samples_by_id:
+        gateway_delay_samples = int(sum(delay_samples_by_id.values()))
     return {
         "range": time_range,
         "time": _time_window_meta(time_range, start, end),
@@ -706,6 +740,8 @@ def summary_gateway(
             "ids_detections": ids_alerts,
             "allowed_ips": allowed_ips,
             "delay_latest": gateway_delay_latest,
+            "delay_total": gateway_delay_total,
+            "delay_samples": gateway_delay_samples,
             "delay_sparkline": Q.point_values(delay_chart_out)[-spark_limit:],
         },
         "charts": {

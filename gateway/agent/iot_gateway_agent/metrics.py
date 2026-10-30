@@ -566,7 +566,8 @@ class AgentMetrics:
                     f'kafka_topic="{topic}"}} {ctr.ids}'
                 )
             lines += [
-                "# HELP iotgw_device_delay_ms Last observed sensor→gateway delay (ms)",
+                "# HELP iotgw_device_delay_ms Last gateway processing delay "
+                "(MQTT receive → Kafka produce, ms)",
                 "# TYPE iotgw_device_delay_ms gauge",
             ]
             for did, ctr in sorted(by_device.items()):
@@ -576,6 +577,26 @@ class AgentMetrics:
                 lines.append(
                     f'iotgw_device_delay_ms{{device_id="{did}",'
                     f'kafka_topic="{topic}"}} {ctr.last_delay_ms:.3f}'
+                )
+            lines += [
+                "# HELP iotgw_device_delay_ms_sum Cumulative gateway processing "
+                "delay (ms)",
+                "# TYPE iotgw_device_delay_ms_sum counter",
+                "# HELP iotgw_device_delay_samples_total Gateway processing "
+                "delay sample count",
+                "# TYPE iotgw_device_delay_samples_total counter",
+            ]
+            for did, ctr in sorted(by_device.items()):
+                if ctr.delay_ms_count <= 0:
+                    continue
+                topic = kafka_topic_name(did)
+                lines.append(
+                    f'iotgw_device_delay_ms_sum{{device_id="{did}",'
+                    f'kafka_topic="{topic}"}} {ctr.delay_ms_sum:.3f}'
+                )
+                lines.append(
+                    f'iotgw_device_delay_samples_total{{device_id="{did}",'
+                    f'kafka_topic="{topic}"}} {ctr.delay_ms_count}'
                 )
 
         pids = self._app_pids()

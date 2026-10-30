@@ -55,6 +55,21 @@ GATEWAY_DELAY_BY_DEVICE_PROM = (
 GATEWAY_DELAY_AVG_PROM = (
     'avg(iotgw_device_delay_ms{instance="$node",job="$job"})'
 )
+# Cumulative gateway processing delay (MQTT receive → Kafka), ms.
+GATEWAY_DELAY_SUM_PROM = (
+    'sum(iotgw_device_delay_ms_sum{instance="$node",job="$job"})'
+)
+GATEWAY_DELAY_SUM_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_delay_ms_sum{instance="$node",job="$job"})'
+)
+GATEWAY_DELAY_SAMPLES_PROM = (
+    'sum(iotgw_device_delay_samples_total{instance="$node",job="$job"})'
+)
+GATEWAY_DELAY_SAMPLES_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_delay_samples_total{instance="$node",job="$job"})'
+)
 GATEWAY_DELAY_BY_DEVICE = (
     'avg_over_time({container="iot-nodered", event_type="sensor_data"} '
     "| json | unwrap delay [5m]) by (deviceId)"

@@ -189,6 +189,9 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn('id="gw-sensor-detail"', mon)
         self.assertIn('id="gw-sensor-tabs"', mon)
         self.assertIn('id="chart-sensor_kafka"', mon)
+        self.assertIn('id="chart-gw_msgs"', mon)
+        self.assertIn("Avg messages / sec", mon)
+        self.assertIn("Transmission delay", mon)
         self.assertIn("Kafka topic", mon)
         self.assertNotIn(">Containers<", mon)
         self.assertIn("monitoring.js", mon)
@@ -196,6 +199,8 @@ class WizardApiTests(unittest.TestCase):
         with urllib.request.urlopen(self.base + "/monitoring.js", timeout=5) as resp:
             mjs = resp.read().decode("utf-8")
         self.assertIn("messages_per_sec", mjs)
+        self.assertIn("delay_total", mjs)
+        self.assertIn("chart-gw_msgs", mjs)
         self.assertIn("renderSensorTabs", mjs)
         self.assertIn("kafka_topic", mjs)
         self.assertIn("Name only", mjs)

@@ -173,7 +173,25 @@
       <h3>General information</h3>
       <div class="metrics" id="gw-metrics"></div>
       <div class="act-subsection">
+        <h4 class="act-subhead">Message rate</h4>
+        <div class="chart-grid chart-grid-1">
+          <article class="chart-panel chart-panel-wide" data-chart="gw_msgs">
+            <header class="chart-head">
+              <span class="chart-title">Avg messages / sec</span>
+              <span class="chart-unit">msgs/s</span>
+              <span class="chart-zoom" data-zoom-for="chart-gw_msgs">
+                <button type="button" class="chart-zoom-btn" data-zoom="in" title="Zoom in">+</button>
+                <button type="button" class="chart-zoom-btn" data-zoom="out" title="Zoom out">−</button>
+                <button type="button" class="chart-zoom-btn" data-zoom="reset" title="Reset zoom">⟲</button>
+              </span>
+            </header>
+            <div class="chart-body" id="chart-gw_msgs"></div>
+          </article>
+        </div>
+      </div>
+      <div class="act-subsection">
         <h4 class="act-subhead">Transmission delay</h4>
+        <p class="muted act-help">Gateway processing time from MQTT receive to Kafka produce.</p>
         <div class="metrics" id="gw-delay-metrics"></div>
         <div class="chart-grid chart-grid-1">
           <article class="chart-panel chart-panel-wide" data-chart="gw_delay">
@@ -219,6 +237,7 @@
         </div>
         <div class="act-subsection">
           <h4 class="act-subhead">Transmission delay</h4>
+          <p class="muted act-help">Gateway processing time from MQTT receive to Kafka produce.</p>
           <div class="metrics" id="gw-sensor-delay-metrics"></div>
           <div class="chart-grid chart-grid-1">
             <article class="chart-panel chart-panel-wide" data-chart="sensor_delay">

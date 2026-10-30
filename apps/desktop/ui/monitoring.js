@@ -128,14 +128,18 @@
   }
 
   /** Human delay for Activities cards (values are milliseconds). */
-  function formatDelay(ms) {
+  function formatDelay(ms, { cumulative = false } = {}) {
     if (ms == null || ms === "" || !Number.isFinite(Number(ms))) return "—";
     const n = Number(ms);
-    // Guard against leftover epoch-sized gauges (ts_ms=0 → ~1.7e12).
-    if (n < 0 || n > 24 * 60 * 60 * 1000) return "—";
+    // Per-sample gauges reject epoch-sized nonsense; totals may exceed 24h.
+    const max = cumulative
+      ? 365 * 24 * 60 * 60 * 1000
+      : 24 * 60 * 60 * 1000;
+    if (n < 0 || n > max) return "—";
     if (n < 1000) return n < 10 ? n.toFixed(1) + " ms" : Math.round(n) + " ms";
     if (n < 60_000) return (n / 1000).toFixed(n < 10_000 ? 2 : 1) + " s";
-    return (n / 60_000).toFixed(1) + " min";
+    if (n < 3_600_000) return (n / 60_000).toFixed(1) + " min";
+    return (n / 3_600_000).toFixed(1) + " h";
   }
 
   function pad2(n) {
@@ -616,6 +620,7 @@
     paintBarChart("chart-app_status", []);
     paintBarChart("chart-app_cpu", []);
     paintBarChart("chart-app_mem", []);
+    paintLineChart("chart-gw_msgs", []);
     paintLineChart("chart-gw_delay", []);
     paintLineChart("chart-sensor_kafka", []);
     paintLineChart("chart-sensor_delay", []);
@@ -816,6 +821,7 @@
     ]);
     metricCards($("gw-sensor-delay-metrics"), [
       ["Latest delay", formatDelay(sm.delay_latest)],
+      ["Total delay", formatDelay(sm.delay_total, { cumulative: true })],
     ]);
 
     const charts = sensor.charts || {};
@@ -903,8 +909,13 @@
       ["Denied", String(m.denied_publishes ?? "—")],
       ["IDS", String(m.ids_detections ?? "—")],
     ]);
+    paintLineChart("chart-gw_msgs", charts.messages || [], {
+      unit: "msgs/s",
+      formatValue: (v) => fmtChartNum(v) + " msgs/s",
+    });
     metricCards($("gw-delay-metrics"), [
       ["Latest delay", formatDelay(m.delay_latest)],
+      ["Total delay", formatDelay(m.delay_total, { cumulative: true })],
     ]);
     paintLineChart(
       "chart-gw_delay",
