@@ -466,7 +466,7 @@ def ensure_fake_runtime(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> FakePlaybookResult:
-    """Ensure bridge + unit template exist (lazy first-fake / re-provision hook)."""
+    """Ensure bridge + fake_netns helper + unit template exist."""
     bridge = ensure_fake_bridge(
         ssh,
         sudo_password=sudo_password,
@@ -475,13 +475,29 @@ def ensure_fake_runtime(
     )
     if not bridge.ok:
         return bridge
+    # Unit ExecStartPre needs this module; install it before refreshing the template.
+    module = ensure_fake_netns_module(
+        ssh, sudo_password=sudo_password, install_root=install_root
+    )
+    if not module.ok:
+        return module
+    if not module.details.get("uploaded"):
+        return FakePlaybookResult(
+            ok=False,
+            status="failed",
+            message=(
+                "fake_netns.py is required for iotgw-fake@ but was not found in the "
+                "desktop bundle; reinstall/update IoT Gateway Monitor and try again"
+            ),
+            details={**bridge.details, **module.details},
+        )
     unit = ensure_fake_unit_installed(ssh, sudo_password=sudo_password)
     if not unit.ok:
         return unit
     return FakePlaybookResult(
         ok=True,
         message="fake sensor runtime ready",
-        details={**bridge.details, **unit.details},
+        details={**bridge.details, **module.details, **unit.details},
     )
 
 
@@ -888,7 +904,6 @@ def restart_fake_unit(
     install_root: str = DEFAULT_INSTALL_ROOT,
     data_dir: str | None = None,
 ) -> FakePlaybookResult:
-    del install_root
     device_id = validate_user_id(device_id)
     paths = _paths(DEFAULT_INSTALL_ROOT, data_dir)
     # Reboot drops /run/netns; recreate before systemctl restart.
@@ -900,6 +915,19 @@ def restart_fake_unit(
     )
     if not netns.ok:
         return netns
+    # Heal gateways that got the new unit template without fake_netns.py
+    # (create/Apply after the NetworkNamespacePath → ExecStartPre change).
+    module = ensure_fake_netns_module(
+        ssh, sudo_password=sudo_password, install_root=install_root
+    )
+    if not module.ok:
+        return module
+    if module.details.get("uploaded"):
+        unit_install = ensure_fake_unit_installed(
+            ssh, sudo_password=sudo_password
+        )
+        if not unit_install.ok:
+            return unit_install
     unit = unit_instance(device_id)
     result = _sudo(
         ssh,
@@ -908,13 +936,21 @@ def restart_fake_unit(
         timeout=60.0,
     )
     if result.exit_code != 0:
+        journal = _sudo(
+            ssh,
+            f"journalctl -u {shell_quote(unit)} -n 20 --no-pager -o cat",
+            sudo_password=sudo_password,
+            timeout=30.0,
+        )
+        detail = (
+            (result.stderr or result.stdout or "").strip()
+            + " "
+            + (journal.stdout or "").strip()
+        ).strip()[:400]
         return FakePlaybookResult(
             ok=False,
             status="failed",
-            message=(
-                f"failed to restart {unit}: "
-                + (result.stderr or result.stdout or "").strip()[:300]
-            ),
+            message=f"failed to restart {unit}: {detail}",
             details={"unit": unit},
         )
     return FakePlaybookResult(

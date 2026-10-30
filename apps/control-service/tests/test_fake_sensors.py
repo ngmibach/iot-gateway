@@ -109,9 +109,11 @@ class TestFakeSensorsPlaybooks(unittest.TestCase):
     def test_ensure_fake_runtime_combines_bridge_and_unit(self) -> None:
         ssh = FakeSSH()
         result = ensure_fake_runtime(ssh, sudo_password="pw")  # type: ignore[arg-type]
-        self.assertTrue(result.ok)
+        self.assertTrue(result.ok, result.message)
         self.assertEqual(result.details.get("bridge"), FAKE_BRIDGE)
         self.assertEqual(result.details.get("unit_template"), FAKE_UNIT_TEMPLATE)
+        self.assertTrue(result.details.get("uploaded"))
+        self.assertIn("fake_netns.py", "\n".join(ssh.commands))
 
     def test_install_fake_files_and_feed_certs(self) -> None:
         ssh = FakeSSH()
