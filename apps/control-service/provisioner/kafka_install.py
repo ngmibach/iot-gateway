@@ -11,6 +11,8 @@ import ipaddress
 import json
 import shlex
 import tempfile
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +29,11 @@ DEFAULT_SCALA_VERSION = "2.13"
 # Agent clients use INTERNAL on loopback; Grafana uses EXTERNAL on LAN :9092.
 KAFKA_BOOTSTRAP = "127.0.0.1:9092"
 KAFKA_CONTROLLER = "127.0.0.1:9093"
+# Official Apache archive size for kafka_2.13-3.7.1.tgz (Content-Length).
+# Used when HEAD is unavailable so truncated uploads still fail closed.
+_KNOWN_TARBALL_BYTES: dict[str, int] = {
+    "3.7.1": 120_235_344,
+}
 
 
 def _kafka_tarball_url(version: str = DEFAULT_KAFKA_VERSION) -> str:
@@ -34,6 +41,72 @@ def _kafka_tarball_url(version: str = DEFAULT_KAFKA_VERSION) -> str:
         f"https://archive.apache.org/dist/kafka/{version}/"
         f"kafka_{DEFAULT_SCALA_VERSION}-{version}.tgz"
     )
+
+
+def _probe_tarball_size(url: str, *, version: str) -> int | None:
+    """Return expected Content-Length, or a known pin, or None."""
+    try:
+        req = urllib.request.Request(url, method="HEAD")
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.headers.get("Content-Length")
+            if raw and str(raw).isdigit() and int(raw) > 0:
+                return int(raw)
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        pass
+    return _KNOWN_TARBALL_BYTES.get(version)
+
+
+def _download_tarball_local(url: str, dest: Path, *, expected: int | None) -> None:
+    """Download Kafka tarball on the provisioner host (resume-friendly).
+
+    Phone-tether installs often make *remote* curl from the Pi crawl or drop.
+    Fetching on the Windows/Linux monitoring host then SFTP-uploading over the
+    LAN is much more reliable.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    existing = dest.stat().st_size if dest.is_file() else 0
+    if expected and existing == expected:
+        return
+    if expected and existing > expected:
+        dest.unlink(missing_ok=True)
+        existing = 0
+
+    headers: dict[str, str] = {}
+    mode = "wb"
+    if existing > 0:
+        headers["Range"] = f"bytes={existing}-"
+        mode = "ab"
+
+    req = urllib.request.Request(url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp, dest.open(mode) as out:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                out.write(chunk)
+    except urllib.error.HTTPError as exc:
+        # 416 = already complete; 200 on Range means server ignored resume.
+        if exc.code == 416 and expected and dest.is_file() and dest.stat().st_size == expected:
+            return
+        if exc.code == 200 and existing > 0:
+            # Server ignored Range — restart from scratch.
+            dest.unlink(missing_ok=True)
+            _download_tarball_local(url, dest, expected=expected)
+            return
+        raise AgentInstallError(
+            f"Kafka host download HTTP {exc.code}: {exc.reason}"
+        ) from exc
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AgentInstallError(f"Kafka host download failed: {exc}") from exc
+
+    size = dest.stat().st_size if dest.is_file() else 0
+    if expected and size != expected:
+        raise AgentInstallError(
+            f"Kafka tarball size {size} != expected {expected} after host download"
+        )
+    if size < 1_000_000:
+        raise AgentInstallError(f"Kafka tarball too small after host download: {size} bytes")
 
 
 def _validate_advertise_host(advertise_host: str | None) -> str:
@@ -169,22 +242,78 @@ def ensure_kafka_kraft(
         url = _kafka_tarball_url(version)
         dest = f"/tmp/kafka-{version}.tgz"
         parent = kafka_home.rsplit("/", 1)[0] or "/opt"
-        download = sudo_run(
+        expected = _probe_tarball_size(url, version=version)
+        staged = False
+        stage_errors: list[str] = []
+
+        # Preferred path: download on the monitoring host, SFTP to the Pi.
+        # Remote curl over phone tether often stalls or truncates.
+        local_tgz: Path | None = None
+        try:
+            tmp_dir = Path(tempfile.gettempdir()) / "iotgw-kafka"
+            local_tgz = tmp_dir / f"kafka_{DEFAULT_SCALA_VERSION}-{version}.tgz"
+            _download_tarball_local(url, local_tgz, expected=expected)
+            # Drop any partial remote file so SFTP put is authoritative.
+            ssh.run(f"rm -f {shlex.quote(dest)}", timeout=15.0)
+            ssh.upload_file(local_tgz, dest, mode=0o644)
+            staged = True
+            notes.append("Kafka tarball fetched on host and uploaded via SFTP")
+        except (AgentInstallError, OSError) as exc:
+            stage_errors.append(f"host/SFTP: {exc}")
+            # Fall back to remote curl with resume + size check.
+            size_check = ""
+            if expected:
+                size_check = (
+                    f"SIZE=$(stat -c%s {shlex.quote(dest)} 2>/dev/null || echo 0); "
+                    f"if [ \"$SIZE\" != {expected} ]; then "
+                    f"echo \"Kafka tarball size $SIZE != expected {expected}\" >&2; "
+                    f"exit 3; fi && "
+                )
+            download = sudo_run(
+                ssh,
+                f"mkdir -p {shlex.quote(parent)} "
+                f"{shlex.quote(data_dir + '/kafka/data')} "
+                f"{shlex.quote(kafka_home + '/logs')} && "
+                f"curl -fL --retry 8 --retry-delay 3 --retry-all-errors -C - "
+                f"-o {shlex.quote(dest)} {shlex.quote(url)} && "
+                f"{size_check}"
+                f"echo DOWNLOAD_OK",
+                sudo_password=sudo_password,
+                timeout=1200.0,
+            )
+            if download.ok and "DOWNLOAD_OK" in (download.stdout or ""):
+                staged = True
+                notes.append("Kafka tarball fetched via remote curl (host path failed)")
+            else:
+                stage_errors.append(
+                    "remote curl: "
+                    + ((download.stderr or download.stdout or "")[:300] or "no output")
+                )
+
+        if not staged:
+            raise AgentInstallError(
+                "Kafka download failed: " + " | ".join(stage_errors)[:500]
+            )
+
+        extract = sudo_run(
             ssh,
-            f"mkdir -p {shlex.quote(parent)} {shlex.quote(data_dir + '/kafka/data')} "
+            f"mkdir -p {shlex.quote(parent)} "
+            f"{shlex.quote(data_dir + '/kafka/data')} "
             f"{shlex.quote(kafka_home + '/logs')} && "
-            f"curl -fsSL {shlex.quote(url)} -o {shlex.quote(dest)} && "
             f"rm -rf {shlex.quote(kafka_home)} && "
             f"mkdir -p {shlex.quote(kafka_home)} && "
-            f"tar -xzf {shlex.quote(dest)} -C {shlex.quote(kafka_home)} --strip-components=1 && "
-            f"rm -f {shlex.quote(dest)}",
+            f"tar -xzf {shlex.quote(dest)} -C {shlex.quote(kafka_home)} "
+            f"--strip-components=1 && "
+            f"rm -f {shlex.quote(dest)} && "
+            f"test -x {shlex.quote(kafka_home + '/bin/kafka-topics.sh')} && "
+            f"echo EXTRACT_OK",
             sudo_password=sudo_password,
-            timeout=900.0,
+            timeout=180.0,
         )
-        if not download.ok or not kafka_present(ssh, kafka_home=kafka_home):
+        if not extract.ok or not kafka_present(ssh, kafka_home=kafka_home):
             raise AgentInstallError(
-                "Kafka download/extract failed: "
-                f"{(download.stderr or download.stdout or '')[:500]}"
+                "Kafka extract failed: "
+                f"{(extract.stderr or extract.stdout or '')[:500]}"
             )
         notes.append(f"installed Apache Kafka {version} (KRaft) at {kafka_home}")
     else:
