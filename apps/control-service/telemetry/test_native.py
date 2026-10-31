@@ -221,7 +221,7 @@ class NativeHelperTests(unittest.TestCase):
                                         mgr.ensure_binaries(force=True)
             stop_g.assert_called_once()
             kill_port.assert_called_once_with(nv._GRAFANA_PORT)
-            kill_tree.assert_called_once_with(mgr.grafana_home)
+            kill_tree.assert_called_once_with(mgr.grafana_home, mgr.grafana_data)
             ensure_tree.assert_called_once()
             self.assertTrue(ensure_tree.call_args.kwargs.get("force"))
 
