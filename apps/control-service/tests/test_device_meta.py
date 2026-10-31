@@ -7,6 +7,7 @@ import unittest
 from api.device_meta import (
     fake_block,
     is_fake_meta,
+    is_publish_blocked_meta,
     merge_device_meta,
     parse_meta,
 )
@@ -69,6 +70,22 @@ class DeviceMetaTests(unittest.TestCase):
         self.assertEqual(meta2["fake"]["ip"], "10.255.0.2")
         self.assertEqual(meta2["fake"]["status"], "stopped")
         self.assertEqual(meta2["fake"]["send_interval_ms"], 500)
+
+    def test_publish_blocked_meta(self) -> None:
+        self.assertFalse(is_publish_blocked_meta(None))
+        self.assertFalse(is_publish_blocked_meta({}))
+        self.assertFalse(is_publish_blocked_meta({"publish_blocked": False}))
+        blocked = merge_device_meta(
+            {"kafka_topic": "sensor.a"},
+            publish_blocked=True,
+            topics_rw_before_block=["sensors/a/#"],
+        )
+        self.assertTrue(is_publish_blocked_meta(blocked))
+        self.assertEqual(blocked["topics_rw_before_block"], ["sensors/a/#"])
+        cleared = merge_device_meta(blocked, clear_publish_block=True)
+        self.assertFalse(is_publish_blocked_meta(cleared))
+        self.assertNotIn("publish_blocked", cleared)
+        self.assertNotIn("topics_rw_before_block", cleared)
 
 
 if __name__ == "__main__":

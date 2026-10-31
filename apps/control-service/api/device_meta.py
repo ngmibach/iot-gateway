@@ -46,11 +46,15 @@ def merge_device_meta(
     clear_fake: bool = False,
     schema_id: Optional[str] = None,
     crypto_profile: Optional[str] = None,
+    publish_blocked: Optional[bool] = None,
+    topics_rw_before_block: Any = None,
+    clear_publish_block: bool = False,
 ) -> dict[str, Any]:
-    """Merge kafka / fake / crypto fields into device meta.
+    """Merge kafka / fake / crypto / control fields into device meta.
 
     ``clear_fake=True`` drops ``is_fake`` / ``fake`` (real-sensor register path).
     Passing ``is_fake`` / ``fake`` updates those keys. Nested ``fake`` is shallow-merged.
+    ``clear_publish_block=True`` drops Control-tab block flags.
     """
     meta = parse_meta(existing)
     if kafka_topic is not None:
@@ -61,6 +65,15 @@ def merge_device_meta(
         meta["schema_id"] = schema_id
     if crypto_profile is not None:
         meta["crypto_profile"] = crypto_profile
+    if clear_publish_block:
+        meta.pop("publish_blocked", None)
+        meta.pop("topics_rw_before_block", None)
+    elif publish_blocked is not None:
+        meta["publish_blocked"] = bool(publish_blocked)
+        if topics_rw_before_block is not None:
+            meta["topics_rw_before_block"] = topics_rw_before_block
+        if not publish_blocked:
+            meta.pop("topics_rw_before_block", None)
     if clear_fake:
         meta.pop("is_fake", None)
         meta.pop("fake", None)
@@ -75,3 +88,10 @@ def merge_device_meta(
         meta["fake"] = merged
         meta["is_fake"] = True
     return meta
+
+
+def is_publish_blocked_meta(meta: dict[str, Any] | None) -> bool:
+    """True when Control tab has blocked MQTT publish for this device."""
+    if not meta:
+        return False
+    return meta.get("publish_blocked") is True

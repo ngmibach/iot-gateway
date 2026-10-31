@@ -10,7 +10,7 @@
   <header>
     <div>
       <h1>Control Plane</h1>
-      <div class="sub">Registration · View · Simulate</div>
+      <div class="sub">Registration · View · Simulate · Control</div>
     </div>
     <div id="hdr-status"></div>
   </header>
@@ -28,6 +28,7 @@
       <button type="button" data-action="register" class="active">Registration</button>
       <button type="button" data-action="view">View</button>
       <button type="button" data-action="simulate">Simulate</button>
+      <button type="button" data-action="control">Control</button>
     </nav>
 
     <section class="panel action-panel" data-action="register" id="panel-register">
@@ -428,6 +429,55 @@
           <button type="button" class="primary" id="btn-sim-apply">Apply</button>
         </div>
         <div id="sim-msg"></div>
+      </div>
+    </section>
+
+    <section class="panel action-panel hidden" data-action="control" id="panel-control">
+      <h2>Control</h2>
+      <p class="muted">
+        Block a sensor from publishing (keeps registration), or clear its Kafka topic data.
+        Permanent removal stays on View → Delete.
+      </p>
+
+      <div class="row">
+        <label for="ctl-device">Device</label>
+        <select id="ctl-device"></select>
+        <button type="button" class="secondary" id="btn-refresh-ctl">Refresh</button>
+      </div>
+
+      <div id="ctl-empty" class="muted">No registered sensors on this gateway.</div>
+
+      <div id="ctl-form" class="hidden">
+        <div class="row">
+          <label>Type</label>
+          <span id="ctl-type-badge">—</span>
+        </div>
+        <div class="row">
+          <label>Publish</label>
+          <span id="ctl-publish-badge" class="badge">—</span>
+          <span class="muted" id="ctl-topic-line"></span>
+        </div>
+        <div class="row">
+          <label>Kafka topic</label>
+          <span class="mono" id="ctl-kafka-topic">—</span>
+        </div>
+
+        <div class="row view-actions">
+          <button type="button" class="danger" id="btn-ctl-block">Block publish</button>
+          <button type="button" class="primary hidden" id="btn-ctl-unblock">Allow publish</button>
+        </div>
+
+        <div class="row">
+          <input type="checkbox" id="ctl-purge-confirm" />
+          <label for="ctl-purge-confirm" style="min-width:auto">
+            I understand this deletes stored Kafka messages for this sensor
+          </label>
+        </div>
+        <div class="row view-actions">
+          <button type="button" class="danger" id="btn-ctl-purge" disabled>Clear Kafka data</button>
+        </div>
+        <p class="muted">Clear Kafka needs Kafka running on the gateway. Block uses Mosquitto ACL only.</p>
+        <div id="ctl-msg"></div>
       </div>
     </section>
   </main>

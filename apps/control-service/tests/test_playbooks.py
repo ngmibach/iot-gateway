@@ -6,6 +6,11 @@ import re
 import unittest
 
 from actions.csr import generate_client_key_and_csr
+from actions.device_control import (
+    block_device_publish,
+    purge_device_kafka,
+    unblock_device_publish,
+)
 from actions.playbooks import (
     clear_logs,
     register_device,
@@ -303,6 +308,90 @@ class TestUnregister(unittest.TestCase):
         self.assertEqual(result.details.get("removed_ip"), "10.0.0.1")
         self.assertNotIn("user sensor1\n", ssh.read_text(ACL))
         self.assertFalse(any("haproxy" in c for c in ssh.commands))
+
+
+class TestDeviceControl(unittest.TestCase):
+    def test_block_removes_readwrite(self) -> None:
+        ssh = FakeSSH(_base_files())
+        result = block_device_publish(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic_rw_hint="sensors/sensor1/#",
+        )
+        self.assertTrue(result.ok)
+        text = ssh.read_text(ACL)
+        self.assertNotIn("topic readwrite sensors/sensor1/#\n", text)
+        self.assertIn("topic read alerts/+\n", text)
+        self.assertIn("user sensor1\n", text)
+        self.assertTrue(any("systemctl reload mosquitto" in c for c in ssh.commands))
+
+    def test_block_already_blocked_is_ok(self) -> None:
+        ssh = FakeSSH(_base_files())
+        first = block_device_publish(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic_rw_hint="sensors/sensor1/#",
+        )
+        self.assertTrue(first.ok)
+        second = block_device_publish(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic_rw_hint="sensors/sensor1/#",
+        )
+        self.assertTrue(second.ok)
+        self.assertTrue((second.details or {}).get("already_blocked"))
+
+    def test_unblock_restores_readwrite(self) -> None:
+        ssh = FakeSSH(_base_files())
+        block_device_publish(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic_rw_hint="sensors/sensor1/#",
+        )
+        result = unblock_device_publish(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic_rw="sensors/sensor1/#",
+            topic_r="alerts/+",
+        )
+        self.assertTrue(result.ok)
+        text = ssh.read_text(ACL)
+        self.assertIn("topic readwrite sensors/sensor1/#\n", text)
+        self.assertIn("topic read alerts/+\n", text)
+
+    def test_purge_kafka_delete_and_recreate(self) -> None:
+        ssh = FakeSSH(_base_files())
+
+        def run_handler(cmd: str) -> CommandResult:
+            if "kafka-topics.sh" in cmd and "test -x" in cmd:
+                return CommandResult(argv=cmd, exit_code=0, stdout="OK\n", stderr="")
+            return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
+
+        ssh._run_handler = run_handler
+        result = purge_device_kafka(
+            ssh,  # type: ignore[arg-type]
+            user_id="sensor1",
+            topic="sensor.sensor1",
+            retention_bytes=1024,
+        )
+        self.assertTrue(result.ok)
+        self.assertEqual((result.details or {}).get("topic"), "sensor.sensor1")
+        joined = "\n".join(ssh.commands)
+        self.assertIn("--delete --topic", joined)
+        self.assertIn("--create --if-not-exists --topic", joined)
+
+    def test_purge_kafka_missing_broker(self) -> None:
+        ssh = FakeSSH(_base_files())
+
+        def run_handler(cmd: str) -> CommandResult:
+            if "kafka-topics.sh" in cmd and "test -x" in cmd:
+                return CommandResult(argv=cmd, exit_code=1, stdout="", stderr="missing")
+            return CommandResult(argv=cmd, exit_code=0, stdout="", stderr="")
+
+        ssh._run_handler = run_handler
+        result = purge_device_kafka(ssh, user_id="sensor1")  # type: ignore[arg-type]
+        self.assertFalse(result.ok)
+        self.assertTrue((result.details or {}).get("kafka_missing"))
 
 
 class TestClearLogs(unittest.TestCase):

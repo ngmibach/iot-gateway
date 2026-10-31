@@ -257,6 +257,123 @@
       refreshDevices().catch(showErr);
     } else if (id === "simulate") {
       refreshFakeDevices().catch(showErr);
+    } else if (id === "control") {
+      refreshControlDevices().catch(showErr);
+    }
+  }
+
+  let controlDevices = [];
+
+  function typeBadgeHtml(isFake) {
+    return isFake
+      ? '<span class="badge warn">Fake</span>'
+      : '<span class="badge ok">Real</span>';
+  }
+
+  function fillControlForm(device) {
+    const form = $("ctl-form");
+    const empty = $("ctl-empty");
+    if (!device) {
+      if (form) form.classList.add("hidden");
+      if (empty) empty.classList.remove("hidden");
+      return;
+    }
+    if (empty) empty.classList.add("hidden");
+    if (form) form.classList.remove("hidden");
+    const blocked = !!device.publish_blocked;
+    $("ctl-type-badge").innerHTML = typeBadgeHtml(!!device.is_fake);
+    const badge = $("ctl-publish-badge");
+    badge.textContent = blocked ? "Blocked" : "Allowed";
+    badge.className = "badge " + (blocked ? "bad" : "ok");
+    const topics = Array.isArray(device.topics_rw)
+      ? device.topics_rw.join(", ")
+      : topicOne(device.topics_rw) || `sensors/${device.id}/#`;
+    $("ctl-topic-line").textContent = blocked
+      ? `(intended write: ${topics})`
+      : `(write: ${topics})`;
+    $("ctl-kafka-topic").textContent =
+      device.kafka_topic || `sensor.${device.id}`;
+    $("btn-ctl-block").classList.toggle("hidden", blocked);
+    $("btn-ctl-unblock").classList.toggle("hidden", !blocked);
+    $("ctl-purge-confirm").checked = false;
+    $("btn-ctl-purge").disabled = true;
+    if ($("ctl-msg")) $("ctl-msg").textContent = "";
+  }
+
+  async function refreshControlDevices() {
+    const gid = requireGateway();
+    controlDevices = await control(
+      "GET",
+      `/api/v1/gateways/${encodeURIComponent(gid)}/devices`
+    );
+    const sel = $("ctl-device");
+    const prev = sel.value;
+    sel.innerHTML = "";
+    if (!controlDevices.length) {
+      fillControlForm(null);
+      return;
+    }
+    controlDevices.forEach((d) => {
+      const opt = document.createElement("option");
+      opt.value = d.id;
+      opt.textContent = d.is_fake ? `${d.id} (fake)` : d.id;
+      sel.appendChild(opt);
+    });
+    if (prev && controlDevices.some((d) => d.id === prev)) sel.value = prev;
+    const selected =
+      controlDevices.find((d) => d.id === sel.value) || controlDevices[0];
+    if (selected) sel.value = selected.id;
+    fillControlForm(selected);
+  }
+
+  async function controlBlockUnblock(action) {
+    const gid = requireGateway();
+    const device_id = ($("ctl-device").value || "").trim();
+    if (!device_id) throw new Error("Select a sensor first.");
+    const label = action === "block" ? "Blocking…" : "Allowing…";
+    $("ctl-msg").textContent = label;
+    $("btn-ctl-block").disabled = true;
+    $("btn-ctl-unblock").disabled = true;
+    try {
+      const data = await control(
+        "POST",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/control/${action}`,
+        { body: {} }
+      );
+      $("ctl-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || (action === "block" ? "Publish blocked." : "Publish allowed.")
+      )}</div>`;
+      await refreshControlDevices();
+      if ($("ctl-device")) $("ctl-device").value = device_id;
+      const still = (controlDevices || []).find((d) => d.id === device_id);
+      if (still) fillControlForm(still);
+    } finally {
+      $("btn-ctl-block").disabled = false;
+      $("btn-ctl-unblock").disabled = false;
+    }
+  }
+
+  async function controlPurgeKafka() {
+    const gid = requireGateway();
+    const device_id = ($("ctl-device").value || "").trim();
+    if (!device_id) throw new Error("Select a sensor first.");
+    if (!$("ctl-purge-confirm").checked) {
+      throw new Error("Tick the Kafka clear confirmation checkbox first.");
+    }
+    $("ctl-msg").textContent = "Clearing Kafka data…";
+    $("btn-ctl-purge").disabled = true;
+    try {
+      const data = await control(
+        "POST",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/control/purge-kafka`,
+        { body: {} }
+      );
+      $("ctl-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || "Kafka topic cleared."
+      )}</div>`;
+      $("ctl-purge-confirm").checked = false;
+    } finally {
+      $("btn-ctl-purge").disabled = !$("ctl-purge-confirm").checked;
     }
   }
 
@@ -1243,7 +1360,9 @@
     const panel = document.querySelector(".action-panel:not(.hidden)");
     let target = $("ctrl-msg");
     if (panel) {
-      if (panel.dataset.action === "simulate" && $("sim-msg")) {
+      if (panel.dataset.action === "control" && $("ctl-msg")) {
+        target = $("ctl-msg");
+      } else if (panel.dataset.action === "simulate" && $("sim-msg")) {
         target = $("sim-msg");
       } else if ($("fake-form") && !$("fake-form").classList.contains("hidden")) {
         target = $("fake-msg") || target;
@@ -1277,6 +1396,7 @@
           const tab = activeActionTab();
           if (tab === "view") return refreshDevices();
           if (tab === "simulate") return refreshFakeDevices();
+          if (tab === "control") return refreshControlDevices();
         })
         .catch(showErr)
     );
@@ -1295,6 +1415,8 @@
         refreshDevices().catch(showErr);
       } else if (tab === "simulate") {
         refreshFakeDevices().catch(showErr);
+      } else if (tab === "control") {
+        refreshControlDevices().catch(showErr);
       }
     });
 
@@ -1431,6 +1553,40 @@
     $("btn-sim-apply").addEventListener("click", () =>
       applySimConfig().catch(showErr)
     );
+
+    if ($("btn-refresh-ctl")) {
+      $("btn-refresh-ctl").addEventListener("click", () =>
+        refreshControlDevices().catch(showErr)
+      );
+    }
+    if ($("ctl-device")) {
+      $("ctl-device").addEventListener("change", () => {
+        const d = (controlDevices || []).find(
+          (x) => x.id === $("ctl-device").value
+        );
+        fillControlForm(d || null);
+      });
+    }
+    if ($("btn-ctl-block")) {
+      $("btn-ctl-block").addEventListener("click", () =>
+        controlBlockUnblock("block").catch(showErr)
+      );
+    }
+    if ($("btn-ctl-unblock")) {
+      $("btn-ctl-unblock").addEventListener("click", () =>
+        controlBlockUnblock("unblock").catch(showErr)
+      );
+    }
+    if ($("ctl-purge-confirm") && $("btn-ctl-purge")) {
+      $("ctl-purge-confirm").addEventListener("change", () => {
+        $("btn-ctl-purge").disabled = !$("ctl-purge-confirm").checked;
+      });
+    }
+    if ($("btn-ctl-purge")) {
+      $("btn-ctl-purge").addEventListener("click", () =>
+        controlPurgeKafka().catch(showErr)
+      );
+    }
 
     $("btn-ca-save").addEventListener("click", () => {
       const pass = ($("ca-modal-pass").value || "").trim();

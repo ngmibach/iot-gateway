@@ -204,6 +204,20 @@ class DeviceOut(BaseModel):
     # False when absent in meta_json (real sensors).
     is_fake: bool = False
     fake: Optional[FakeDeviceOut] = None
+    # Control tab: MQTT publish blocked via ACL (registration kept).
+    publish_blocked: bool = False
+
+
+class DeviceControlRequest(BaseModel):
+    """Optional sudo for Control-tab block / unblock / purge-kafka."""
+
+    sudo_password: Optional[str] = None
+
+
+class DeviceControlResponse(BaseModel):
+    device: DeviceOut
+    status: str = "ok"
+    message: str = ""
 
 
 class FakeActionResponse(BaseModel):

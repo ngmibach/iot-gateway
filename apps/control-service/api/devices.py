@@ -24,6 +24,11 @@ from actions.fake_sensors import (
     update_fake_config,
 )
 from actions.kafka_capacity import kafka_topic_name
+from actions.device_control import (
+    block_device_publish,
+    purge_device_kafka,
+    unblock_device_publish,
+)
 from actions.playbooks import (
     gateway_kafka_capacity,
     register_device,
@@ -44,10 +49,17 @@ from .deps import (
     require_gateway,
     require_token,
 )
-from .device_meta import is_fake_meta, merge_device_meta, parse_meta
+from .device_meta import (
+    is_fake_meta,
+    is_publish_blocked_meta,
+    merge_device_meta,
+    parse_meta,
+)
 from .schemas import (
     CreateFakeDeviceRequest,
     DeleteDeviceRequest,
+    DeviceControlRequest,
+    DeviceControlResponse,
     DeviceOut,
     DiscoverSensorsResponse,
     FakeActionRequest,
@@ -241,7 +253,36 @@ def _device_out(row: dict[str, Any]) -> DeviceOut:
         kafka_retention_bytes=int(retention) if retention is not None else None,
         is_fake=fake,
         fake=_fake_out(meta) if fake else None,
+        publish_blocked=is_publish_blocked_meta(meta),
     )
+
+
+def _require_device(registry: Registry, gid: str, device_id: str) -> dict[str, Any]:
+    row = registry.get_device(gid, device_id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"device {device_id!r} not found on gateway {gid!r}",
+        )
+    return row
+
+
+def _topics_rw_list(row: dict[str, Any]) -> list[str]:
+    raw = _parse_json_field(row.get("topics_rw"))
+    if isinstance(raw, list):
+        return [str(x) for x in raw if str(x).strip()]
+    if isinstance(raw, str) and raw.strip():
+        return [raw.strip()]
+    return [f"sensors/{row['id']}/#"]
+
+
+def _topics_r_one(row: dict[str, Any]) -> str | None:
+    raw = _parse_json_field(row.get("topics_r"))
+    if isinstance(raw, list) and raw:
+        return str(raw[0])
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    return None
 
 
 def _capacity_out(plan: Any) -> KafkaCapacityOut:
@@ -1474,6 +1515,202 @@ def post_reissue_cert(
         cert_bundle_token=token,
         status=result.status,
         message=message,
+    )
+
+
+@router.post(
+    "/gateways/{gid}/devices/{device_id}/control/block",
+    response_model=DeviceControlResponse,
+)
+def control_block_publish(
+    gid: str,
+    device_id: str,
+    body: Optional[DeviceControlRequest] = Body(default=None),
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DeviceControlResponse:
+    """Block MQTT publish via ACL (keep registration)."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    row = _require_device(registry, gid, device_id)
+    meta = _meta_dict(row)
+    topics_rw = _topics_rw_list(row)
+    topic_hint = topics_rw[0] if topics_rw else f"sensors/{device_id}/#"
+    sudo_password = body.sudo_password if body is not None else None
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = block_device_publish(
+                ssh,
+                user_id=device_id,
+                topic_rw_hint=topic_hint,
+                install_root=gw["install_root"],
+                sudo_password=sudo_password,
+            )
+            if result.ok and is_fake_meta(meta):
+                stop_fake_unit(
+                    ssh, device_id, sudo_password=sudo_password
+                )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/block failed: {exc}",
+        ) from exc
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.message or "block publish failed",
+        )
+
+    snap = topics_rw
+    if is_publish_blocked_meta(meta) and meta.get("topics_rw_before_block") is not None:
+        snap = meta.get("topics_rw_before_block")
+    new_meta = merge_device_meta(
+        meta,
+        publish_blocked=True,
+        topics_rw_before_block=snap,
+        is_fake=True if is_fake_meta(meta) else None,
+        fake={"status": "stopped"} if is_fake_meta(meta) else None,
+    )
+    device = registry.upsert_device(gid, device_id, meta_json=new_meta)
+    registry.audit(
+        "control_block_publish",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={"status": result.status},
+    )
+    return DeviceControlResponse(
+        device=_device_out(device),
+        status=result.status,
+        message=result.message or "publish blocked",
+    )
+
+
+@router.post(
+    "/gateways/{gid}/devices/{device_id}/control/unblock",
+    response_model=DeviceControlResponse,
+)
+def control_unblock_publish(
+    gid: str,
+    device_id: str,
+    body: Optional[DeviceControlRequest] = Body(default=None),
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DeviceControlResponse:
+    """Restore MQTT publish ACL from registry topics."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    row = _require_device(registry, gid, device_id)
+    topics_rw = _topics_rw_list(row)
+    topic_r = _topics_r_one(row)
+    sudo_password = body.sudo_password if body is not None else None
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = unblock_device_publish(
+                ssh,
+                user_id=device_id,
+                topic_rw=topics_rw[0] if topics_rw else None,
+                topic_r=topic_r,
+                install_root=gw["install_root"],
+                sudo_password=sudo_password,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/unblock failed: {exc}",
+        ) from exc
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.message or "unblock publish failed",
+        )
+
+    new_meta = merge_device_meta(
+        _meta_dict(row), clear_publish_block=True
+    )
+    device = registry.upsert_device(gid, device_id, meta_json=new_meta)
+    registry.audit(
+        "control_unblock_publish",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={"status": result.status},
+    )
+    return DeviceControlResponse(
+        device=_device_out(device),
+        status=result.status,
+        message=result.message or "publish allowed",
+    )
+
+
+@router.post(
+    "/gateways/{gid}/devices/{device_id}/control/purge-kafka",
+    response_model=DeviceControlResponse,
+)
+def control_purge_kafka(
+    gid: str,
+    device_id: str,
+    body: Optional[DeviceControlRequest] = Body(default=None),
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DeviceControlResponse:
+    """Delete and recreate the device Kafka topic (messages cleared)."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    row = _require_device(registry, gid, device_id)
+    meta = _meta_dict(row)
+    topic = meta.get("kafka_topic") or kafka_topic_name(device_id)
+    retention = meta.get("kafka_retention_bytes")
+    sudo_password = body.sudo_password if body is not None else None
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = purge_device_kafka(
+                ssh,
+                user_id=device_id,
+                topic=str(topic) if topic else None,
+                retention_bytes=int(retention) if retention is not None else None,
+                install_root=gw["install_root"],
+                sudo_password=sudo_password,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/purge-kafka failed: {exc}",
+        ) from exc
+    if not result.ok:
+        code = (
+            status.HTTP_409_CONFLICT
+            if (result.details or {}).get("kafka_missing")
+            else status.HTTP_502_BAD_GATEWAY
+        )
+        raise HTTPException(
+            status_code=code,
+            detail=result.message or "purge kafka failed",
+        )
+
+    registry.audit(
+        "control_purge_kafka",
+        gateway_id=gid,
+        device_id=device_id,
+        detail=result.details,
+    )
+    return DeviceControlResponse(
+        device=_device_out(row),
+        status=result.status,
+        message=result.message or "Kafka topic cleared",
     )
 
 
