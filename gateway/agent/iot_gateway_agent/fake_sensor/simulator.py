@@ -226,14 +226,57 @@ def _ssl_context(
     if wrong_client_cert:
         w_crt = wrong_dir / "client.crt"
         w_key = wrong_dir / "client.key"
+        if not (w_crt.is_file() and w_key.is_file()):
+            try:
+                _ensure_wrong_client_cert(wrong_dir)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("could not create wrong-certs: %s", exc)
         if w_crt.is_file() and w_key.is_file():
             ctx.load_cert_chain(certfile=str(w_crt), keyfile=str(w_key))
             return ctx
+        # Fall through without a client cert (same visible failure as omit).
         return ctx
 
     if crt.is_file() and key.is_file():
         ctx.load_cert_chain(certfile=str(crt), keyfile=str(key))
     return ctx
+
+
+def _ensure_wrong_client_cert(wrong_dir: Path) -> None:
+    """Create a self-signed client cert that the gateway CA will reject."""
+    from datetime import datetime, timedelta, timezone
+
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cryptography.x509.oid import NameOID
+
+    wrong_dir.mkdir(parents=True, exist_ok=True)
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = issuer = x509.Name(
+        [x509.NameAttribute(NameOID.COMMON_NAME, "iotgw-wrong-client")]
+    )
+    now = datetime.now(timezone.utc)
+    cert = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(issuer)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(days=30))
+        .sign(key, hashes.SHA256())
+    )
+    (wrong_dir / "client.key").write_bytes(
+        key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.TraditionalOpenSSL,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+    )
+    (wrong_dir / "client.crt").write_bytes(
+        cert.public_bytes(serialization.Encoding.PEM)
+    )
 
 
 def _resolve_topic(cfg: dict[str, Any]) -> str:

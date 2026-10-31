@@ -520,7 +520,8 @@ class AgentMetrics:
             )
             ids_total = max(ids_total, sum(c.ids for c in by_device.values()))
         lines += [
-            "# HELP iotgw_denied_publishes_total Mosquitto Denied PUBLISH events",
+            "# HELP iotgw_denied_publishes_total Denied publishes "
+            "(ACL, TLS handshake, decrypt/schema fails)",
             "# TYPE iotgw_denied_publishes_total counter",
             f"iotgw_denied_publishes_total {denied_total}",
             "# HELP iotgw_ids_detections_total IDS / anomaly detections",

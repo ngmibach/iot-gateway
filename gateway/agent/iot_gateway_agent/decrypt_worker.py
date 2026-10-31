@@ -29,6 +29,7 @@ from .kafka_store import kafka_topic_name
 from .schema_validate import SchemaError
 
 if TYPE_CHECKING:
+    from .deny_log import DenyLog
     from .kafka_producer import SensorKafkaProducer
 
 logger = logging.getLogger(__name__)
@@ -166,6 +167,8 @@ class DecryptWorker:
         envelope_require: bool | None = None,
         pair_timeout_s: float = 5.0,
         replay_cache_size: int = 4096,
+        deny_log: "DenyLog | None" = None,
+        gateway_id: str = "",
     ):
         self.host = host
         self.port = port
@@ -178,6 +181,8 @@ class DecryptWorker:
         self.tls_cert = Path(tls_cert) if tls_cert else None
         self.tls_key = Path(tls_key) if tls_key else None
         self.data_dir = Path(data_dir) if data_dir else self.log_path.parent.parent
+        self.deny_log = deny_log
+        self.gateway_id = (gateway_id or "").strip()
         self.envelope_enabled = (
             _env_flag("IOTGW_ENVELOPE_V1", True)
             if envelope_enabled is None
@@ -232,10 +237,34 @@ class DecryptWorker:
                 for k, v in self._by_device.items()
             }
 
-    def bump_denied(self, device_id: str, *, n: int = 1) -> None:
+    def bump_denied(
+        self,
+        device_id: str,
+        *,
+        n: int = 1,
+        reason: str = "acl_deny",
+        source_ip: str = "",
+        detail: str = "",
+        count_as_message: bool = False,
+    ) -> None:
         did = (device_id or "unknown").strip() or "unknown"
         with self._lock:
-            self._by_device[did].denied += n
+            ctr = self._by_device[did]
+            ctr.denied += n
+            if count_as_message:
+                self.messages_fail += n
+                ctr.messages_fail += n
+            if reason:
+                ctr.deny_reasons[reason] = ctr.deny_reasons.get(reason, 0) + n
+        if self.deny_log is not None:
+            for _ in range(max(1, int(n))):
+                self.deny_log.record(
+                    reason=reason or "acl_deny",
+                    device_id=did,
+                    source_ip=source_ip,
+                    gateway_id=self.gateway_id,
+                    detail=detail,
+                )
 
     def bump_ids(self, device_id: str, *, n: int = 1) -> None:
         did = (device_id or "unknown").strip() or "unknown"
@@ -269,13 +298,29 @@ class DecryptWorker:
         self._thread = None
         self._janitor = None
 
-    def _fail(self, device_id: str, reason: str) -> None:
+    def _fail(
+        self,
+        device_id: str,
+        reason: str,
+        *,
+        detail: str = "",
+        envelope: bool = True,
+    ) -> None:
         self.messages_fail += 1
-        self.envelope_fail += 1
+        if envelope:
+            self.envelope_fail += 1
         with self._lock:
             ctr = self._by_device[device_id]
             ctr.messages_fail += 1
+            ctr.denied += 1
             ctr.deny_reasons[reason] = ctr.deny_reasons.get(reason, 0) + 1
+        if self.deny_log is not None:
+            self.deny_log.record(
+                reason=reason or "decrypt",
+                device_id=device_id,
+                gateway_id=self.gateway_id,
+                detail=detail,
+            )
         logger.warning("decrypt deny device=%s reason=%s", device_id, reason)
 
     def _accept_clear(
@@ -473,12 +518,7 @@ class DecryptWorker:
         process_t0 = time.perf_counter()
         clear = decrypt_wrapper_payload(payload)
         if clear is None:
-            self.messages_fail += 1
-            with self._lock:
-                self._by_device[device_id].messages_fail += 1
-                self._by_device[device_id].deny_reasons["fernet"] = (
-                    self._by_device[device_id].deny_reasons.get("fernet", 0) + 1
-                )
+            self._fail(device_id, "fernet", envelope=False)
             return
         self._accept_clear(
             device_id,

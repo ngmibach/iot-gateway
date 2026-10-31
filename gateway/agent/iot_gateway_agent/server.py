@@ -21,6 +21,7 @@ def make_handler(
     metrics_fn: Callable[[], str] | None = None,
     reload_fn: Callable[[], dict[str, Any]] | None = None,
     day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
+    denied_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class AgentHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -49,12 +50,23 @@ def make_handler(
             self.wfile.write(raw)
 
         def do_GET(self) -> None:  # noqa: N802
-            path = urlparse(self.path).path.rstrip("/") or "/"
+            parsed = urlparse(self.path)
+            path = parsed.path.rstrip("/") or "/"
             if path == "/v1/health":
                 self._send_json(200, health_fn())
                 return
             if path == "/v1/info":
                 self._send_json(200, info_fn())
+                return
+            if path == "/v1/denied" and denied_fn is not None:
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(parsed.query or "")
+                params = {k: (v[0] if v else "") for k, v in qs.items()}
+                try:
+                    self._send_json(200, denied_fn(params))
+                except Exception as e:  # noqa: BLE001
+                    self._send_json(500, {"error": str(e)})
                 return
             if path == "/v1/crypto/day/current" and day_crypto_fn is not None:
                 try:
@@ -77,9 +89,12 @@ def make_handler(
 
         def do_HEAD(self) -> None:  # noqa: N802
             path = urlparse(self.path).path.rstrip("/") or "/"
-            if path in ("/v1/health", "/v1/info", "/v1/crypto/day/current") or (
-                path == "/metrics" and metrics_fn is not None
-            ):
+            if path in (
+                "/v1/health",
+                "/v1/info",
+                "/v1/crypto/day/current",
+                "/v1/denied",
+            ) or (path == "/metrics" and metrics_fn is not None):
                 self.send_response(200)
                 self.send_header("Cache-Control", "no-store")
                 self.end_headers()
@@ -116,6 +131,7 @@ def create_server(
     metrics_fn: Callable[[], str] | None = None,
     reload_fn: Callable[[], dict[str, Any]] | None = None,
     day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
+    denied_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> ThreadingHTTPServer:
     handler = make_handler(
         health_fn,
@@ -123,5 +139,6 @@ def create_server(
         metrics_fn=metrics_fn,
         reload_fn=reload_fn,
         day_crypto_fn=day_crypto_fn,
+        denied_fn=denied_fn,
     )
     return ThreadingHTTPServer((host, port), handler)

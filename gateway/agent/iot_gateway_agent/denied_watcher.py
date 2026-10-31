@@ -1,4 +1,4 @@
-"""Tail Mosquitto logs for Denied PUBLISH / ACL rejects → per-device counters."""
+"""Tail Mosquitto logs for Denied PUBLISH / TLS / auth rejects → counters + deny log."""
 
 from __future__ import annotations
 
@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Callable, Optional
 
 if TYPE_CHECKING:
     from .decrypt_worker import DecryptWorker
+    from .deny_log import DenyLog
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,20 @@ logger = logging.getLogger(__name__)
 # Also match "Denied PUBLISH ... user sensor1" variants.
 _DENIED_RE = re.compile(
     r"Denied PUBLISH.*?((?:from|user)\s+)([A-Za-z0-9_.\-]+)",
+    re.IGNORECASE,
+)
+_NEW_CONN_RE = re.compile(
+    r"New connection from ([0-9a-fA-F:.]+):\d+ on port \d+",
+    re.IGNORECASE,
+)
+_CONN_FAILED_RE = re.compile(
+    r"Client connection from ([0-9a-fA-F:.]+) failed:\s*(.+)$",
+    re.IGNORECASE,
+)
+_OPENSSL_RE = re.compile(r"OpenSSL Error\[\d+\]:\s*(.+)$", re.IGNORECASE)
+_BAD_AUTH_RE = re.compile(
+    r"(?:Bad username or password|not authorised|Connection Refused:\s*not authorized)"
+    r".*?(?:user[=: ]+|from\s+)?([A-Za-z0-9_.\-]+)?",
     re.IGNORECASE,
 )
 _IDS_RE = re.compile(
@@ -31,6 +46,27 @@ _DEFAULT_LOG_CANDIDATES = (
     "/var/log/mosquitto.log",
 )
 
+_LOCAL_IPS = frozenset({"127.0.0.1", "::1", "0.0.0.0"})
+
+
+def _classify_tls_detail(detail: str) -> str:
+    low = (detail or "").lower()
+    if "peer did not return a certificate" in low or "no certificate" in low:
+        return "missing_client_cert"
+    if (
+        "certificate verify failed" in low
+        or "unknown ca" in low
+        or "alert bad certificate" in low
+        or "alert unknown ca" in low
+        or "certificate required" in low
+    ):
+        return "bad_client_cert"
+    if "unexpected eof" in low:
+        return "tls_eof"
+    if "protocol error" in low:
+        return "tls_protocol"
+    return "tls_handshake"
+
 
 class DeniedWatcher:
     """Follow Mosquitto (and optional IDS) log files; bump agent counters."""
@@ -41,14 +77,17 @@ class DeniedWatcher:
         worker: "DecryptWorker",
         log_paths: list[str | Path] | None = None,
         ids_log_paths: list[str | Path] | None = None,
+        deny_log: "DenyLog | None" = None,
     ):
         self.worker = worker
         self.log_paths = [Path(p) for p in (log_paths or _DEFAULT_LOG_CANDIDATES)]
         self.ids_log_paths = [Path(p) for p in (ids_log_paths or [])]
+        self.deny_log = deny_log
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self.denied_total = 0
         self.ids_total = 0
+        self._last_conn_ip: str = ""
 
     @property
     def alive(self) -> bool:
@@ -108,13 +147,100 @@ class DeniedWatcher:
         except OSError as exc:
             logger.warning("denied watcher stopped reading %s: %s", path, exc)
 
-    def _on_mosquitto_line(self, line: str) -> None:
-        m = _DENIED_RE.search(line)
-        if not m:
-            return
-        device_id = m.group(2).strip() or "unknown"
+    def _emit_deny(
+        self,
+        *,
+        device_id: str,
+        reason: str,
+        source_ip: str = "",
+        detail: str = "",
+        count_as_message: bool = False,
+    ) -> None:
         self.denied_total += 1
-        self.worker.bump_denied(device_id)
+        self.worker.bump_denied(
+            device_id,
+            reason=reason,
+            source_ip=source_ip,
+            detail=detail,
+            count_as_message=count_as_message,
+        )
+
+    def _on_mosquitto_line(self, line: str) -> None:
+        text = line.strip()
+        if not text:
+            return
+
+        m_new = _NEW_CONN_RE.search(text)
+        if m_new:
+            ip = m_new.group(1).strip()
+            self._last_conn_ip = "" if ip in _LOCAL_IPS else ip
+            return
+
+        m_denied = _DENIED_RE.search(text)
+        if m_denied:
+            device_id = m_denied.group(2).strip() or "unknown"
+            self._emit_deny(
+                device_id=device_id,
+                reason="acl_deny",
+                source_ip=self._last_conn_ip,
+                detail=text[:200],
+                count_as_message=True,
+            )
+            return
+
+        m_fail = _CONN_FAILED_RE.search(text)
+        if m_fail:
+            ip = m_fail.group(1).strip()
+            if ip in _LOCAL_IPS:
+                return
+            detail = m_fail.group(2).strip()
+            reason = _classify_tls_detail(detail)
+            if reason == "tls_eof":
+                # Common benign disconnect noise; still count handshake-ish fails.
+                pass
+            device_id = "unknown"
+            if self.deny_log is not None:
+                device_id = self.deny_log.lookup_device(ip) or "unknown"
+            self._emit_deny(
+                device_id=device_id,
+                reason=reason,
+                source_ip=ip,
+                detail=detail[:200],
+                count_as_message=True,
+            )
+            return
+
+        m_ssl = _OPENSSL_RE.search(text)
+        if m_ssl:
+            ip = self._last_conn_ip
+            if not ip or ip in _LOCAL_IPS:
+                return
+            detail = m_ssl.group(1).strip()
+            reason = _classify_tls_detail(detail)
+            device_id = "unknown"
+            if self.deny_log is not None:
+                device_id = self.deny_log.lookup_device(ip) or "unknown"
+            self._emit_deny(
+                device_id=device_id,
+                reason=reason,
+                source_ip=ip,
+                detail=detail[:200],
+                count_as_message=True,
+            )
+            # Avoid double-counting the following "Client <unknown> disconnected".
+            self._last_conn_ip = ""
+            return
+
+        m_auth = _BAD_AUTH_RE.search(text)
+        if m_auth:
+            device_id = (m_auth.group(1) or "unknown").strip() or "unknown"
+            self._emit_deny(
+                device_id=device_id,
+                reason="bad_password",
+                source_ip=self._last_conn_ip,
+                detail=text[:200],
+                count_as_message=True,
+            )
 
     def _on_ids_line(self, line: str) -> None:
         m = _IDS_RE.search(line)
