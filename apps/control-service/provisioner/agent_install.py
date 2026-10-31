@@ -241,11 +241,21 @@ def ensure_gateway_ca_and_server_cert(
             f"-addext 'subjectKeyIdentifier=hash' && "
             f"chmod 600 {shlex.quote(ca_key)} && chmod 644 {shlex.quote(ca_crt)} && "
             "echo CA_CREATED; "
-            "else echo CA_EXISTS; fi"
+            # Existing encrypted ca.key: refuse wrong passphrase before decrypt cert sign.
+            f"elif openssl pkey -in {shlex.quote(ca_key)} -passin file:{remote_pass} "
+            f"-noout >/dev/null 2>&1; then echo CA_EXISTS; "
+            "else echo CA_PASS_MISMATCH; exit 42; fi"
         )
         ca_res = sudo_run(
             ssh, ca_script, sudo_password=sudo_password, timeout=120.0
         )
+        combined = f"{ca_res.stdout or ''}{ca_res.stderr or ''}"
+        if "CA_PASS_MISMATCH" in combined:
+            raise AgentInstallError(
+                "Existing gateway CA could not be unlocked with this passphrase. "
+                "Uncheck auto-generate and enter the original CA passphrase, or use "
+                "Clean up gateway and reinstall to create a new CA."
+            )
         if not ca_res.ok:
             raise AgentInstallError(
                 "creating gateway CA failed: "
@@ -405,10 +415,17 @@ def ensure_decrypt_mqtt_identity(
         res = sudo_run(
             ssh, sign_script, sudo_password=sudo_password, timeout=120.0
         )
+        combined = f"{res.stdout or ''}{res.stderr or ''}"
         if not res.ok or "DECRYPT_OK" not in (res.stdout or ""):
+            hint = ""
+            if "bad decrypt" in combined.lower() or "pkcs12" in combined.lower():
+                hint = (
+                    " (often a wrong CA passphrase for an existing ca.key — "
+                    "enter the original passphrase or Clean up gateway first)"
+                )
             raise AgentInstallError(
                 "decrypt worker MQTT identity failed: "
-                f"{(res.stderr or res.stdout).strip()[:400]}"
+                f"{(res.stderr or res.stdout).strip()[:400]}{hint}"
             )
     finally:
         local_pass.unlink(missing_ok=True)

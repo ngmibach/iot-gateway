@@ -515,6 +515,27 @@ class ProvisionFlowTests(unittest.TestCase):
             provision(ssh, self._config(sudo_password=""))
         self.assertIn("sudo password", str(ctx.exception).lower())
 
+    def test_existing_ca_passphrase_mismatch_is_clear(self) -> None:
+        from provisioner.agent_install import (
+            AgentInstallError,
+            ensure_gateway_ca_and_server_cert,
+        )
+
+        ssh = FakeSSH()
+        ssh.when("CA_PASS_MISMATCH", CommandResult(42, "CA_PASS_MISMATCH\n", ""))
+        ssh.when("openssl", CommandResult(42, "CA_PASS_MISMATCH\n", ""))
+        ssh.when("sudo -S", CommandResult(42, "CA_PASS_MISMATCH\n", ""))
+        with self.assertRaises(AgentInstallError) as ctx:
+            ensure_gateway_ca_and_server_cert(
+                ssh,
+                sudo_password="sudo",
+                gateway_ip="192.168.1.50",
+                ca_passphrase="wrong-passphrase-value-here",
+            )
+        msg = str(ctx.exception).lower()
+        self.assertIn("could not be unlocked", msg)
+        self.assertIn("clean up", msg)
+
     def test_agent_backend_requires_ca_passphrase(self) -> None:
         ssh = _ok_ssh()
         ssh.when("sudo -S", CommandResult(0, "", ""))

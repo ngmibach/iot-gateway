@@ -1158,10 +1158,17 @@ def _handle_api(
                 return
             try:
                 if generate_ca:
-                    ca_pass = ca_passphrase.generate_ca_passphrase(
-                        sudo_password=sudo_password,
-                        gateway_id=gateway_id,
-                    )
+                    # Reinstall: keep the keyring CA so we can unlock an existing
+                    # remote ca.key. Generating a new passphrase here left the old
+                    # encrypted key on the Pi and failed decrypt cert signing.
+                    existing_ca = keyring_store.get_secret(gateway_id, kind="ca")
+                    if isinstance(existing_ca, str) and existing_ca.strip():
+                        ca_pass = ca_passphrase.validate_ca_passphrase(existing_ca)
+                    else:
+                        ca_pass = ca_passphrase.generate_ca_passphrase(
+                            sudo_password=sudo_password,
+                            gateway_id=gateway_id,
+                        )
                 else:
                     ca_pass = ca_passphrase.validate_ca_passphrase(
                         str(body.get("ca_passphrase") or "")
