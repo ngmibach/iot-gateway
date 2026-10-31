@@ -191,14 +191,59 @@ def _find_tree_root(extract_dir: Path, root_dir_glob: str) -> Path:
 def grafana_tree_layout_ok(tree: Path) -> bool:
     """True when ``tree`` has public/, conf/, and a grafana[-server][.exe] binary."""
     tree = Path(tree)
-    if not (tree / "public").is_dir():
+    try:
+        if not (tree / "public").is_dir():
+            return False
+        if not (tree / "conf").is_dir():
+            return False
+        bin_dir = tree / "bin"
+        if not bin_dir.is_dir():
+            return False
+        return any((bin_dir / name).is_file() for name in _GRAFANA_SERVER_NAMES)
+    except OSError:
+        # Windows can leave extracted trees execute-only (WinError 5); treat as absent.
         return False
-    if not (tree / "conf").is_dir():
-        return False
-    bin_dir = tree / "bin"
-    if not bin_dir.is_dir():
-        return False
-    return any((bin_dir / name).is_file() for name in _GRAFANA_SERVER_NAMES)
+
+
+def ensure_windows_tree_access(path: Path) -> None:
+    """Grant the current user modify rights on ``path`` (Windows ACL repair).
+
+    Grafana tar extracts can land as execute-only under ``%APPDATA%``, so later
+    ``public/`` probes raise ``WinError 5 Access is denied``. No-op on non-Windows
+    or when ``icacls`` is unavailable.
+    """
+    import subprocess
+
+    if os.name != "nt":
+        return
+    path = Path(path)
+    if not path.exists():
+        return
+    user = (os.environ.get("USERNAME") or "").strip()
+    if not user:
+        try:
+            user = os.getlogin()
+        except OSError:
+            return
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        subprocess.run(
+            [
+                "icacls",
+                str(path),
+                "/grant",
+                f"{user}:(OI)(CI)M",
+                "/T",
+                "/C",
+                "/Q",
+            ],
+            check=False,
+            capture_output=True,
+            timeout=120,
+            creationflags=flags,
+        )
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        pass
 
 
 def _grafana_layout_ok(tree: Path) -> bool:
@@ -363,6 +408,7 @@ def ensure_grafana_tree(
                 )
             shutil.move(str(root), staging)
         _atomic_replace_dir(staging, dest_dir, old)
+        ensure_windows_tree_access(dest_dir)
         marker.write_text(f"{version}\n{digest}\n", encoding="utf-8")
     except Exception:
         _rmtree_if_exists(staging)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import tarfile
 import tempfile
 import unittest
@@ -191,6 +192,33 @@ class BinaryFetchTests(unittest.TestCase):
         self.assertEqual(any_asset["archive"], "zip")
         self.assertEqual(len(any_asset["sha256"]), 64)
         self.assertTrue(any_asset["url"].startswith("https://storage.googleapis.com/"))
+
+    def test_grafana_layout_ok_permission_error_is_false(self) -> None:
+        tree = Path("/tmp/iotgw-grafana-missing-acl")
+        with mock.patch.object(Path, "is_dir", side_effect=PermissionError(5, "denied")):
+            self.assertFalse(bf.grafana_tree_layout_ok(tree))
+
+    def test_ensure_grafana_tree_repairs_windows_acl(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            archive, digest = _make_grafana_archive(root)
+            versions = _grafana_versions(digest)
+            dest = root / "grafana"
+
+            def _dl(url, dest_path, progress=None):
+                dest_path.write_bytes(archive.read_bytes())
+                if progress:
+                    progress("x", 1.0)
+
+            with mock.patch.object(bf, "platform_key", return_value="linux-amd64"):
+                with mock.patch.object(bf, "_download", side_effect=_dl):
+                    with mock.patch.object(
+                        bf, "ensure_windows_tree_access"
+                    ) as acl:
+                        bf.ensure_grafana_tree(
+                            dest, versions=versions, min_free_bytes=None
+                        )
+                        acl.assert_called_once_with(dest)
 
     def test_ensure_grafana_tree_extract_and_marker(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -55,6 +55,18 @@ class FakeSSH:
                 return result
         return CommandResult(0, "", "")
 
+    def read_text(self, path: str) -> str:
+        if path not in self.files:
+            raise FileNotFoundError(path)
+        data = self.files[path]
+        if isinstance(data, bytes):
+            return data.decode("utf-8")
+        return str(data)
+
+    def write_text(self, path: str, content: str, *, mode: int = 0o644) -> None:
+        self.files[path] = content.encode("utf-8")
+        self.uploads.append((path, mode))
+
     def upload_file(self, local_path: Path, remote_path: str, *, mode: int = 0o644) -> None:
         self.uploads.append((remote_path, mode))
         self.files[remote_path] = Path(local_path).read_bytes()

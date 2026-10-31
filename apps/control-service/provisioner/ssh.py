@@ -126,6 +126,52 @@ class ParamikoSSHSession:
         code = stdout.channel.recv_exit_status()
         return CommandResult(exit_code=code, stdout=out, stderr=err)
 
+    def read_text(self, path: str) -> str:
+        """Read a remote UTF-8 text file via SFTP (playbook / fake teardown API)."""
+        sftp = self._client.open_sftp()
+        try:
+            with sftp.open(path, "r") as fh:
+                data = fh.read()
+        except FileNotFoundError:
+            raise
+        except OSError as exc:
+            # Paramiko raises IOError subclasses; normalize missing files.
+            if getattr(exc, "errno", None) in (2, None) and "No such file" in str(exc):
+                raise FileNotFoundError(path) from exc
+            raise
+        finally:
+            sftp.close()
+        if isinstance(data, bytes):
+            return data.decode("utf-8", errors="replace")
+        return str(data)
+
+    def write_text(self, path: str, content: str, *, mode: int = 0o644) -> None:
+        """Write a remote UTF-8 text file via SFTP (tmp + rename)."""
+        data = content.encode("utf-8")
+        sftp = self._client.open_sftp()
+        try:
+            parent = posixpath.dirname(path)
+            if parent and parent != "/":
+                _sftp_makedirs(sftp, parent)
+            tmp = f"{path}.tmp.{int(time.time())}"
+            with sftp.open(tmp, "w") as fh:
+                fh.write(data)
+            try:
+                sftp.chmod(tmp, mode)
+            except OSError:
+                pass
+            try:
+                sftp.remove(path)
+            except OSError:
+                pass
+            sftp.rename(tmp, path)
+            try:
+                sftp.chmod(path, mode)
+            except OSError:
+                pass
+        finally:
+            sftp.close()
+
     def upload_file(
         self, local_path: Path, remote_path: str, *, mode: int = 0o644
     ) -> None:

@@ -19,6 +19,15 @@ class WslStatus:
 
 
 def in_wsl() -> bool:
+    """True only when this process is the Linux side of WSL.
+
+    Native Windows Python / the packaged ``.exe`` must return False even when
+    the process cwd is a ``\\\\wsl.localhost\\…`` UNC path. On that cwd,
+    ``open("/proc/version")`` resolves into the distro and would falsely
+    report WSL.
+    """
+    if os.name == "nt" or platform.system().lower() == "windows":
+        return False
     if os.environ.get("WSL_DISTRO_NAME") or os.environ.get("WSL_INTEROP"):
         return True
     try:
@@ -31,10 +40,10 @@ def in_wsl() -> bool:
 
 def operator_runtime() -> Literal["windows", "wsl", "linux"]:
     """Which operator-PC path the wizard should use."""
-    if in_wsl():
-        return "wsl"
     if os.name == "nt" or platform.system().lower() == "windows":
         return "windows"
+    if in_wsl():
+        return "wsl"
     return "linux"
 
 
