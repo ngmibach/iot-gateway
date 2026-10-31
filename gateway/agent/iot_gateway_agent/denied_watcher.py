@@ -30,10 +30,17 @@ _CONN_FAILED_RE = re.compile(
 )
 _OPENSSL_RE = re.compile(r"OpenSSL Error\[\d+\]:\s*(.+)$", re.IGNORECASE)
 _BAD_AUTH_RE = re.compile(
-    r"(?:Bad username or password|not authorised|Connection Refused:\s*not authorized)"
-    r".*?(?:user[=: ]+|from\s+)?([A-Za-z0-9_.\-]+)?",
+    r"(?:Bad username or password|not authorised|not authorized|"
+    r"Connection Refused:\s*not authorized)",
     re.IGNORECASE,
 )
+# "Client iotgw-fake-fake2 disconnected, not authorised."
+# "Client fake2 disconnected, not authorised."
+_CLIENT_NAME_RE = re.compile(
+    r"Client\s+([A-Za-z0-9_.\-]+)\s+(?:disconnected|denied|closed)",
+    re.IGNORECASE,
+)
+_FAKE_CLIENT_RE = re.compile(r"^iotgw-fake-(.+)$")
 _IDS_RE = re.compile(
     r"(?:ids[_ ]?alert|intrusion|anomaly).*?(?:device[_ ]?id[=: ]+|user[=: ]+)?"
     r"([A-Za-z0-9_.\-]+)?",
@@ -129,23 +136,47 @@ class DeniedWatcher:
                 self._follow(ids_path, self._on_ids_line)
 
     def _follow(self, path: Path, on_line: Callable[[str], None]) -> None:
+        """Follow ``path`` in binary mode.
+
+        Text-mode ``tell()`` returns an opaque cookie that is often larger than
+        ``st_size``, which previously tripped the rotation check and rewound the
+        watcher to byte 0 — flooding Denied counters from historical log lines.
+        """
         try:
-            with path.open("r", encoding="utf-8", errors="replace") as f:
+            with path.open("rb") as f:
                 f.seek(0, 2)  # start at end (only new denies)
+                buf = b""
                 while not self._stop.is_set():
-                    line = f.readline()
-                    if line:
-                        on_line(line)
+                    chunk = f.read(8192)
+                    if chunk:
+                        buf += chunk
+                        while b"\n" in buf:
+                            raw, buf = buf.split(b"\n", 1)
+                            line = raw.decode("utf-8", errors="replace")
+                            on_line(line)
                         continue
-                    # Handle truncation/rotation.
+                    # Truncation / rotation: byte size shrank under our offset.
                     try:
-                        if path.stat().st_size < f.tell():
+                        size = path.stat().st_size
+                        pos = f.tell()
+                        if size < pos:
                             f.seek(0)
+                            buf = b""
                     except OSError:
                         pass
                     self._stop.wait(0.5)
         except OSError as exc:
             logger.warning("denied watcher stopped reading %s: %s", path, exc)
+
+    @staticmethod
+    def _device_from_client_name(name: str) -> str:
+        raw = (name or "").strip()
+        if not raw or raw in {"<unknown>", "unknown"}:
+            return "unknown"
+        m = _FAKE_CLIENT_RE.match(raw)
+        if m:
+            return m.group(1).strip() or "unknown"
+        return raw
 
     def _emit_deny(
         self,
@@ -178,7 +209,8 @@ class DeniedWatcher:
 
         m_denied = _DENIED_RE.search(text)
         if m_denied:
-            device_id = m_denied.group(2).strip() or "unknown"
+            # Mosquitto logs the client id ("iotgw-fake-fake2"), not the MQTT user.
+            device_id = self._device_from_client_name(m_denied.group(2))
             self._emit_deny(
                 device_id=device_id,
                 reason="acl_deny",
@@ -231,12 +263,26 @@ class DeniedWatcher:
             self._last_conn_ip = ""
             return
 
-        m_auth = _BAD_AUTH_RE.search(text)
-        if m_auth:
-            device_id = (m_auth.group(1) or "unknown").strip() or "unknown"
+        if _BAD_AUTH_RE.search(text):
+            device_id = "unknown"
+            m_client = _CLIENT_NAME_RE.search(text)
+            if m_client:
+                device_id = self._device_from_client_name(m_client.group(1))
+            if device_id == "unknown" and self._last_conn_ip:
+                if self.deny_log is not None:
+                    device_id = self.deny_log.lookup_device(self._last_conn_ip) or "unknown"
+            # Mosquitto may say "not authorised" for ACL publish denies too.
+            reason = "acl_deny" if "Denied PUBLISH" in text else "bad_password"
+            if "not authorised" in text.lower() or "not authorized" in text.lower():
+                # Prefer ACL when the classic Denied PUBLISH form is present;
+                # otherwise treat as auth failure (wrong password / not allowed).
+                if "Denied PUBLISH" in text:
+                    reason = "acl_deny"
+                else:
+                    reason = "bad_password"
             self._emit_deny(
                 device_id=device_id,
-                reason="bad_password",
+                reason=reason,
                 source_ip=self._last_conn_ip,
                 detail=text[:200],
                 count_as_message=True,
