@@ -59,6 +59,43 @@ def upsert_user_acl(
     return append_user_acl(content, user_id, topic_rw=topic_rw, topic_r=topic_r)
 
 
+def block_user_publish_acl(
+    content: str,
+    user_id: str,
+    *,
+    fallback_read_topic: str,
+) -> str:
+    """Deny MQTT publish for ``user_id`` while keeping a non-empty ACL stanza.
+
+    Mosquitto treats a user with an empty topic list as allow-all, so we always
+    leave at least one ``topic read`` rule (existing reads, else ``fallback_read_topic``).
+    """
+    if not acl_has_user(content, user_id):
+        raise ValueError(f"user {user_id!r} not found in ACL")
+    read_topics: list[str] = []
+    for username, lines in _iter_user_blocks(content):
+        if username != user_id:
+            continue
+        for line in lines:
+            s = line.strip()
+            if s.startswith("topic read ") and not s.startswith("topic readwrite "):
+                read_topics.append(s[len("topic read ") :].strip())
+    topic_r = read_topics[0] if read_topics else fallback_read_topic
+    return replace_user_acl(content, user_id, topic_rw=None, topic_r=topic_r)
+
+
+def user_has_write_acl(content: str, user_id: str) -> bool:
+    """True when the user block has at least one ``topic readwrite`` rule."""
+    for username, lines in _iter_user_blocks(content):
+        if username != user_id:
+            continue
+        for line in lines:
+            if line.strip().startswith("topic readwrite "):
+                return True
+        return False
+    return False
+
+
 def _iter_user_blocks(content: str) -> list[tuple[str | None, list[str]]]:
     """Split ACL into (username|None, lines) blocks. Preamble has username None."""
     blocks: list[tuple[str | None, list[str]]] = []

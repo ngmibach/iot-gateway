@@ -68,6 +68,43 @@ class TestAclHelpers(unittest.TestCase):
         self.assertNotIn("user sensor1\n", out)
         self.assertIn("user nodered\n", out)
 
+    def test_user_has_write_acl(self) -> None:
+        self.assertTrue(fileops.user_has_write_acl(SAMPLE_ACL, "sensor1"))
+        self.assertTrue(fileops.user_has_write_acl(SAMPLE_ACL, "nodered"))
+        self.assertFalse(fileops.user_has_write_acl(SAMPLE_ACL, "anonymous"))
+        self.assertFalse(fileops.user_has_write_acl(SAMPLE_ACL, "missing"))
+
+    def test_block_user_publish_keeps_read(self) -> None:
+        out = fileops.block_user_publish_acl(
+            SAMPLE_ACL, "sensor1", fallback_read_topic="sensors/sensor1/#"
+        )
+        self.assertEqual(out.count("user sensor1\n"), 1)
+        self.assertNotIn("topic readwrite sensors/sensor1/#\n", out)
+        self.assertIn("topic read alerts/+\n", out)
+        self.assertFalse(fileops.user_has_write_acl(out, "sensor1"))
+        self.assertIn("user nodered\n", out)
+
+    def test_block_user_publish_fallback_when_no_read(self) -> None:
+        acl = (
+            "user sensor2\n"
+            "topic readwrite sensors/sensor2/#\n"
+            "\n"
+            "user anonymous\n"
+            "topic none\n"
+        )
+        out = fileops.block_user_publish_acl(
+            acl, "sensor2", fallback_read_topic="sensors/sensor2/#"
+        )
+        self.assertNotIn("topic readwrite ", out.split("user sensor2\n", 1)[1].split("user ", 1)[0])
+        self.assertIn("topic read sensors/sensor2/#\n", out)
+        self.assertFalse(fileops.user_has_write_acl(out, "sensor2"))
+
+    def test_block_missing_user_raises(self) -> None:
+        with self.assertRaises(ValueError):
+            fileops.block_user_publish_acl(
+                SAMPLE_ACL, "nope", fallback_read_topic="sensors/nope/#"
+            )
+
     def test_merge_password_replace_and_append(self) -> None:
         content = "sensor1:$7$1000$aaa$bbb\nnodered:$7$1000$ccc$ddd\n"
         merged = fileops.merge_password_line(content, "sensor1:$7$1000$NEW$HASH")

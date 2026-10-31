@@ -65,7 +65,7 @@ Message flow and per-sensor Kafka activity.
 
 ### Control Plane
 
-Tabs: **Registration | View | Simulate**. Pick a gateway at the top first.
+Tabs: **Registration | View | Simulate | Control**. Pick a gateway at the top first.
 
 #### Registration — real sensor
 
@@ -109,6 +109,18 @@ Lists `is_fake` devices only.
 TLS attack toggles pause auto-renew until cleared. Apply changes after editing interval/topic/payload/behaviors as prompted by the UI.
 
 **Persistence (Windows):** Form edits are kept when you switch Registration ↔ View ↔ Simulate, and across app restart / reboot. Unapplied drafts live in `%APPDATA%\IoTGatewayMonitor\ui-state.json` (and browser `localStorage`). **Apply** writes interval/topic/payload/behaviors into local `registry.sqlite` first, then pushes them to the gateway unit — so a failed unit restart still leaves the last Apply on this PC. Settings → Remove wipes app data including these files.
+
+#### Control
+
+Operate on any registered sensor (fake or real). Permanent unregister stays on **View → Delete**.
+
+| Action | Effect |
+|--------|--------|
+| **Block publish** | Removes Mosquitto write ACL for the sensor (keeps registration, certs, Kafka slot). Fake units are stopped. |
+| **Allow publish** | Restores write ACL from the registry topics. |
+| **Clear Kafka data** | Deletes and recreates the sensor Kafka topic (messages cleared; catalog/slot kept). Requires Kafka on the gateway and an explicit confirmation checkbox. |
+
+Publish state is shown as **Allowed** / **Blocked**. Block is reversible; Clear Kafka does not unregister the sensor.
 
 ### Grafana
 

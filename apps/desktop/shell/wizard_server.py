@@ -1353,6 +1353,13 @@ def _should_inject_sudo(method: str, path: str) -> bool:
     # Unregister / fake teardown needs sudo for Mosquitto secrets + netns.
     if method == "DELETE" and "/devices/" in path:
         return True
+    # Control tab: block/unblock rewrite Mosquitto ACL; purge may need broker access.
+    if method == "POST" and (
+        path.endswith("/control/block")
+        or path.endswith("/control/unblock")
+        or path.endswith("/control/purge-kafka")
+    ):
+        return True
     return False
 
 

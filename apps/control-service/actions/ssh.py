@@ -39,6 +39,11 @@ class CommandResult:
     stdout: str
     stderr: str
 
+    @property
+    def ok(self) -> bool:
+        """True when the remote command exited 0 (matches provisioner.ssh)."""
+        return self.exit_code == 0
+
     def check(self) -> CommandResult:
         if self.exit_code != 0:
             raise RuntimeError(
