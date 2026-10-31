@@ -484,17 +484,10 @@ def _handle_api(
             # Coupling: Monitoring always removes every registered gateway.
             if do_monitoring:
                 do_gateway = True
+            # Optional typed override only — run_uninstall resolves each
+            # gateway's keyring sudo (kind=sudo) and uses this when missing.
             sudo_password = str(body.get("sudo_password") or "").strip()
             gateway_id = str(body.get("gateway_id") or "").strip() or None
-            if not sudo_password:
-                # Prefer the targeted gateway; else default / first registered.
-                settings = load_settings()
-                lookup_id = gateway_id or str(
-                    settings.get("default_gateway_id") or "gateway"
-                ).strip()
-                sudo_password = (
-                    keyring_store.get_secret(lookup_id, kind="sudo") or ""
-                ).strip()
             try:
                 out = uninstall_mod.run_uninstall(
                     gateway=do_gateway,

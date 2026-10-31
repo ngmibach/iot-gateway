@@ -40,6 +40,18 @@ def list_registered_gateways() -> list[dict[str, Any]]:
         reg.close()
 
 
+def _sudo_present(gateway_id: str) -> bool:
+    """True when keyring (or fallback) has a sudo secret for this gateway."""
+    gid = (gateway_id or "").strip()
+    if not gid:
+        return False
+    try:
+        return bool((keyring_store.get_secret(gid, kind="sudo") or "").strip())
+    except Exception:  # noqa: BLE001
+        logger.debug("sudo presence check failed for %s", gid, exc_info=True)
+        return False
+
+
 def uninstall_targets() -> dict[str, Any]:
     """Describe what Remove can act on (for Settings UI)."""
     settings = load_settings()
@@ -51,6 +63,7 @@ def uninstall_targets() -> dict[str, Any]:
             "id": str(r.get("id") or ""),
             "host": str(r.get("host") or ""),
             "ssh_user": str(r.get("ssh_user") or settings.get("ssh_user") or "").strip(),
+            "sudo_present": _sudo_present(str(r.get("id") or "")),
         }
         for r in rows
         if str(r.get("id") or "").strip()
@@ -66,8 +79,13 @@ def uninstall_targets() -> dict[str, Any]:
                     settings.get("ssh_host") or settings.get("gateway_ip") or ""
                 ).strip(),
                 "ssh_user": str(settings.get("ssh_user") or "").strip(),
+                "sudo_present": _sudo_present(default_gid),
             },
         )
+    # Prompt only when at least one SSH-removable gateway lacks a saved sudo.
+    needs_sudo_prompt = any(
+        bool(g.get("host")) and not g.get("sudo_present") for g in gateways
+    )
     return {
         "gateways": gateways,
         "provisioned": provisioned,
@@ -75,6 +93,7 @@ def uninstall_targets() -> dict[str, Any]:
         "ssh_host": str(settings.get("ssh_host") or settings.get("gateway_ip") or ""),
         "ssh_user": str(settings.get("ssh_user") or "").strip(),
         "ssh_port": int(settings.get("ssh_port") or 22),
+        "needs_sudo_prompt": needs_sudo_prompt,
         "monitoring_hint": (
             "Removing the monitoring panel also removes every gateway "
             "registered to this panel and clears local app data on this PC. "
@@ -227,6 +246,20 @@ def _gateway_jobs(
     return out
 
 
+def _resolve_job_sudo(gateway_id: str, override: str = "") -> str:
+    """Prefer keyring sudo for this gateway; fall back to a typed override."""
+    gid = (gateway_id or "").strip()
+    if gid:
+        try:
+            saved = (keyring_store.get_secret(gid, kind="sudo") or "").strip()
+        except Exception:  # noqa: BLE001
+            logger.debug("keyring sudo read failed for %s", gid, exc_info=True)
+            saved = ""
+        if saved:
+            return saved
+    return (override or "").strip()
+
+
 def run_uninstall(
     *,
     gateway: bool,
@@ -243,6 +276,9 @@ def run_uninstall(
     Monitoring always implies every registered gateway is removed (SSH when
     possible, then registry + full app-data wipe). Gateway-only leaves
     Loki/Prometheus running.
+
+    Each gateway uses its own keyring sudo (``kind=sudo``). ``sudo_password``
+    is only a fallback for gateways that have no saved sudo yet.
     """
     if not gateway and not monitoring:
         raise UninstallError("Select Gateway and/or Monitoring to uninstall")
@@ -258,6 +294,7 @@ def run_uninstall(
         gateway_id=gateway_id,
         all_gateways=all_gateways,
     )
+    override_sudo = (sudo_password or "").strip()
 
     result: dict[str, Any] = {
         "ok": True,
@@ -278,16 +315,24 @@ def run_uninstall(
             }
             result["notes"].append("Gateway: nothing registered locally")
         else:
-            need_sudo = any(j.get("host") for j in jobs)
-            if need_sudo and not (sudo_password or "").strip():
+            missing_sudo = [
+                j["id"]
+                for j in jobs
+                if j.get("host") and not _resolve_job_sudo(j["id"], override_sudo)
+            ]
+            if missing_sudo:
+                ids = ", ".join(missing_sudo)
                 raise UninstallError(
-                    "Gateway sudo password required to remove the agent on the Pi"
+                    "Gateway sudo password required to remove the agent on the "
+                    f"Pi (missing saved sudo for: {ids}). Save it under "
+                    "Gateways → Settings, or enter it here."
                 )
             gateway_results: list[dict[str, Any]] = []
             secret_ids: list[str] = []
             for job in jobs:
                 gid = job["id"]
                 host = job["host"]
+                job_sudo = _resolve_job_sudo(gid, override_sudo)
                 entry: dict[str, Any] = {"id": gid, "host": host, "ok": True}
                 if host and not job.get("username"):
                     entry["ok"] = False
@@ -307,7 +352,7 @@ def run_uninstall(
                             username=job["username"],
                             port=job["port"],
                             gateway_id=gid,
-                            sudo_password=sudo_password,
+                            sudo_password=job_sudo,
                         )
                         entry["notes"] = notes
                         result["notes"].extend(
