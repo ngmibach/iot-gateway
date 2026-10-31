@@ -863,7 +863,6 @@
       ["Total msgs", String(sm.total_messages ?? "—")],
       ["Msgs / sec", numOrDash(sm.messages_per_sec, 4)],
       ["Denied", String(sm.denied_publishes ?? "—")],
-      ["IDS", String(sm.ids_detections ?? "—")],
     ]);
     metricCards($("gw-sensor-kafka-meta"), [
       ["Topic", sensor.kafka_topic || "—"],
@@ -958,7 +957,6 @@
       ["Total msgs", String(m.total_sensor_messages ?? "—")],
       ["Msgs / sec", numOrDash(m.messages_per_sec, 4)],
       ["Denied", String(m.denied_publishes ?? "—")],
-      ["IDS", String(m.ids_detections ?? "—")],
     ]);
     paintLineChart("chart-gw_msgs", charts.messages || [], {
       unit: "msgs/s",

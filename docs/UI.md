@@ -55,7 +55,7 @@ Empty charts show **No data in range** until Prometheus has scrapes from the age
 Message flow and per-sensor Kafka activity.
 
 1. Select a **gateway** (name only in the dropdown).
-2. **General** — Total msgs, Msgs/sec, Denied, IDS; **Avg messages / sec** chart; transmission delay (Latest + Total, MQTT receive → Kafka produce) with delay chart; **Invalid messages** table (arrival, reason, IP, sensor, gateway) for TLS/ACL/decrypt/schema denials.
+2. **General** — Total msgs, Msgs/sec, Denied; **Avg messages / sec** chart; transmission delay (Latest + Total, MQTT receive → Kafka produce) with delay chart; **Invalid messages** scrollable table (arrival, reason, IP, sensor, gateway) for TLS/ACL/decrypt/schema denials.
 3. **Connected sensors** — table: Device, **Type** (Fake/Real), IP, Kafka topic, Retention, Monitor.
 4. **Sensor detail**
    - One sensor → detail panel under the table

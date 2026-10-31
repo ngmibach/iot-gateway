@@ -163,6 +163,23 @@
   display: none !important;
 }
 .table-wrap { overflow-x: auto; margin-bottom: 1rem; }
+/* Invalid-messages list: fixed viewport (~6 rows) with vertical scroll */
+.table-wrap-denied {
+  overflow: auto;
+  max-height: 13.75rem;
+  margin-bottom: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #0b1118;
+}
+.table-wrap-denied table { margin: 0; }
+.table-wrap-denied thead th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: #121a24;
+  box-shadow: 0 1px 0 var(--border);
+}
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 th, td { text-align: left; padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }
