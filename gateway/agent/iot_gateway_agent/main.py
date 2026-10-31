@@ -15,6 +15,7 @@ from .broker import MosquittoSupervisor, write_mosquitto_conf
 from .day_crypto import ensure_day_material, load_day_cert_pem
 from .decrypt_worker import DecryptWorker
 from .denied_watcher import DeniedWatcher
+from .deny_log import DenyLog
 from .envelope_v1 import today_day_id
 from .health import build_health, build_info
 from .kafka_producer import SensorKafkaProducer
@@ -115,6 +116,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Disable Kafka produce of decrypted sensor payloads",
     )
     parser.add_argument("--no-mdns", action="store_true")
+    parser.add_argument(
+        "--gateway-id",
+        default=os.environ.get("IOTGW_GATEWAY_ID", ""),
+        help="Gateway id stamped on denied-message events",
+    )
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser.parse_args(argv)
@@ -180,6 +186,14 @@ def main(argv: list[str] | None = None) -> int:
     shipper: LokiShipper | None = None
     kafka: SensorKafkaProducer | None = None
     denied: DeniedWatcher | None = None
+    gateway_id = (args.gateway_id or "").strip() or os.environ.get(
+        "IOTGW_GATEWAY_ID", ""
+    ).strip()
+    deny_log = DenyLog(
+        path=data / "logs" / "denied_messages.jsonl",
+        gateway_id=gateway_id,
+    )
+    deny_log.set_ip_map_path(data / "fake" / "ip-map.json")
     if not args.no_kafka:
         kafka = SensorKafkaProducer(bootstrap=args.kafka_bootstrap)
     metrics = AgentMetrics(
@@ -258,6 +272,8 @@ def main(argv: list[str] | None = None) -> int:
             log_path=sensor_log,
             kafka=kafka,
             data_dir=data,
+            deny_log=deny_log,
+            gateway_id=gateway_id,
             **tls_kwargs,
         )
         worker.start()
@@ -270,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
                 Path("/var/log/mosquitto.log"),
             ],
             ids_log_paths=[data / "logs" / "ids_alerts.log"],
+            deny_log=deny_log,
         )
         denied.start()
         metrics.denied_watcher = denied
@@ -300,6 +317,7 @@ def main(argv: list[str] | None = None) -> int:
         info["api"] = [
             "GET /v1/health",
             "GET /v1/info",
+            "GET /v1/denied",
             "GET /v1/crypto/day/current",
             "GET /metrics",
             "POST /v1/reload",
@@ -309,6 +327,7 @@ def main(argv: list[str] | None = None) -> int:
         info["data_dir"] = str(data)
         info["mqtt_mode"] = "external" if args.no_broker else "child"
         info["envelope_v1"] = True
+        info["gateway_id"] = gateway_id or None
         return info
 
     def day_crypto_fn():
@@ -327,6 +346,20 @@ def main(argv: list[str] | None = None) -> int:
             "ok": True,
             "day_id": did,
             "cert_pem": pem.decode("utf-8") if pem else None,
+        }
+
+    def denied_fn(params: dict) -> dict:
+        try:
+            limit = int(params.get("limit") or 100)
+        except (TypeError, ValueError):
+            limit = 100
+        device_id = (params.get("device_id") or "").strip() or None
+        events = deny_log.recent(limit=limit, device_id=device_id)
+        return {
+            "ok": True,
+            "gateway_id": gateway_id or None,
+            "count": len(events),
+            "events": events,
         }
 
     def reload_fn():
@@ -353,6 +386,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics_fn=metrics.render,
         reload_fn=reload_fn,
         day_crypto_fn=day_crypto_fn,
+        denied_fn=denied_fn,
     )
 
     def _request_shutdown(signum: int, _frame: object) -> None:

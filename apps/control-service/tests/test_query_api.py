@@ -397,12 +397,16 @@ class QueryApiTests(unittest.TestCase):
         self.assertEqual(body["metrics"]["total_sensor_messages"], 0)
         self.assertIn("messages_per_sec", body["metrics"])
         self.assertTrue(body["warnings"])
+        self.assertIn("denied_messages", body)
+        self.assertEqual(body["denied_messages"], [])
         # Registry sensors still listed when backends are down.
         ids = {s["device_id"] for s in body["connected_sensors"]}
         self.assertEqual(ids, {"sensor_a", "sensor_b"})
         for s in body["connected_sensors"]:
             self.assertIn("is_fake", s)
             self.assertFalse(s["is_fake"])
+            self.assertIn("denied_messages", s)
+            self.assertEqual(s["denied_messages"], [])
 
     def test_summary_gateway_catalog_sync_scrubs_ssh_keys(self) -> None:
         """Activities warnings must never include OpenSSH key bodies."""

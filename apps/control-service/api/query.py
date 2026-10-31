@@ -56,6 +56,65 @@ def close_http_client() -> None:
             close()
 
 
+def _agent_base_url(gw: Optional[dict[str, Any]]) -> Optional[str]:
+    """Resolve gateway agent HTTP base (``http://host:9139``)."""
+    if not gw:
+        return None
+    raw = str(gw.get("agent_url") or "").strip().rstrip("/")
+    if raw:
+        return raw
+    host = str(gw.get("host") or "").strip()
+    if not host:
+        return None
+    if "://" in host:
+        return host.rstrip("/")
+    return f"http://{host}:9139"
+
+
+def _fetch_agent_denied(
+    gw: Optional[dict[str, Any]],
+    *,
+    gateway_id: Optional[str],
+    limit: int = 100,
+    device_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Pull recent invalid/denied message events from the gateway agent."""
+    base = _agent_base_url(gw)
+    if not base:
+        return []
+    params: dict[str, Any] = {"limit": max(1, min(int(limit or 100), 500))}
+    if device_id:
+        params["device_id"] = device_id
+    try:
+        r = _http_client().get(f"{base}/v1/denied", params=params, timeout=5.0)
+    except httpx.HTTPError:
+        return []
+    if r.status_code != 200:
+        return []
+    try:
+        payload = r.json()
+    except ValueError:
+        return []
+    events = payload.get("events") if isinstance(payload, dict) else None
+    if not isinstance(events, list):
+        return []
+    gid = (gateway_id or (gw or {}).get("id") or "").strip()
+    out: list[dict[str, Any]] = []
+    for raw in events:
+        if not isinstance(raw, dict):
+            continue
+        item = {
+            "arrival_ms": int(raw.get("arrival_ms") or 0),
+            "reason": str(raw.get("reason") or "denied"),
+            "device_id": str(raw.get("device_id") or "unknown"),
+            "source_ip": str(raw.get("source_ip") or ""),
+            "gateway_id": str(raw.get("gateway_id") or gid or ""),
+            "detail": str(raw.get("detail") or ""),
+        }
+        out.append(item)
+    return out
+
+
 def _proxy_get(url: str, params: dict[str, Any]) -> Any:
     try:
         r = _http_client().get(url, params=params)
@@ -308,6 +367,9 @@ def summary_gateway(
         else (float(loki_msgs_min) / 60.0 if loki_msgs_min else 0.0)
     )
     denied_prom = prom_scalar(Q.prep_prom(Q.GATEWAY_DENIED_PROM, node="gateway"))
+    decrypt_fail = prom_scalar(
+        Q.prep_prom(Q.GATEWAY_DECRYPT_FAIL_TOTAL, node="gateway")
+    )
     ids_prom = prom_scalar(Q.prep_prom(Q.GATEWAY_IDS_PROM, node="gateway"))
     if denied_prom > 0:
         denied = int(denied_prom)
@@ -317,6 +379,10 @@ def summary_gateway(
             + loki_scalar(Q.GATEWAY_DENIED_HAPROXY)
             + loki_scalar(Q.GATEWAY_DENIED_MOSQUITTO)
         )
+    # Decrypt/schema fails are invalid messages; include them when the agent
+    # denied counter is still ACL-only (pre-upgrade) or lagging.
+    if decrypt_fail > denied:
+        denied = int(decrypt_fail)
     if ids_prom > 0:
         ids_alerts = int(ids_prom)
     else:
@@ -393,6 +459,12 @@ def summary_gateway(
     denied_by_id = _prom_by_device(
         Q.prep_prom(Q.GATEWAY_DENIED_BY_DEVICE_PROM, node="gateway")
     )
+    fail_by_id = _prom_by_device(
+        Q.prep_prom(Q.GATEWAY_FAIL_BY_DEVICE_PROM, node="gateway")
+    )
+    for did, fail_n in fail_by_id.items():
+        if float(fail_n or 0) > float(denied_by_id.get(did) or 0):
+            denied_by_id[did] = float(fail_n)
     ids_by_id = _prom_by_device(
         Q.prep_prom(Q.GATEWAY_IDS_BY_DEVICE_PROM, node="gateway")
     )
@@ -727,6 +799,25 @@ def summary_gateway(
         gateway_delay_total = _sane_delay_total_ms(sum(delay_sum_by_id.values()))
     if gateway_delay_samples <= 0 and delay_samples_by_id:
         gateway_delay_samples = int(sum(delay_samples_by_id.values()))
+
+    denied_events = _fetch_agent_denied(gw, gateway_id=gid, limit=100)
+    # Fill blank IPs from the registry / connected rows when the agent omits them.
+    ip_by_device = {
+        str(s.get("device_id") or ""): str(s.get("ip") or s.get("source_ip") or "")
+        for s in connected
+        if s.get("device_id")
+    }
+    for ev in denied_events:
+        if not ev.get("source_ip"):
+            ev["source_ip"] = ip_by_device.get(str(ev.get("device_id") or ""), "")
+        if not ev.get("gateway_id") and gid:
+            ev["gateway_id"] = str(gid)
+    for s in connected:
+        did = str(s.get("device_id") or "")
+        s["denied_messages"] = [
+            ev for ev in denied_events if str(ev.get("device_id") or "") == did
+        ]
+
     return {
         "range": time_range,
         "time": _time_window_meta(time_range, start, end),
@@ -749,6 +840,7 @@ def summary_gateway(
             "messages": decrypt_chart,
         },
         "connected_sensors": connected,
+        "denied_messages": denied_events,
         "delay_by_device": delay_series_legacy,
         "kafka_catalog_topics": sorted(catalog_topics.keys()),
         "warnings": warnings,

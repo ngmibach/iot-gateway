@@ -718,6 +718,56 @@
       .join("");
   }
 
+  function formatArrivalMs(ms) {
+    const n = Number(ms);
+    if (!n || !isFinite(n)) return "—";
+    try {
+      return new Date(n).toLocaleString();
+    } catch (_e) {
+      return String(n);
+    }
+  }
+
+  function reasonLabel(reason) {
+    const r = String(reason || "denied");
+    const map = {
+      missing_client_cert: "Missing client certificate",
+      bad_client_cert: "Bad client certificate",
+      tls_eof: "TLS connection dropped",
+      tls_protocol: "TLS protocol error",
+      tls_handshake: "TLS handshake failed",
+      bad_password: "Bad MQTT password",
+      acl_deny: "ACL deny",
+      fernet: "Bad encryption / Fernet",
+      schema: "Schema validation",
+      key_only: "Key half only",
+      data_only: "Data half only",
+      stamp: "Stamp mismatch",
+      day: "Wrong / missing day material",
+      unwrap: "Envelope unwrap failed",
+      gcm: "GCM auth failed",
+      legacy: "Legacy wrapper rejected",
+      version: "Envelope version",
+    };
+    return map[r] || r.replace(/_/g, " ");
+  }
+
+  function fillDeniedTable(table, events) {
+    if (!table) return;
+    const rows = (events || []).map((ev) => [
+      escapeHtml(formatArrivalMs(ev.arrival_ms)),
+      escapeHtml(reasonLabel(ev.reason)),
+      escapeHtml(ev.source_ip || "—"),
+      escapeHtml(ev.device_id || "—"),
+      escapeHtml(ev.gateway_id || "—"),
+    ]);
+    fillTable(
+      table,
+      ["Arrival", "Reason", "IP", "Sensor", "Gateway"],
+      rows
+    );
+  }
+
   function buildTabs() {
     const nav = $("mon-tabs");
     nav.innerHTML = "";
@@ -836,6 +886,7 @@
         formatValue: (v) => formatDelay(v),
       }
     );
+    fillDeniedTable($("gw-sensor-denied"), sensor.denied_messages || []);
   }
 
   function renderSensorTabs(sensors) {
@@ -936,6 +987,7 @@
         r.monitor_enabled ? "on" : "off",
       ])
     );
+    fillDeniedTable($("gw-denied"), data.denied_messages || []);
     renderSensorTabs(activitiesSensors);
 
     $("gw-msg").textContent =

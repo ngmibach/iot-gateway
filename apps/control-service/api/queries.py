@@ -20,6 +20,9 @@ GATEWAY_MSGS_PER_MIN = (
 GATEWAY_DECRYPT_MSGS_TOTAL = (
     'sum(iotgw_decrypt_messages_total{instance="$node",job="$job"})'
 )
+GATEWAY_DECRYPT_FAIL_TOTAL = (
+    'sum(iotgw_decrypt_messages_total{instance="$node",job="$job",result="fail"})'
+)
 GATEWAY_DECRYPT_MSGS_PER_SEC = (
     'sum(rate(iotgw_decrypt_messages_total{instance="$node",job="$job"}[1m]))'
 )
@@ -86,6 +89,10 @@ GATEWAY_MSGS_BY_DEVICE_RATE_PROM = (
 GATEWAY_DENIED_BY_DEVICE_PROM = (
     'sum by (device_id) ('
     'iotgw_device_denied_publishes_total{instance="$node",job="$job"})'
+)
+GATEWAY_FAIL_BY_DEVICE_PROM = (
+    'sum by (device_id) ('
+    'iotgw_device_messages_total{instance="$node",job="$job",result="fail"})'
 )
 GATEWAY_IDS_BY_DEVICE_PROM = (
     'sum by (device_id) ('
