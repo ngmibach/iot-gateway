@@ -257,6 +257,39 @@ class NativeHelperTests(unittest.TestCase):
             self.assertIn("9140", detail)
             self.assertIn("Grafana", detail)
 
+    def test_current_scrape_gateway_ip_parses_prometheus_yml(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            mgr.config_dir.mkdir(parents=True)
+            (mgr.config_dir / "prometheus.yml").write_text(
+                "scrape_configs:\n"
+                "  - job_name: iot-gateway-agent\n"
+                "    static_configs:\n"
+                "      - targets: ['172.20.10.2:9139']\n",
+                encoding="utf-8",
+            )
+            self.assertEqual(mgr.current_scrape_gateway_ip(), "172.20.10.2")
+
+    def test_apply_scrape_target_rewrites_and_reloads(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            mgr = nv.NativeTelemetryManager(tmp)
+            mgr.config_dir.mkdir(parents=True)
+            (mgr.config_dir / "prometheus.yml").write_text(
+                "targets: ['127.0.0.1:9139']\n", encoding="utf-8"
+            )
+            with mock.patch.object(mgr, "write_configs") as write:
+                with mock.patch(
+                    "telemetry.native.check_prometheus",
+                    return_value=nv.ProbeResult(True, "u", "ok"),
+                ):
+                    with mock.patch.object(
+                        mgr, "reload_prometheus", return_value=True
+                    ) as reload_prom:
+                        ok = mgr.apply_scrape_target("172.20.10.2")
+            self.assertTrue(ok)
+            write.assert_called_once_with(gateway_ip="172.20.10.2")
+            reload_prom.assert_called_once()
+
     def test_write_configs_passes_registry_beside_root(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "telemetry"

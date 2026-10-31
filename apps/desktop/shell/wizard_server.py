@@ -133,9 +133,18 @@ class WizardState:
         def _run() -> None:
             try:
                 tel = self.telemetry
-                # Fast path: already healthy → mark ok without re-downloading.
+                settings = load_settings()
+                gw = resolve_gateway_ip(settings, override=gateway_ip)
+                # Fast path: already healthy → mark ok without re-downloading,
+                # but still pin Prometheus to the registered gateway IP.
                 snap0 = tel.snapshot()
                 if snap0.ready and not force:
+                    try:
+                        tel.apply_scrape_target(gw)
+                    except Exception as scrape_err:  # noqa: BLE001
+                        logger.warning(
+                            "telemetry scrape refresh failed: %s", scrape_err
+                        )
                     with self.lock:
                         self._telemetry_job = {
                             "state": "ok",
@@ -144,8 +153,6 @@ class WizardState:
                             "error": None,
                         }
                     return
-                settings = load_settings()
-                gw = resolve_gateway_ip(settings, override=gateway_ip)
                 # start() downloads binaries only when ports are free / not ready.
                 st = tel.start(
                     gateway_ip=gw, wait=True, ensure_bins=True
@@ -1264,6 +1271,15 @@ def _handle_api(
                     )
                 except Exception as reg_err:  # noqa: BLE001
                     logger.warning("registry upsert after provision failed: %s", reg_err)
+                # Point Prometheus at the new gateway (Install monitoring may have
+                # left 127.0.0.1:9139 from before Create Gateway).
+                try:
+                    STATE.telemetry.apply_scrape_target(gateway_ip or host)
+                except Exception as scrape_err:  # noqa: BLE001
+                    logger.warning(
+                        "prometheus scrape refresh after provision failed: %s",
+                        scrape_err,
+                    )
                 _json_response(
                     handler,
                     200,

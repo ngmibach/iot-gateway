@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import socket
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -420,6 +423,49 @@ class NativeTelemetryManager:
         )
         return out
 
+    def current_scrape_gateway_ip(self) -> str | None:
+        """Return the gateway host currently pinned in prometheus.yml, if any."""
+        path = self.config_dir / "prometheus.yml"
+        if not path.is_file():
+            return None
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError:
+            return None
+        match = re.search(
+            r"targets:\s*\[\s*['\"]([^'\"]+):9139['\"]\s*\]",
+            text,
+        )
+        if not match:
+            return None
+        host = match.group(1).strip()
+        return host or None
+
+    def reload_prometheus(self) -> bool:
+        """Ask a running Prometheus to reload prometheus.yml (lifecycle API)."""
+        try:
+            req = urllib.request.Request(
+                "http://127.0.0.1:9090/-/reload", method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=5.0) as resp:
+                return 200 <= int(getattr(resp, "status", 200)) < 300
+        except (urllib.error.URLError, TimeoutError, OSError):
+            return False
+
+    def apply_scrape_target(self, gateway_ip: str) -> bool:
+        """Rewrite scrape target and reload Prometheus when the host changed."""
+        host = (gateway_ip or "").strip()
+        if not host:
+            return False
+        current = self.current_scrape_gateway_ip()
+        if current == host:
+            return True
+        self.write_configs(gateway_ip=host)
+        # Reload when Prom is up; otherwise next start() loads the new file.
+        if check_prometheus("http://127.0.0.1:9090", timeout=1.0).ok:
+            return self.reload_prometheus()
+        return True
+
     def write_configs(self, *, gateway_ip: str = "127.0.0.1") -> None:
         self.config_dir.mkdir(parents=True, exist_ok=True)
         loki_cfg = self.config_dir / "loki-config.yaml"
@@ -597,8 +643,12 @@ class NativeTelemetryManager:
         ensure_bins: bool = True,
     ) -> BackendStatus:
         # Already serving? Succeed before any download (common after app restart).
+        # Still refresh the scrape target — Install monitoring often runs before
+        # Create Gateway, leaving 127.0.0.1:9139 and an empty Gateway Metric.
         already_ok, loki_p, prom_p, grafana_p = self._http_ready()
         if already_ok:
+            if gateway_ip:
+                self.apply_scrape_target(gateway_ip)
             return BackendStatus(
                 running=True,
                 compose_ps="native (already running)",
@@ -872,7 +922,10 @@ class NativeTelemetryManager:
             )
             return out
 
-        self.write_configs()
+        # Preserve the current scrape host (do not reset to 127.0.0.1).
+        self.write_configs(
+            gateway_ip=self.current_scrape_gateway_ip() or "127.0.0.1"
+        )
         # Drop tracked child and any orphan still serving the old cert on :9140.
         self._stop_grafana_only(grace=5.0)
         _best_effort_stop_listeners(_GRAFANA_PORT)
