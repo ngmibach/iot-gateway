@@ -442,17 +442,19 @@ class NativeTelemetryManager:
         )
 
     def _popen_kwargs(self) -> dict:
-        kwargs: dict = {
+        # Base kwargs only; creationflags / breakaway come from popen_daemon
+        # so Access Denied on CREATE_BREAKAWAY_FROM_JOB can fall back.
+        return {
             "cwd": str(self.root),
             "stderr": subprocess.STDOUT,
         }
-        # Detach from the starter process job so Loki/Prometheus/Grafana
-        # survive after a one-shot ensure/start Python exits (Windows job
-        # objects otherwise reap the children with the parent).
-        from telemetry.winproc import daemon_popen_kwargs  # type: ignore[import-not-found]
 
-        kwargs.update(daemon_popen_kwargs())
-        return kwargs
+    def _popen_daemon(self, args: list[str], **extra: object) -> subprocess.Popen:
+        from telemetry.winproc import popen_daemon  # type: ignore[import-not-found]
+
+        kwargs = dict(self._popen_kwargs())
+        kwargs.update(extra)
+        return popen_daemon(args, **kwargs)
 
     def start(
         self,
@@ -506,22 +508,20 @@ class NativeTelemetryManager:
 
         log_dir = self.root / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        popen_kwargs = self._popen_kwargs()
 
         if not self._running(self._loki) and not check_loki(
             "http://127.0.0.1:3100", timeout=1.0
         ).ok:
             loki_log = open(log_dir / "loki.log", "a", encoding="utf-8")  # noqa: SIM115
-            self._loki = subprocess.Popen(
+            self._loki = self._popen_daemon(
                 [str(loki_bin), f"-config.file={self.config_dir / 'loki-config.yaml'}"],
                 stdout=loki_log,
-                **popen_kwargs,
             )
         if not self._running(self._prom) and not check_prometheus(
             "http://127.0.0.1:9090", timeout=1.0
         ).ok:
             prom_log = open(log_dir / "prometheus.log", "a", encoding="utf-8")  # noqa: SIM115
-            self._prom = subprocess.Popen(
+            self._prom = self._popen_daemon(
                 [
                     str(prom_bin),
                     f"--config.file={self.config_dir / 'prometheus.yml'}",
@@ -530,7 +530,6 @@ class NativeTelemetryManager:
                     "--web.enable-lifecycle",
                 ],
                 stdout=prom_log,
-                **popen_kwargs,
             )
         if not self._running(self._grafana) and not check_grafana(
             _GRAFANA_URL, timeout=1.0
@@ -677,12 +676,10 @@ class NativeTelemetryManager:
                 f"--homepath={self.grafana_home}",
                 f"--config={self.config_dir / 'grafana.ini'}",
             ]
-        grafana_kwargs = dict(self._popen_kwargs())
-        grafana_kwargs["cwd"] = str(self.grafana_home)
-        self._grafana = subprocess.Popen(
+        self._grafana = self._popen_daemon(
             cmd,
             stdout=grafana_log,
-            **grafana_kwargs,
+            cwd=str(self.grafana_home),
         )
         return True
 

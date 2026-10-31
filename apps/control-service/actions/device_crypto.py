@@ -18,6 +18,31 @@ PROFILE_PSK = "v1-psk"
 PROFILE_ECDHE = "v1-ecdhe"
 SUPPORTED_PROFILES = frozenset({PROFILE_PSK, PROFILE_ECDHE})
 
+
+def envelope_acl_topic(user_id: str, topic_rw: str | None, *, crypto_profile: str) -> str | None:
+    """ACL write topic for envelope v1 sensors.
+
+    Envelope publishes to ``sensors/{id}/env/key`` and ``…/env/data`` in addition
+    to the logical process topic. A narrow ACL such as ``sensors/{id}/process``
+    denies those halves. When the profile is envelope v1, expand to
+    ``sensors/{id}/#`` unless ``topic_rw`` already covers the device subtree
+    (device ``#`` or broader ``sensors/#``).
+    """
+    user_id = validate_user_id(user_id)
+    if crypto_profile not in SUPPORTED_PROFILES:
+        return topic_rw
+    device_wildcard = f"sensors/{user_id}/#"
+    if topic_rw is None or not str(topic_rw).strip():
+        return device_wildcard
+    topic = str(topic_rw).strip()
+    if topic in (device_wildcard, "sensors/#", "#"):
+        return topic
+    # Already a subtree wildcard under this device (e.g. sensors/id/v2/#).
+    prefix = f"sensors/{user_id}/"
+    if topic.startswith(prefix) and topic.endswith("/#"):
+        return topic
+    return device_wildcard
+
 DEFAULT_SCHEMA: dict[str, Any] = {
     "schema_id": "default",
     "type": "object",
