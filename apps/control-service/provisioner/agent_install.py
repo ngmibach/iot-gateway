@@ -138,7 +138,12 @@ MQTT_TLS_PORT = 8883
 
 
 def _mqtts_conf_body(*, data_dir: str) -> str:
-    """Mosquitto conf.d body: MQTTS :8883 mTLS + password/ACL only (no :1883)."""
+    """Mosquitto conf.d body: MQTTS :8883 mTLS + password/ACL only (no :1883).
+
+    ``log_type debug`` is required on Mosquitto 2.0.21 so ACL ``Denied PUBLISH``
+    lines appear in the log (they are emitted at DEBUG, not notice). The agent
+    denied_watcher tails that log for Monitoring invalid-message tables.
+    """
     mosq_dir = f"{data_dir}/mosquitto"
     certs_dir = f"{data_dir}/certs"
     return (
@@ -150,6 +155,12 @@ def _mqtts_conf_body(*, data_dir: str) -> str:
         "require_certificate true\n"
         f"password_file {mosq_dir}/passwords\n"
         f"acl_file {mosq_dir}/acl\n"
+        "connection_messages true\n"
+        "log_type error\n"
+        "log_type warning\n"
+        "log_type notice\n"
+        "log_type information\n"
+        "log_type debug\n"
     )
 
 

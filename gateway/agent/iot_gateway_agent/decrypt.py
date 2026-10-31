@@ -65,17 +65,22 @@ def fernet_decrypt(token_b64: str, key_b64: str) -> Any:
 
 
 def decrypt_wrapper_payload(payload: str | bytes | dict) -> str | None:
-    """Decrypt sensor wrapper JSON; return JSON string or None on failure."""
+    """Decrypt Fernet wrapper JSON; return clear JSON string or None on failure.
+
+    Cleartext sensor JSON (no ``key``/``encrypted``) is rejected. The
+    ``skip_encryption`` Simulate attack relies on this deny instead of
+    treating plain JSON as a successful decrypt.
+    """
     try:
         if isinstance(payload, (bytes, bytearray)):
             payload = payload.decode("utf-8")
         wrapper = json.loads(payload) if isinstance(payload, str) else payload
         if not isinstance(wrapper, dict):
-            return json.dumps(wrapper)
+            return None
         key = wrapper.get("key")
         encrypted = wrapper.get("encrypted")
         if not key or not encrypted:
-            return json.dumps(wrapper)
+            return None
         decrypted = fernet_decrypt(str(encrypted), str(key))
         return json.dumps(decrypted, ensure_ascii=False)
     except Exception as e:  # noqa: BLE001

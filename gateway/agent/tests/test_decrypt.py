@@ -43,9 +43,12 @@ class DecryptTests(unittest.TestCase):
         self.assertIsNotNone(out)
         self.assertEqual(json.loads(out), payload)
 
-    def test_missing_fields_passthrough(self) -> None:
-        raw = '{"hello":1}'
-        self.assertEqual(json.loads(decrypt_wrapper_payload(raw) or ""), {"hello": 1})
+    def test_cleartext_without_wrapper_rejected(self) -> None:
+        """skip_encryption publishes bare JSON; must not count as ok."""
+        self.assertIsNone(decrypt_wrapper_payload('{"hello":1}'))
+        self.assertIsNone(decrypt_wrapper_payload({"device_id": "fake2", "hello": 1}))
+        self.assertIsNone(decrypt_wrapper_payload(json.dumps([1, 2, 3])))
+        self.assertIsNone(decrypt_wrapper_payload(json.dumps({"key": "only"})))
 
     def test_bad_key_returns_none(self) -> None:
         self.assertIsNone(

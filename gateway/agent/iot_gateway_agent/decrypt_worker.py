@@ -454,11 +454,15 @@ class DecryptWorker:
                 require_schema_file=schema_id != "default",
             )
         except SchemaError as exc:
-            self._fail(device_id, getattr(exc, "reason", "schema"))
+            self._fail(
+                device_id,
+                getattr(exc, "reason", "schema"),
+                detail=str(exc)[:200],
+            )
             return
         except Exception as exc:  # noqa: BLE001
             logger.warning("schema validate error: %s", exc)
-            self._fail(device_id, "schema")
+            self._fail(device_id, "schema", detail=str(exc)[:200])
             return
 
         self._accept_clear(

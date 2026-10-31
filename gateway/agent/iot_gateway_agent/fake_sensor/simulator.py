@@ -287,6 +287,24 @@ def _resolve_topic(cfg: dict[str, Any]) -> str:
     return topic
 
 
+def _rewrite_topic_for_wrong_topic(
+    topic: str, device_id: str, behaviors: dict[str, bool]
+) -> str:
+    """Force publish outside the device ACL prefix when wrong_topic is set.
+
+    Envelope mode builds its own ``sensors/<id>/env/*`` topics and previously
+    ignored ``_resolve_topic``, so the attack never hit Mosquitto ACL.
+    """
+    if not behaviors.get("wrong_topic"):
+        return topic
+    # Preserve env half suffix when present so logs stay readable.
+    if topic.endswith("/env/key"):
+        return f"sensors/__denied__/{device_id}/env/key"
+    if topic.endswith("/env/data"):
+        return f"sensors/__denied__/{device_id}/env/data"
+    return f"sensors/__denied__/{device_id}/process"
+
+
 def _resolve_password(cfg: dict[str, Any]) -> str:
     behaviors = cfg.get("behaviors") or {}
     password = str(cfg.get("mqtt_password") or "")
@@ -413,6 +431,9 @@ def run_simulator(
                     pubs = [(topic, body)]
 
                 for pub_topic, body in pubs:
+                    pub_topic = _rewrite_topic_for_wrong_topic(
+                        pub_topic, device_id, behaviors
+                    )
                     info = client.publish(pub_topic, body, qos=0)
                     if info.rc != 0:
                         log.warning("publish rc=%s topic=%s", info.rc, pub_topic)

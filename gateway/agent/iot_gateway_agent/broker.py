@@ -53,6 +53,7 @@ log_type error
 log_type warning
 log_type notice
 log_type information
+log_type debug
 connection_messages true
 """,
         encoding="utf-8",

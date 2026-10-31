@@ -274,6 +274,7 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertIn(f"listener {MQTT_TLS_PORT}", body)
         self.assertIn("require_certificate true", body)
         self.assertIn("cafile", body)
+        self.assertIn("log_type debug", body)
         self.assertNotIn("listener 1883", body)
 
         ssh = FakeSSH()
