@@ -49,6 +49,26 @@ def _port_open(host: str, port: int, *, timeout: float = 0.4) -> bool:
         return False
 
 
+def _taskkill_pids(pids: list[int], *, tree: bool = False) -> None:
+    """Best-effort ``taskkill /F`` for the given PIDs (Windows only)."""
+    if os.name != "nt":
+        return
+    for pid in pids:
+        if pid <= 0:
+            continue
+        cmd = ["taskkill", "/PID", str(pid), "/F"]
+        if tree:
+            cmd.append("/T")
+        subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+            **hidden_kwargs(),
+        )
+
+
 def _best_effort_stop_listeners(port: int) -> None:
     """Terminate whatever is listening on ``port`` (orphans after app restart)."""
     if not _port_open("127.0.0.1", port, timeout=0.3):
@@ -80,15 +100,7 @@ def _best_effort_stop_listeners(port: int) -> None:
                     continue
                 if pid > 0 and pid not in pids:
                     pids.append(pid)
-            for pid in pids:
-                subprocess.run(
-                    ["taskkill", "/PID", str(pid), "/F"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    timeout=5,
-                    check=False,
-                    **hidden_kwargs(),
-                )
+            _taskkill_pids(pids, tree=True)
         else:
             subprocess.run(
                 ["fuser", "-k", f"{port}/tcp"],
@@ -99,6 +111,113 @@ def _best_effort_stop_listeners(port: int) -> None:
             )
     except (OSError, subprocess.SubprocessError):
         pass
+
+
+def _best_effort_stop_grafana_tree_holders(grafana_home: Path) -> None:
+    """Unlock ``grafana_home`` for tree replace on Windows.
+
+    Grafana leaves bundled datasource helpers (``gpx_grafana*``) that keep
+    directory handles after the main process exits. Port kill alone is not
+    enough — ``ensure_grafana_tree`` then hits WinError 32 renaming
+    ``grafana`` → ``grafana.old``.
+    """
+    if os.name != "nt":
+        return
+    try:
+        root = str(grafana_home.resolve())
+    except OSError:
+        root = str(grafana_home)
+    root_norm = root.replace("/", "\\").rstrip("\\").lower()
+
+    # 1) Main server image + children.
+    for image in ("grafana.exe", "grafana-server.exe"):
+        subprocess.run(
+            ["taskkill", "/IM", image, "/F", "/T"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            check=False,
+            **hidden_kwargs(),
+        )
+
+    pids: list[int] = []
+
+    # 2) Image-name helpers (ExecutablePath is often empty for these).
+    try:
+        out = subprocess.check_output(
+            ["tasklist", "/FO", "CSV", "/NH"],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=8,
+            **hidden_kwargs(),
+        )
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    for line in out.splitlines():
+        # "image.exe","1234","Session","1","12,345 K"
+        parts = [p.strip().strip('"') for p in line.split('","')]
+        if len(parts) < 2:
+            continue
+        name = parts[0].strip('"')
+        if not name.lower().startswith("gpx_grafana"):
+            continue
+        try:
+            pid = int(parts[1])
+        except ValueError:
+            continue
+        if pid > 0 and pid not in pids:
+            pids.append(pid)
+
+    # 3) Path / command-line holders under grafana_home (when CIM exposes them).
+    try:
+        import json as _json
+
+        ps = (
+            "$ErrorActionPreference='SilentlyContinue'; "
+            f"$root = {_json.dumps(root)}; "
+            "$rootNorm = $root.TrimEnd('\\').ToLowerInvariant(); "
+            "Get-CimInstance Win32_Process | ForEach-Object { "
+            "  $path = $_.ExecutablePath; $cmd = $_.CommandLine; "
+            "  $hit = $false; "
+            "  if ($path -and $path.ToLowerInvariant().StartsWith($rootNorm)) { $hit = $true } "
+            "  if (-not $hit -and $cmd -and $cmd.ToLowerInvariant().Contains($rootNorm)) { $hit = $true } "
+            "  if ($hit -and $_.ProcessId -gt 0) { $_.ProcessId } "
+            "}"
+        )
+        ps_out = subprocess.check_output(
+            [
+                "powershell",
+                "-NoProfile",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                ps,
+            ],
+            text=True,
+            stderr=subprocess.DEVNULL,
+            timeout=20,
+            **hidden_kwargs(),
+        )
+        for line in ps_out.splitlines():
+            line = line.strip()
+            if not line.isdigit():
+                continue
+            pid = int(line)
+            # Never kill ourselves.
+            if pid == os.getpid():
+                continue
+            if pid > 0 and pid not in pids:
+                pids.append(pid)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+    # Drop our own PID if path/command-line match somehow included us.
+    self_pid = os.getpid()
+    pids = [p for p in pids if p != self_pid]
+    _taskkill_pids(pids, tree=True)
+    # Brief pause so Windows releases directory locks before rename.
+    if pids:
+        time.sleep(0.4)
 
 
 def _bind_conflict_message(log_text: str, *, port: int, name: str) -> str | None:
@@ -265,11 +384,13 @@ class NativeTelemetryManager:
             )
         )
 
-        # Windows locks Grafana tree files while a process holds them.
+        # Windows locks Grafana tree files while a process holds them
+        # (main binary and orphaned gpx_grafana* plugin helpers).
         if self._grafana_needs_ensure(force=force):
             self._stop_grafana_only(grace=5.0)
             # Orphan after app restart: no self._grafana handle.
             _best_effort_stop_listeners(_GRAFANA_PORT)
+            _best_effort_stop_grafana_tree_holders(self.grafana_home)
 
         def _g_progress(msg: str, frac: float) -> None:
             self._progress(msg, 0.45 + 0.35 * frac)
@@ -744,6 +865,7 @@ class NativeTelemetryManager:
         # Drop tracked child and any orphan still serving the old cert on :9140.
         self._stop_grafana_only(grace=5.0)
         _best_effort_stop_listeners(_GRAFANA_PORT)
+        _best_effort_stop_grafana_tree_holders(self.grafana_home)
         if not self._spawn_grafana_child():
             out["detail"] = (
                 "Certificate regenerated but Grafana binary/tree is missing."
@@ -769,6 +891,7 @@ class NativeTelemetryManager:
         # Orphans from a previous elevated EXE session (no tracked Popen handles).
         for port in (_GRAFANA_PORT, 9090, 3100):
             _best_effort_stop_listeners(port)
+        _best_effort_stop_grafana_tree_holders(self.grafana_home)
 
     def uninstall(self, *, grace: float = 5.0) -> dict[str, object]:
         """Stop Loki/Prometheus/Grafana and delete binaries, configs, and data under ``root``.
