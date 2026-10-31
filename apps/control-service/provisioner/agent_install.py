@@ -807,7 +807,8 @@ def provision_monolithic_agent(
             )
         )
     except Exception as exc:  # noqa: BLE001 — Kafka is best-effort on first install
-        notes.append(f"kafka KRaft install deferred: {exc}")
+        detail = str(exc).strip() or repr(exc)
+        notes.append(f"kafka KRaft install deferred: {detail[:400]}")
     _upload_agent_tree(ssh, agent_src, remote_root, sudo_password=sudo_password)
     notes.append(f"uploaded agent to {remote_root}")
     _ensure_venv(ssh, remote_root)

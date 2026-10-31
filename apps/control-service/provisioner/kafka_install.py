@@ -145,24 +145,27 @@ def ensure_kafka_kraft(
     notes: list[str] = []
     adv = _validate_advertise_host(advertise_host)
 
-    # JRE via apt (Kafka is JVM; no native arch binary needed).
+    # JRE via apt (Kafka is JVM). Prefer default-jre-headless (Debian 13+ may
+    # not ship openjdk-17-jre-headless under that exact name).
     jre = sudo_run(
         ssh,
         "if java -version >/dev/null 2>&1; then echo JAVA_OK; else "
         "env DEBIAN_FRONTEND=noninteractive apt-get update -qq && "
         "env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+        "default-jre-headless || "
+        "env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
+        "openjdk-21-jre-headless || "
+        "env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq "
         "openjdk-17-jre-headless; fi",
         sudo_password=sudo_password,
         timeout=600.0,
     )
-    if not jre.ok and "JAVA_OK" not in (jre.stdout or ""):
-        # apt may succeed with empty stdout
-        probe = ssh.run("java -version 2>&1 | head -1", timeout=15.0)
-        if probe.exit_code != 0:
-            raise AgentInstallError(
-                "OpenJDK install failed for Kafka: "
-                f"{(jre.stderr or jre.stdout or probe.stderr or '')[:400]}"
-            )
+    probe = ssh.run("java -version 2>&1 | head -1", timeout=15.0)
+    if probe.exit_code != 0 and "JAVA_OK" not in (jre.stdout or ""):
+        raise AgentInstallError(
+            "OpenJDK install failed for Kafka: "
+            f"{(jre.stderr or jre.stdout or probe.stderr or probe.stdout or '')[:400]}"
+        )
     notes.append("openjdk available for Kafka")
 
     if not kafka_present(ssh, kafka_home=kafka_home):

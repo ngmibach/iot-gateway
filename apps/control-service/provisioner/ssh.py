@@ -109,8 +109,17 @@ class ParamikoSSHSession:
         timeout: float = 120.0,
         stdin: Optional[str] = None,
     ) -> CommandResult:
+        """Run ``command`` and return stdout/stderr/exit.
+
+        Uses a **wall-clock** deadline. Paramiko's per-read channel timeout would
+        abort silent long jobs (e.g. ``curl -fsSL`` Kafka tarball) even while
+        the remote process is healthy.
+        """
+        import socket
+
         # Secrets (e.g. sudo password) must go on stdin — never on remote argv.
-        chan_in, stdout, stderr = self._client.exec_command(command, timeout=timeout)
+        chan_in, stdout, stderr = self._client.exec_command(command, timeout=None)
+        channel = stdout.channel
         try:
             if stdin is not None:
                 chan_in.write(stdin if stdin.endswith("\n") else stdin + "\n")
@@ -121,9 +130,70 @@ class ParamikoSSHSession:
                 chan_in.close()
             except Exception:  # noqa: BLE001
                 pass
-        out = stdout.read().decode("utf-8", errors="replace")
-        err = stderr.read().decode("utf-8", errors="replace")
-        code = stdout.channel.recv_exit_status()
+
+        out_chunks: list[bytes] = []
+        err_chunks: list[bytes] = []
+        deadline = time.time() + max(1.0, float(timeout))
+        channel.settimeout(1.0)
+        while True:
+            if channel.exit_status_ready():
+                # Drain remaining buffered output after exit.
+                while channel.recv_ready():
+                    chunk = channel.recv(65536)
+                    if not chunk:
+                        break
+                    out_chunks.append(chunk)
+                while channel.recv_stderr_ready():
+                    chunk = channel.recv_stderr(65536)
+                    if not chunk:
+                        break
+                    err_chunks.append(chunk)
+                break
+            if time.time() > deadline:
+                try:
+                    channel.close()
+                except Exception:  # noqa: BLE001
+                    pass
+                raise TimeoutError(
+                    f"remote command exceeded {timeout:.0f}s wall clock"
+                )
+            try:
+                if channel.recv_ready():
+                    chunk = channel.recv(65536)
+                    if chunk:
+                        out_chunks.append(chunk)
+                if channel.recv_stderr_ready():
+                    chunk = channel.recv_stderr(65536)
+                    if chunk:
+                        err_chunks.append(chunk)
+            except socket.timeout:
+                pass
+            time.sleep(0.05)
+
+        code = channel.recv_exit_status()
+        out = b"".join(out_chunks).decode("utf-8", errors="replace")
+        err = b"".join(err_chunks).decode("utf-8", errors="replace")
+        # Also pull anything left on the file wrappers (Paramiko buffers).
+        try:
+            extra_out = stdout.read()
+            if extra_out:
+                out += (
+                    extra_out.decode("utf-8", errors="replace")
+                    if isinstance(extra_out, bytes)
+                    else str(extra_out)
+                )
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            extra_err = stderr.read()
+            if extra_err:
+                err += (
+                    extra_err.decode("utf-8", errors="replace")
+                    if isinstance(extra_err, bytes)
+                    else str(extra_err)
+                )
+        except Exception:  # noqa: BLE001
+            pass
         return CommandResult(exit_code=code, stdout=out, stderr=err)
 
     def read_text(self, path: str) -> str:
