@@ -221,16 +221,28 @@ class NativeTelemetryManager:
 
     def _grafana_tree_present(self) -> bool:
         """True when version marker and Grafana layout (public/, conf/, server) exist."""
-        if not grafana_tree_layout_ok(self.grafana_home):
-            return False
         try:
+            if not grafana_tree_layout_ok(self.grafana_home):
+                return False
             versions = load_versions()
             plat = platform_key()
             version = str(versions["grafana"]["version"])
-        except (KeyError, OSError, ValueError, BinaryFetchError):
+            marker = self.grafana_home / f".grafana-{version}-{plat}.ok"
+            return marker.is_file()
+        except OSError as exc:
+            # Locked / execute-only Grafana tree (WinError 5) — try ACL repair once.
+            detail = str(exc).lower()
+            if "access is denied" in detail or getattr(exc, "winerror", None) == 5:
+                try:
+                    from .binary_fetch import ensure_windows_tree_access
+
+                    ensure_windows_tree_access(self.grafana_home)
+                    return grafana_tree_layout_ok(self.grafana_home)
+                except OSError:
+                    return False
             return False
-        marker = self.grafana_home / f".grafana-{version}-{plat}.ok"
-        return marker.is_file()
+        except (KeyError, ValueError, BinaryFetchError):
+            return False
 
     def _grafana_needs_ensure(self, *, force: bool = False) -> bool:
         return force or not self._grafana_tree_present()
@@ -756,6 +768,9 @@ class NativeTelemetryManager:
         for attr in ("_grafana", "_prom", "_loki"):
             self._stop_one(getattr(self, attr), grace=grace)
             setattr(self, attr, None)
+        # Orphans from a previous elevated EXE session (no tracked Popen handles).
+        for port in (_GRAFANA_PORT, 9090, 3100):
+            _best_effort_stop_listeners(port)
 
     def uninstall(self, *, grace: float = 5.0) -> dict[str, object]:
         """Stop Loki/Prometheus/Grafana and delete binaries, configs, and data under ``root``.
@@ -766,21 +781,26 @@ class NativeTelemetryManager:
         """
         import shutil
 
+        from .binary_fetch import ensure_windows_tree_access
+
         self.stop(grace=grace)
         removed: list[str] = []
         errors: list[str] = []
         root = self.root
         if root.is_dir():
+            ensure_windows_tree_access(root)
             for child in sorted(root.iterdir(), key=lambda p: p.name):
                 try:
                     if child.is_dir():
+                        ensure_windows_tree_access(child)
                         shutil.rmtree(child)
                     else:
                         child.unlink(missing_ok=True)
                     removed.append(child.name)
                 except OSError as exc:
-                    # Locked files (Windows) — best-effort second pass.
+                    # Locked files (Windows) — ACL repair + best-effort second pass.
                     try:
+                        ensure_windows_tree_access(child)
                         if child.is_dir():
                             shutil.rmtree(child, ignore_errors=True)
                         elif child.is_file():

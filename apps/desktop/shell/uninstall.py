@@ -50,7 +50,7 @@ def uninstall_targets() -> dict[str, Any]:
         {
             "id": str(r.get("id") or ""),
             "host": str(r.get("host") or ""),
-            "ssh_user": str(r.get("ssh_user") or settings.get("ssh_user") or "ubuntu"),
+            "ssh_user": str(r.get("ssh_user") or settings.get("ssh_user") or "").strip(),
         }
         for r in rows
         if str(r.get("id") or "").strip()
@@ -65,7 +65,7 @@ def uninstall_targets() -> dict[str, Any]:
                 "host": str(
                     settings.get("ssh_host") or settings.get("gateway_ip") or ""
                 ).strip(),
-                "ssh_user": str(settings.get("ssh_user") or "ubuntu"),
+                "ssh_user": str(settings.get("ssh_user") or "").strip(),
             },
         )
     return {
@@ -73,7 +73,7 @@ def uninstall_targets() -> dict[str, Any]:
         "provisioned": provisioned,
         "default_gateway_id": default_gid,
         "ssh_host": str(settings.get("ssh_host") or settings.get("gateway_ip") or ""),
-        "ssh_user": str(settings.get("ssh_user") or "ubuntu"),
+        "ssh_user": str(settings.get("ssh_user") or "").strip(),
         "ssh_port": int(settings.get("ssh_port") or 22),
         "monitoring_hint": (
             "Removing the monitoring panel also removes every gateway "
@@ -215,9 +215,7 @@ def _gateway_jobs(
         gid = str(g.get("id") or "").strip() or "gateway"
         if gid == default_gid and default_host:
             host = default_host
-        username = str(
-            g.get("ssh_user") or settings.get("ssh_user") or "ubuntu"
-        ).strip()
+        username = str(g.get("ssh_user") or settings.get("ssh_user") or "").strip()
         out.append(
             {
                 "id": gid,
@@ -291,7 +289,18 @@ def run_uninstall(
                 gid = job["id"]
                 host = job["host"]
                 entry: dict[str, Any] = {"id": gid, "host": host, "ok": True}
-                if host:
+                if host and not job.get("username"):
+                    entry["ok"] = False
+                    entry["error"] = (
+                        "SSH username missing for this gateway — set it under "
+                        "Gateways → Settings before Clean up, or remove the "
+                        "registry row only."
+                    )
+                    result["notes"].append(f"[{gid}] {entry['error']}")
+                    if not monitoring:
+                        raise UninstallError(entry["error"])
+                    result["ok"] = False
+                elif host:
                     try:
                         notes = uninstall_gateway_over_ssh(
                             host=host,

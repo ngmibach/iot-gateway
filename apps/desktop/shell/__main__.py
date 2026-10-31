@@ -59,7 +59,26 @@ def _run_control_service() -> int:
     return 0
 
 
+def _ensure_windows_cwd() -> None:
+    """Avoid ``\\\\wsl.localhost`` UNC cwd so ``open("/proc/…")`` and tools stay native."""
+    if os.name != "nt":
+        return
+    try:
+        cwd = os.getcwd()
+    except OSError:
+        cwd = ""
+    unc = cwd.startswith("\\\\") or cwd.lower().startswith("//wsl")
+    if not unc:
+        return
+    target = os.environ.get("APPDATA") or os.environ.get("USERPROFILE") or os.path.expanduser("~")
+    try:
+        os.chdir(target)
+    except OSError:
+        pass
+
+
 def main(argv: list[str] | None = None) -> int:
+    _ensure_windows_cwd()
     raw = list(sys.argv[1:] if argv is None else argv)
     if "--run-control-service" in raw:
         return _run_control_service()
