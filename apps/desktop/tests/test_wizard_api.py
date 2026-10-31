@@ -685,6 +685,24 @@ class WizardApiTests(unittest.TestCase):
         body = json.loads(ctx.exception.read().decode("utf-8"))
         self.assertIn("pin", body.get("error", "").lower())
 
+    def test_resolve_gateway_ip_from_gateways_map(self) -> None:
+        from shell.wizard_server import resolve_gateway_ip
+
+        self.assertEqual(
+            resolve_gateway_ip({"gateway_ip": "10.0.0.1"}, override="9.9.9.9"),
+            "9.9.9.9",
+        )
+        self.assertEqual(
+            resolve_gateway_ip(
+                {
+                    "default_gateway_id": "gateway",
+                    "gateways": {"gateway": {"host": "172.20.10.2"}},
+                }
+            ),
+            "172.20.10.2",
+        )
+        self.assertEqual(resolve_gateway_ip({}), "127.0.0.1")
+
     def test_telemetry_ensure_background_job(self) -> None:
         from shell import wizard_server as ws
 

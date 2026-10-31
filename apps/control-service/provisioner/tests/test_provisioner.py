@@ -384,6 +384,55 @@ class ProvisionFlowTests(unittest.TestCase):
         with self.assertRaises(AgentInstallError):
             _validate_advertise_host("evil.example; rm -rf /")
 
+    def test_kafka_known_tarball_size_pinned(self) -> None:
+        from provisioner.kafka_install import (
+            DEFAULT_KAFKA_VERSION,
+            _KNOWN_TARBALL_BYTES,
+            _probe_tarball_size,
+        )
+
+        self.assertEqual(_KNOWN_TARBALL_BYTES[DEFAULT_KAFKA_VERSION], 120_235_344)
+        with mock.patch(
+            "provisioner.kafka_install.urllib.request.urlopen",
+            side_effect=OSError("offline"),
+        ):
+            self.assertEqual(
+                _probe_tarball_size("https://example.invalid/kafka.tgz", version="3.7.1"),
+                120_235_344,
+            )
+
+    def test_download_tarball_local_rejects_truncated(self) -> None:
+        from provisioner.agent_install import AgentInstallError
+        from provisioner.kafka_install import _download_tarball_local
+
+        with tempfile.TemporaryDirectory() as tmp:
+            dest = Path(tmp) / "kafka.tgz"
+            dest.write_bytes(b"tiny")
+
+            class _Resp:
+                headers = {"Content-Length": "100"}
+
+                def read(self, _n: int = -1) -> bytes:
+                    return b""
+
+                def __enter__(self):
+                    return self
+
+                def __exit__(self, *exc):
+                    return False
+
+            with mock.patch(
+                "provisioner.kafka_install.urllib.request.urlopen",
+                return_value=_Resp(),
+            ):
+                with self.assertRaises(AgentInstallError) as ctx:
+                    _download_tarball_local(
+                        "https://example.invalid/kafka.tgz",
+                        dest,
+                        expected=120_235_344,
+                    )
+            self.assertIn("size", str(ctx.exception).lower())
+
     def test_agent_backend_no_docker(self) -> None:
         ssh = _ok_ssh()
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))

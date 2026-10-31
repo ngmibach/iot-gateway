@@ -50,6 +50,40 @@ if _CS not in sys.path:
     sys.path.insert(0, _CS)
 
 
+def resolve_gateway_ip(
+    settings: dict[str, Any] | None = None,
+    *,
+    override: str | None = None,
+) -> str:
+    """Resolve Prometheus scrape target host for the registered gateway.
+
+    Prefer an explicit override, then top-level ``gateway_ip``, then the
+    default (or first) entry under ``gateways.*.host``. Falling back to
+    ``127.0.0.1`` scrapes the operator PC and leaves Gateway Metric empty.
+    """
+    raw = (override or "").strip()
+    if raw:
+        return raw
+    cfg = settings if isinstance(settings, dict) else load_settings()
+    top = str(cfg.get("gateway_ip") or "").strip()
+    if top:
+        return top
+    gateways = cfg.get("gateways")
+    if isinstance(gateways, dict) and gateways:
+        default_id = str(cfg.get("default_gateway_id") or "").strip()
+        ordered: list[Any] = []
+        if default_id and default_id in gateways:
+            ordered.append(gateways[default_id])
+        ordered.extend(v for k, v in gateways.items() if k != default_id)
+        for entry in ordered:
+            if not isinstance(entry, dict):
+                continue
+            host = str(entry.get("host") or entry.get("gateway_ip") or "").strip()
+            if host:
+                return host
+    return "127.0.0.1"
+
+
 class WizardState:
     def __init__(self) -> None:
         self.manager = ProcessManager()
@@ -111,7 +145,7 @@ class WizardState:
                         }
                     return
                 settings = load_settings()
-                gw = gateway_ip or str(settings.get("gateway_ip") or "127.0.0.1")
+                gw = resolve_gateway_ip(settings, override=gateway_ip)
                 # start() downloads binaries only when ports are free / not ready.
                 st = tel.start(
                     gateway_ip=gw, wait=True, ensure_bins=True
@@ -363,7 +397,7 @@ def _handle_api(
                 return
             try:
                 settings = load_settings()
-                gw = gateway_ip or str(settings.get("gateway_ip") or "127.0.0.1")
+                gw = resolve_gateway_ip(settings, override=gateway_ip)
                 # start() probes first, then downloads only if needed.
                 st = STATE.telemetry.start(
                     gateway_ip=gw, wait=True, ensure_bins=True
