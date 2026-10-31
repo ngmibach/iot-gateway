@@ -260,8 +260,9 @@ def _atomic_replace_dir(staging: Path, dest: Path, old: Path) -> None:
             # WinError 32: Grafana/plugin still locking the tree.
             raise BinaryFetchError(
                 f"cannot replace {dest.name}: {exc}. "
-                "Stop Grafana (and any gpx_grafana* plugin helpers) and retry "
-                "Install monitoring."
+                "Stop Grafana and any gpx_* plugin helpers "
+                "(including gpx_grafana* and gpx_kafka-datasource*) "
+                "in Task Manager, then retry Install monitoring."
             ) from exc
         try:
             staging.rename(dest)
