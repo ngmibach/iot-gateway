@@ -446,11 +446,12 @@ class NativeTelemetryManager:
             "cwd": str(self.root),
             "stderr": subprocess.STDOUT,
         }
-        if os.name == "nt":
-            # Hide console windows on Windows.
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        else:
-            kwargs["start_new_session"] = True
+        # Detach from the starter process job so Loki/Prometheus/Grafana
+        # survive after a one-shot ensure/start Python exits (Windows job
+        # objects otherwise reap the children with the parent).
+        from telemetry.winproc import daemon_popen_kwargs  # type: ignore[import-not-found]
+
+        kwargs.update(daemon_popen_kwargs())
         return kwargs
 
     def start(
