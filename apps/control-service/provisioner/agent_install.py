@@ -210,7 +210,6 @@ def ensure_gateway_ca_and_server_cert(
     token = _secrets.token_hex(8)
     remote_pass = f"/tmp/iotgw-ca-pass-{token}"
     remote_ext = f"/tmp/iotgw-server-ext-{token}"
-    remote_ca_ext = f"/tmp/iotgw-ca-ext-{token}"
     notes: list[str] = []
 
     with tempfile.NamedTemporaryFile("wb", delete=False) as tmp_pass:
@@ -222,22 +221,12 @@ def ensure_gateway_ca_and_server_cert(
             f"subjectAltName=IP:{gateway_ip},IP:127.0.0.1,DNS:localhost\n"
         )
         local_ext = Path(tmp_ext.name)
-    # Explicit CA extensions for OpenSSL 3 / Python 3.13 VERIFY_X509_STRICT.
-    with tempfile.NamedTemporaryFile(
-        "w", delete=False, encoding="utf-8"
-    ) as tmp_ca_ext:
-        tmp_ca_ext.write(
-            "basicConstraints=critical,CA:TRUE\n"
-            "keyUsage=critical,keyCertSign,cRLSign\n"
-            "subjectKeyIdentifier=hash\n"
-            "authorityKeyIdentifier=keyid:always,issuer\n"
-        )
-        local_ca_ext = Path(tmp_ca_ext.name)
 
     try:
         ssh.upload_file(local_pass, remote_pass, mode=0o600)
         ssh.upload_file(local_ext, remote_ext, mode=0o600)
-        ssh.upload_file(local_ca_ext, remote_ca_ext, mode=0o600)
+        # OpenSSL 3.5+ ``req -x509`` rejects ``-extfile`` ("Extra unknown options").
+        # Use ``-addext`` for CA basics (VERIFY_X509_STRICT / keyCertSign).
         ca_script = (
             f"mkdir -p {shlex.quote(certs_dir)} && "
             f"if [ ! -f {shlex.quote(ca_crt)} ] || [ ! -f {shlex.quote(ca_key)} ]; then "
@@ -247,7 +236,9 @@ def ensure_gateway_ca_and_server_cert(
             f"-key {shlex.quote(ca_key)} -passin file:{remote_pass} "
             f"-out {shlex.quote(ca_crt)} "
             f"-subj '/C=VN/ST=Hanoi/L=Hanoi/O=My IOT Org/OU=IOT Devices/CN=My IOT CA Root' "
-            f"-extfile {remote_ca_ext} && "
+            f"-addext 'basicConstraints=critical,CA:TRUE' "
+            f"-addext 'keyUsage=critical,keyCertSign,cRLSign' "
+            f"-addext 'subjectKeyIdentifier=hash' && "
             f"chmod 600 {shlex.quote(ca_key)} && chmod 644 {shlex.quote(ca_crt)} && "
             "echo CA_CREATED; "
             "else echo CA_EXISTS; fi"
@@ -301,10 +292,8 @@ def ensure_gateway_ca_and_server_cert(
     finally:
         local_pass.unlink(missing_ok=True)
         local_ext.unlink(missing_ok=True)
-        local_ca_ext.unlink(missing_ok=True)
         ssh.run(
-            f"rm -f {shlex.quote(remote_pass)} {shlex.quote(remote_ext)} "
-            f"{shlex.quote(remote_ca_ext)}",
+            f"rm -f {shlex.quote(remote_pass)} {shlex.quote(remote_ext)}",
             timeout=15.0,
         )
 
