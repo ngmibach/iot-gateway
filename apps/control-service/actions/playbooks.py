@@ -521,6 +521,15 @@ def register_device(
             topic_rw = validate_topic(topic_rw)
         if topic_r:
             topic_r = validate_topic(topic_r)
+        # Envelope v1 needs env/key + env/data write ACL; expand narrow process
+        # topics to sensors/{id}/# (logical publish topic stays elsewhere).
+        from actions.device_crypto import envelope_acl_topic
+
+        topic_rw = envelope_acl_topic(
+            user_id, topic_rw, crypto_profile=crypto_profile or "v1-psk"
+        )
+        if topic_rw:
+            topic_rw = validate_topic(topic_rw)
 
         hash_line = hash_password_line(user_id, password)
         zeroize_str(password)
