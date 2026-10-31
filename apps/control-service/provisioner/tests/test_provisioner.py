@@ -348,13 +348,13 @@ class ProvisionFlowTests(unittest.TestCase):
             advertise_host="192.168.1.50",
         )
         self.assertIn(
-            "listeners=INTERNAL://127.0.0.1:9092,EXTERNAL://192.168.1.50:9092,"
+            "listeners=INTERNAL://127.0.0.1:9092,EXTERNAL://192.168.1.50:9094,"
             "CONTROLLER://127.0.0.1:9093",
             props,
         )
         self.assertIn(
             "advertised.listeners=INTERNAL://127.0.0.1:9092,"
-            "EXTERNAL://192.168.1.50:9092",
+            "EXTERNAL://192.168.1.50:9094",
             props,
         )
         self.assertIn("inter.broker.listener.name=INTERNAL", props)

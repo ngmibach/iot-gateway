@@ -1,4 +1,4 @@
-# Details
+﻿# Details
 
 Depth behind the diagrams in [`architecture.md`](architecture.md). Operator UI steps are in [`UI.md`](UI.md).
 
@@ -14,9 +14,9 @@ Depth behind the diagrams in [`architecture.md`](architecture.md). Operator UI s
 | Prometheus | `:9090` | Scrapes gateway agent `job=iot-gateway-agent` |
 | Grafana | `https://127.0.0.1:9140` | Localhost HTTPS; opens in system browser |
 
-Ready/start of the monitoring install requires Loki, Prometheus, and Grafana. Grafana OSS pin is documented in packaging (~445 MiB compressed); free-space preflight is ≥2.5 GiB. Self-signed Grafana cert is **download-only** from Settings → Certificates (no OS auto-import).
+Ready/start of the monitoring install requires Loki, Prometheus, and Grafana. Grafana OSS pin is documented in packaging (~445 MiB compressed); free-space preflight is â‰¥2.5 GiB. Self-signed Grafana cert is **download-only** from Settings â†’ Certificates (no OS auto-import).
 
-Provisioned Grafana datasources: Prometheus, Loki, and one Kafka datasource per registered gateway (`{gateway_ip}:9092` PLAINTEXT on trusted LAN).
+Provisioned Grafana datasources: Prometheus, Loki, and one Kafka datasource per registered gateway (`{gateway_ip}:9094` PLAINTEXT on trusted LAN).
 
 ### App data directories
 
@@ -29,12 +29,12 @@ Typical contents: settings, `registry.sqlite`, telemetry binaries, Chromium prof
 
 ### Registry and secrets
 
-- **registry.sqlite** — gateways and devices. Monitoring Metric/Activities read gateways from the registry (settings.json SSH fields alone do not populate Monitoring).
+- **registry.sqlite** â€” gateways and devices. Monitoring Metric/Activities read gateways from the registry (settings.json SSH fields alone do not populate Monitoring).
 - After successful **Install gateway**, the wizard upserts the provisioned gateway into the local registry (`shell/registry_gateways.py`).
 - **Keyring** service name `iot-gateway-monitor` (file fallback `keyring-fallback.json`):
-  - `ca:{gateway_id}` — CA signing passphrase
-  - `sudo:{gateway_id}` — gateway sudo / SSH password for day-2 playbooks
-  - Admin PIN for Settings → Admin
+  - `ca:{gateway_id}` â€” CA signing passphrase
+  - `sudo:{gateway_id}` â€” gateway sudo / SSH password for day-2 playbooks
+  - Admin PIN for Settings â†’ Admin
 
 Wizard proxy injects keyring CA/sudo into Control Plane requests when the body omits them. Secrets are never written to settings.json or logs.
 
@@ -67,34 +67,34 @@ Wrong job names (for example legacy `node`) yield empty Metric panels while HTTP
 |----------------|------|
 | `iot-gateway-agent` | Monolithic agent (`--no-broker`); health, metrics, decrypt, shipper |
 | `mosquitto.service` | System Mosquitto; MQTTS `:8883` with `require_certificate` |
-| `iotgw-kafka` | Kafka KRaft; heap 128–256M |
+| `iotgw-kafka` | Kafka KRaft; heap 128â€“256M |
 | `iotgw-fake@<id>` | Optional fake sensor simulator |
 
-MQTT “up” is reported when TCP `127.0.0.1:1883` accepts (system broker), not only when an agent child broker is running. Production sensor ingress is **MQTTS `:8883` only**.
+MQTT â€œupâ€ is reported when TCP `127.0.0.1:1883` accepts (system broker), not only when an agent child broker is running. Production sensor ingress is **MQTTS `:8883` only**.
 
 ### MQTTS material
 
 Under `/var/lib/iot-gateway-agent/`:
 
-- `certs/` — CA, server cert (IP SAN), decrypt `nodered` client cert, daily DMEC under `certs/day/`
-- `mosquitto/acl`, `mosquitto/passwords` — owned `mosquitto:mosquitto` (day-2 writes use sudo temp + mv)
+- `certs/` â€” CA, server cert (IP SAN), decrypt `nodered` client cert, daily DMEC under `certs/day/`
+- `mosquitto/acl`, `mosquitto/passwords` â€” owned `mosquitto:mosquitto` (day-2 writes use sudo temp + mv)
 
 ### Kafka listeners
 
 | Listener | Bind | Use |
 |----------|------|-----|
 | INTERNAL | `127.0.0.1:9092` | Agent produce |
-| EXTERNAL | `{gateway_ip}:9092` | Desktop Grafana datasource (PLAINTEXT; trusted-LAN only) |
+| EXTERNAL | `{gateway_ip}:9094` | Desktop Grafana datasource (PLAINTEXT; trusted-LAN only) |
 
 Catalog: `/var/lib/iot-gateway-agent/kafka/topics.json`. Topic name: `sensor.<device_id>`.
 
 ### Sensor capacity (Kafka)
 
 ```
-max_sensors = floor(total_gateway_disk × 0.70 / topic_retention_bytes)
+max_sensors = floor(total_gateway_disk Ã— 0.70 / topic_retention_bytes)
 ```
 
-Example: disk=10, topic cap=1 → max **7** sensors. Only 70% of disk is budgeted for Kafka retention; 30% remains for OS, Mosquitto, logs, and agent.
+Example: disk=10, topic cap=1 â†’ max **7** sensors. Only 70% of disk is budgeted for Kafka retention; 30% remains for OS, Mosquitto, logs, and agent.
 
 - `GET /api/v1/gateways/{gid}/kafka/capacity`
 - Register / create-fake returns **409** when full
@@ -116,7 +116,7 @@ On Control Plane register / create-fake the control service typically:
 4. Reserves Kafka topic with `retention.bytes` from catalog defaults
 5. Writes device crypto + schema under `crypto/` and `schemas/`
 6. Reloads Mosquitto (`systemctl`)
-7. For fakes: netns + unit install (unit left **stopped** until Simulate → Start)
+7. For fakes: netns + unit install (unit left **stopped** until Simulate â†’ Start)
 
 ### Runtime path after publish
 
@@ -124,7 +124,7 @@ On Control Plane register / create-fake the control service typically:
 2. Mosquitto enforces ACL
 3. Decrypt worker (mTLS client on `:8883`) receives payload
 4. Envelope pair/open or legacy Fernet decrypt
-5. Schema validate — deny on failure (no log, no Kafka)
+5. Schema validate â€” deny on failure (no log, no Kafka)
 6. Append `sensor_data.log`; produce Kafka; shipper tails to Loki
 
 ### Health and crypto HTTP
@@ -173,13 +173,13 @@ Legacy Fernet remains accepted while `IOTGW_ENVELOPE_REQUIRE` is off (default).
 
 | Profile | CEK wrap | Typical use |
 |---------|----------|-------------|
-| `v1-psk` | Registration `wrap_secret` + HKDF(`day_id`) → AES-GCM wrap | Tiny / MCU sensors, lab fakes |
-| `v1-ecdhe` | Ephemeral P-256 ECDH with today’s DMEC public key → AES-GCM wrap | Sensors that can do ECC |
+| `v1-psk` | Registration `wrap_secret` + HKDF(`day_id`) â†’ AES-GCM wrap | Tiny / MCU sensors, lab fakes |
+| `v1-ecdhe` | Ephemeral P-256 ECDH with todayâ€™s DMEC public key â†’ AES-GCM wrap | Sensors that can do ECC |
 
 Both profiles use:
 
-- **Content:** AES-128-GCM (12-byte nonce, AAD = `msg_id ‖ day_id ‖ schema_id`)
-- **Binding stamp:** HMAC-SHA256 over canonical `msg_id ‖ day_id ‖ schema_id ‖ wrapped_key ‖ nonce ‖ ciphertext`
+- **Content:** AES-128-GCM (12-byte nonce, AAD = `msg_id â€– day_id â€– schema_id`)
+- **Binding stamp:** HMAC-SHA256 over canonical `msg_id â€– day_id â€– schema_id â€– wrapped_key â€– nonce â€– ciphertext`
 - **Wire version:** `"v": 1`
 
 ### Wire format (dual MQTT topics)
@@ -194,23 +194,23 @@ Both profiles use:
 - Binary fields are **urlsafe base64 without padding**
 - Decrypt worker pairs halves by `(device_id, msg_id)` within `IOTGW_ENVELOPE_PAIR_TIMEOUT` (default 5s)
 
-### Seal → open flow
+### Seal â†’ open flow
 
 ```text
 Sensor                         Gateway decrypt worker
-──────                         ──────────────────────
+â”€â”€â”€â”€â”€â”€                         â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 schema check (local copy)
-CEK, nonce, msg_id ← random
-ciphertext ← AES-GCM(CEK, …)
-wrapped_key ← Wrap(profile, CEK)
-stamp ← HMAC(mac_key, …)
-PUB env/key + env/data  ──►    pair by msg_id
+CEK, nonce, msg_id â† random
+ciphertext â† AES-GCM(CEK, â€¦)
+wrapped_key â† Wrap(profile, CEK)
+stamp â† HMAC(mac_key, â€¦)
+PUB env/key + env/data  â”€â”€â–º    pair by msg_id
                                verify stamps
-                               check day_id ∈ {y,t,t+1}
+                               check day_id âˆˆ {y,t,t+1}
                                unwrap CEK
                                AES-GCM open
                                schema validate
-                               → sensor_data.log / Kafka
+                               â†’ sensor_data.log / Kafka
 ```
 
 ### Registration material
@@ -239,7 +239,7 @@ Agent helpers: `iot_gateway_agent.envelope_v1` (`generate_device_secrets`, `seal
 
 ### Schema validation
 
-After a successful open, the decrypt worker validates plaintext against the registered schema (`schema_validate.py` — compact JSON Schema subset: `string`, `integer`, `number`, `boolean`, `object`, `array`). Failures deny the message.
+After a successful open, the decrypt worker validates plaintext against the registered schema (`schema_validate.py` â€” compact JSON Schema subset: `string`, `integer`, `number`, `boolean`, `object`, `array`). Failures deny the message.
 
 Example:
 
@@ -315,7 +315,7 @@ When ready to retire Fernet on a gateway, set `IOTGW_ENVELOPE_REQUIRE=1` and res
 
 ### Provision (Install gateway)
 
-Desktop → SSH:
+Desktop â†’ SSH:
 
 1. Discover open SSH on monitoring LAN (`POST /api/wizard/discover/gateways`)
 2. Fetch/pin host key; install operator SSH public key
@@ -329,8 +329,8 @@ CA passphrase: Generate (default) or manual entry (reject passphrase `admin`). S
 
 | Action | Effect |
 |--------|--------|
-| Gateways → Clean up | Remove one gateway agent over SSH; monitoring stack stays |
-| Settings → Remove | Uninstall Loki/Prometheus/Grafana + wipe local app data; also removes registered gateways when possible |
+| Gateways â†’ Clean up | Remove one gateway agent over SSH; monitoring stack stays |
+| Settings â†’ Remove | Uninstall Loki/Prometheus/Grafana + wipe local app data; also removes registered gateways when possible |
 
 Gateway uninstall runs `teardown_all_fakes` (units, netns, bridge, fake data dir) then removes the agent install.
 
@@ -343,9 +343,9 @@ Gateway uninstall runs `teardown_all_fakes` (units, netns, bridge, fake data dir
 | Piece | Value |
 |-------|-------|
 | Bridge | `iotgw-fake` on `10.255.0.0/24`, gateway `10.255.0.1` |
-| Netns | `iotgw-fake-<device_id>` under `/run/netns` (tmpfs — recreated on every unit start from `ip-map.json` via `python -m iot_gateway_agent.fake_netns ensure`) |
+| Netns | `iotgw-fake-<device_id>` under `/run/netns` (tmpfs â€” recreated on every unit start from `ip-map.json` via `python -m iot_gateway_agent.fake_netns ensure`) |
 | IP map | `/var/lib/iot-gateway-agent/fake/ip-map.json` |
-| Unit | `iotgw-fake@<device_id>.service` (`ExecStartPre` ensures netns; `ip netns exec` runs the simulator — avoids `NetworkNamespacePath` / `225/NETWORK` after reboot) |
+| Unit | `iotgw-fake@<device_id>.service` (`ExecStartPre` ensures netns; `ip netns exec` runs the simulator â€” avoids `NetworkNamespacePath` / `225/NETWORK` after reboot) |
 | Payload file | `fake/<device_id>/payload.json` (default `{"device_id","hello":1}`) |
 | Publish topic | `sensors/<device_id>/process` (envelope uses env/key + env/data) |
 
@@ -353,12 +353,12 @@ Create leaves the unit **stopped**. Start/stop and interval/topic/payload/behavi
 
 **Persistence:** Applied Simulate fields are stored in monitoring-app `registry.sqlite` (`meta.fake`: interval, topic, payload, behaviors) before the gateway unit restart; gateway `payload.json` + unit env are updated over SSH. Unapplied UI drafts use `%APPDATA%\IoTGatewayMonitor\ui-state.json` (Linux: `~/.local/share/iot-gateway-monitor/ui-state.json`) via `GET`/`PUT /api/wizard/ui-state`, mirrored in browser `localStorage`.
 
-**Activities transmission delay:** Agent records gateway processing time (envelope decrypt/validate → log → Kafka produce) as `iotgw_device_delay_ms` (latest), `iotgw_device_delay_ms_sum` (cumulative Total), and `iotgw_device_delay_samples_total`. Kafka handoff time is included only when produce succeeds so a down broker does not inflate the gauge. General Information also charts avg messages/sec from `rate(iotgw_decrypt_messages_total)`.
+**Activities transmission delay:** Agent records gateway processing time (envelope decrypt/validate â†’ log â†’ Kafka produce) as `iotgw_device_delay_ms` (latest), `iotgw_device_delay_ms_sum` (cumulative Total), and `iotgw_device_delay_samples_total`. Kafka handoff time is included only when produce succeeds so a down broker does not inflate the gauge. General Information also charts avg messages/sec from `rate(iotgw_decrypt_messages_total)`.
 
 ### Cert lifecycle
 
 - Fakes: monitoring app **auto-renews and feeds** mTLS (`FakeCertRenewer`); no operator cert zip / fingerprint / Re-issue UI
-- Real sensors: one-time cert zip download + View → Re-issue cert
+- Real sensors: one-time cert zip download + View â†’ Re-issue cert
 - TLS attack toggles (`omit_client_cert`, `wrong_client_cert`) pause auto-feed until cleared
 - Disable renewer: `IOTGW_FAKE_CERT_RENEWER=0`
 
@@ -384,15 +384,15 @@ Netns/bridge/unit and some day-2 Mosquitto/Kafka file writes need sudo on the ga
 ### Metric series (high level)
 
 - Host: node_exporter-compat gauges from agent `/proc` scrape
-- Apps: `iotgw_app_up{app=…}`, CPU/mem where available; MQTT via TCP probe; Kafka may fall back to `iotgw_kafka_up`
+- Apps: `iotgw_app_up{app=â€¦}`, CPU/mem where available; MQTT via TCP probe; Kafka may fall back to `iotgw_kafka_up`
 - Activities: `iotgw_decrypt_*`, `iotgw_device_*`, denied/IDS; Kafka topic labels from registry + live `topics.json` SSH sync; Loki as fallback for some legacy queries
-- Envelope: `iotgw_envelope_messages_total{result=…}`
+- Envelope: `iotgw_envelope_messages_total{result=â€¦}`
 
-Chart frames stay visible with “No data in range” until scrapes fill in.
+Chart frames stay visible with â€œNo data in rangeâ€ until scrapes fill in.
 
 ### Applications order (Metric)
 
-Fixed canonical order: **Agent → MQTT → Decrypt → Shipper → Kafka**.
+Fixed canonical order: **Agent â†’ MQTT â†’ Decrypt â†’ Shipper â†’ Kafka**.
 
 ---
 

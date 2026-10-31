@@ -1,4 +1,4 @@
-"""Unit tests for Grafana TLS certs and base config render helpers."""
+﻿"""Unit tests for Grafana TLS certs and base config render helpers."""
 
 from __future__ import annotations
 
@@ -111,7 +111,7 @@ class EnsureGrafanaCertsTests(unittest.TestCase):
             key = load_pem_private_key(meta["key_file"].read_bytes(), password=None)
             self.assertIsInstance(key, rsa.RSAPrivateKey)
             self.assertEqual(key.key_size, 2048)
-            # Default validity_days=825 (± a few minutes of clock skew / not_before offset).
+            # Default validity_days=825 (Â± a few minutes of clock skew / not_before offset).
             expected = before + timedelta(days=825)
             delta = abs(meta["not_after"] - expected)
             self.assertLess(delta, timedelta(minutes=5))
@@ -212,12 +212,12 @@ class RenderGrafanaConfigTests(unittest.TestCase):
         self.assertIn("uid: iotgw-prometheus", yaml)
         self.assertIn("uid: iotgw-loki", yaml)
         self.assertIn("uid: iotgw-kafka-gw-1", yaml)
-        self.assertIn('bootstrapServers: "192.168.1.50:9092"', yaml)
+        self.assertIn('bootstrapServers: "192.168.1.50:9094"', yaml)
         self.assertIn("type: hamedkarbasi93-kafka-datasource", yaml)
         self.assertIn('name: "Kafka (gw-1)"', yaml)
         suffix = hashlib.sha256(b"bad_chars!").hexdigest()[:8]
         self.assertIn(f"uid: iotgw-kafka-bad-chars-{suffix}", yaml)
-        self.assertIn('bootstrapServers: "10.0.0.2:9092"', yaml)
+        self.assertIn('bootstrapServers: "10.0.0.2:9094"', yaml)
         self.assertNotIn("iotgw-kafka-no-host", yaml)
         self.assertIn('securityProtocol: "PLAINTEXT"', yaml)
 
@@ -245,8 +245,8 @@ class RenderGrafanaConfigTests(unittest.TestCase):
         self.assertIn(f"uid: {u1}", yaml)
         self.assertIn(f"uid: {u2}", yaml)
         self.assertNotIn("uid: iotgw-kafka-gw-1\n", yaml)
-        self.assertIn('bootstrapServers: "10.0.0.1:9092"', yaml)
-        self.assertIn('bootstrapServers: "10.0.0.2:9092"', yaml)
+        self.assertIn('bootstrapServers: "10.0.0.1:9094"', yaml)
+        self.assertIn('bootstrapServers: "10.0.0.2:9094"', yaml)
         # Injected sibling keys / breakout hosts must not appear.
         self.assertNotIn("url: http://evil", yaml)
         self.assertNotIn("name: Evil", yaml)
@@ -276,7 +276,7 @@ class RenderGrafanaConfigTests(unittest.TestCase):
             self.assertIn("iotgw-prometheus", ds)
             self.assertIn("iotgw-loki", ds)
             self.assertIn("iotgw-kafka-gateway", ds)
-            self.assertIn("172.20.10.2:9092", ds)
+            self.assertIn("172.20.10.2:9094", ds)
 
 
 class SyncGrafanaDatasourcesTests(unittest.TestCase):
@@ -320,7 +320,7 @@ class SyncGrafanaDatasourcesTests(unittest.TestCase):
             self.assertTrue(ds_path.is_file())
             text = ds_path.read_text(encoding="utf-8")
             self.assertIn("iotgw-kafka-gateway", text)
-            self.assertIn("192.168.1.50:9092", text)
+            self.assertIn("192.168.1.50:9094", text)
 
     def test_sync_skips_reload_when_grafana_down(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

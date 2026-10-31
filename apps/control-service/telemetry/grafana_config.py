@@ -181,7 +181,8 @@ def render_datasources_yaml(*, gateways: list[dict[str, Any]] | None = None) -> 
             continue
         uid = f"iotgw-kafka-{_sanitize_uid_part(gid)}"
         name = _yaml_double_quoted(f"Kafka ({gid})")
-        bootstrap = _yaml_double_quoted(f"{host}:9092")
+        # Match provisioner KAFKA_EXTERNAL_PORT (LAN listener; not agent :9092).
+        bootstrap = _yaml_double_quoted(f"{host}:9094")
         parts.append(
             f"  - name: {name}\n"
             f"    type: {_KAFKA_PLUGIN_ID}\n"

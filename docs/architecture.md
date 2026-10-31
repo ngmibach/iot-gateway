@@ -1,6 +1,6 @@
-# Architecture
+﻿# Architecture
 
-Overview of IoT Gateway Monitor and the gateway agent. Diagrams only — paths, APIs, flags, and formulas live in [`details.md`](details.md). Operator click-paths live in [`UI.md`](UI.md).
+Overview of IoT Gateway Monitor and the gateway agent. Diagrams only â€” paths, APIs, flags, and formulas live in [`details.md`](details.md). Operator click-paths live in [`UI.md`](UI.md).
 
 ## 1. System top level
 
@@ -8,15 +8,15 @@ The system has two applications: the **monitoring app** on the operator PC, and 
 
 ```mermaid
 flowchart LR
-  subgraph PC["Operator PC — Monitoring app"]
-    UI["Desktop UI\nWizard · Gateways · Monitoring · Settings"]
+  subgraph PC["Operator PC â€” Monitoring app"]
+    UI["Desktop UI\nWizard Â· Gateways Â· Monitoring Â· Settings"]
     CS["Control service"]
     PROM["Prometheus"]
     LOKI["Loki"]
     GRAF["Grafana"]
   end
 
-  subgraph GW["Gateway device — Agent"]
+  subgraph GW["Gateway device â€” Agent"]
     AGENT["iot-gateway-agent"]
     MQTT["Mosquitto MQTTS :8883"]
     KAFKA["Kafka KRaft"]
@@ -48,7 +48,7 @@ flowchart TB
     WIZ["Wizard / UI :9138"]
     CTRL["Control service :9137"]
     REG["registry.sqlite\ngateways + devices"]
-    KEY["OS keyring\nCA · sudo · admin PIN"]
+    KEY["OS keyring\nCA Â· sudo Â· admin PIN"]
     RENEW["FakeCertRenewer\nfakes only"]
   end
 
@@ -84,9 +84,9 @@ flowchart TB
     MOSQ["Mosquitto\nMQTTS :8883 mTLS"]
     DEC["Decrypt worker"]
     LOG["sensor_data.log"]
-    KAFKA["iotgw-kafka\nINTERNAL :9092 / EXTERNAL :9092"]
+    KAFKA["iotgw-kafka\nINTERNAL :9092 / EXTERNAL :9094"]
     SHIP["Loki shipper"]
-    MET["/metrics · /v1/health\n:9139"]
+    MET["/metrics Â· /v1/health\n:9139"]
     FAKE["iotgw-fake bridge\n10.255.0.0/24\niotgw-fake@ units"]
   end
 
@@ -100,7 +100,7 @@ flowchart TB
   MET -->|"Prometheus scrape"| PROM["Operator Prometheus"]
 ```
 
-Canonical application order in Metric UI: **Agent → MQTT → Decrypt → Shipper → Kafka**.
+Canonical application order in Metric UI: **Agent â†’ MQTT â†’ Decrypt â†’ Shipper â†’ Kafka**.
 
 ## 4. Verification and storage path
 
@@ -154,10 +154,10 @@ flowchart LR
   PAIR --> UNWRAP
   UNWRAP --> GCM
   GCM --> SCHEMA
-  SCHEMA --> OUT["sensor_data.log · Kafka · Loki"]
+  SCHEMA --> OUT["sensor_data.log Â· Kafka Â· Loki"]
 ```
 
-Profiles: `v1-psk` (registration wrap secret) and `v1-ecdhe` (ephemeral ECDH + daily DMEC). Legacy Fernet remains accepted until `IOTGW_ENVELOPE_REQUIRE=1`. Full reference: [`details.md` — Encryption](details.md#encryption-envelope-v1).
+Profiles: `v1-psk` (registration wrap secret) and `v1-ecdhe` (ephemeral ECDH + daily DMEC). Legacy Fernet remains accepted until `IOTGW_ENVELOPE_REQUIRE=1`. Full reference: [`details.md` â€” Encryption](details.md#encryption-envelope-v1).
 
 ## 6. Monitoring operations
 
@@ -167,8 +167,8 @@ Profiles: `v1-psk` (registration wrap secret) and `v1-ecdhe` (ephemeral ECDH + d
 flowchart LR
   A["Find gateway\nSSH scan :22"] --> B["Select host"]
   B --> C["Install gateway"]
-  C --> D["Pin host key · SSH key\nfirewall if needed"]
-  D --> E["Provision agent\nMosquitto · Kafka · CA"]
+  C --> D["Pin host key Â· SSH key\nfirewall if needed"]
+  D --> E["Provision agent\nMosquitto Â· Kafka Â· CA"]
   E --> F["Upsert registry.sqlite"]
   F --> G["Prometheus scrape target\n:9139"]
 ```
@@ -183,8 +183,8 @@ flowchart TB
   PROM["Prometheus"]
   LOKI["Loki"]
   API["Control service\nsummaries APIs"]
-  METRIC["UI · Gateway Metric"]
-  ACT["UI · Gateway Activities"]
+  METRIC["UI Â· Gateway Metric"]
+  ACT["UI Â· Gateway Activities"]
 
   AGENT -->|"/metrics"| PROM
   AGENT -->|"shipper"| LOKI
@@ -194,17 +194,17 @@ flowchart TB
   API --> ACT
 ```
 
-- **Metric** — host health (CPU, RAM, FS, net, temp) and application up/activity for Agent, MQTT, Decrypt, Shipper, Kafka.
-- **Activities** — gateway-wide and per-sensor message counters, Kafka topic metadata, transmission delay, Fake/Real type.
+- **Metric** â€” host health (CPU, RAM, FS, net, temp) and application up/activity for Agent, MQTT, Decrypt, Shipper, Kafka.
+- **Activities** â€” gateway-wide and per-sensor message counters, Kafka topic metadata, transmission delay, Fake/Real type.
 
 ### 6.3 Spawn and register fake sensors
 
 ```mermaid
 flowchart LR
   C["Create fake sensor"] --> N["Allocate IP on\niotgw-fake bridge"]
-  N --> R["Register like real\nMQTT · cert · Kafka"]
+  N --> R["Register like real\nMQTT Â· cert Â· Kafka"]
   R --> U["iotgw-fake@ unit\ncreated stopped"]
-  U --> S["Simulate · Start"]
+  U --> S["Simulate Â· Start"]
   S --> P["Publish MQTTS\nenvelope traffic"]
   RENEW["FakeCertRenewer"] -.->|"auto-feed mTLS"| U
 ```
