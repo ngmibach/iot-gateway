@@ -254,7 +254,15 @@ def _atomic_replace_dir(staging: Path, dest: Path, old: Path) -> None:
     """Replace ``dest`` with ``staging``; roll back on rename failure."""
     _rmtree_if_exists(old)
     if dest.exists():
-        dest.rename(old)
+        try:
+            dest.rename(old)
+        except OSError as exc:
+            # WinError 32: Grafana/plugin still locking the tree.
+            raise BinaryFetchError(
+                f"cannot replace {dest.name}: {exc}. "
+                "Stop Grafana (and any gpx_grafana* plugin helpers) and retry "
+                "Install monitoring."
+            ) from exc
         try:
             staging.rename(dest)
         except OSError:

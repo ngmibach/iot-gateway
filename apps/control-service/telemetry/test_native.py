@@ -201,23 +201,27 @@ class NativeHelperTests(unittest.TestCase):
                         "telemetry.native._best_effort_stop_listeners"
                     ) as kill_port:
                         with mock.patch(
-                            "telemetry.native.ensure_telemetry_binaries",
-                            return_value={
-                                "loki": Path("l"),
-                                "prometheus": Path("p"),
-                            },
-                        ):
+                            "telemetry.native._best_effort_stop_grafana_tree_holders"
+                        ) as kill_tree:
                             with mock.patch(
-                                "telemetry.native.ensure_grafana_tree",
-                                return_value=Path(tmp) / "grafana",
-                            ) as ensure_tree:
+                                "telemetry.native.ensure_telemetry_binaries",
+                                return_value={
+                                    "loki": Path("l"),
+                                    "prometheus": Path("p"),
+                                },
+                            ):
                                 with mock.patch(
-                                    "telemetry.native.ensure_grafana_kafka_plugin",
-                                    return_value=Path(tmp) / "plugins",
-                                ):
-                                    mgr.ensure_binaries(force=True)
+                                    "telemetry.native.ensure_grafana_tree",
+                                    return_value=Path(tmp) / "grafana",
+                                ) as ensure_tree:
+                                    with mock.patch(
+                                        "telemetry.native.ensure_grafana_kafka_plugin",
+                                        return_value=Path(tmp) / "plugins",
+                                    ):
+                                        mgr.ensure_binaries(force=True)
             stop_g.assert_called_once()
             kill_port.assert_called_once_with(nv._GRAFANA_PORT)
+            kill_tree.assert_called_once_with(mgr.grafana_home)
             ensure_tree.assert_called_once()
             self.assertTrue(ensure_tree.call_args.kwargs.get("force"))
 
