@@ -33,6 +33,14 @@
       .replace(/"/g, "&quot;");
   }
 
+  function needsSudoPrompt() {
+    if (typeof targets.needs_sudo_prompt === "boolean") {
+      return targets.needs_sudo_prompt;
+    }
+    const list = targets.gateways || [];
+    return list.some((g) => g.host && !g.sudo_present);
+  }
+
   function updateSummary() {
     const list = targets.gateways || [];
     const item = $("rm-gateways-item");
@@ -49,10 +57,9 @@
     } else {
       item.hidden = true;
     }
-    $("sudo-wrap").classList.toggle(
-      "hidden",
-      !(list.length > 0 || targets.provisioned)
-    );
+    // Hide the password field when every SSH-removable gateway already has
+    // sudo saved in the keyring; prompt only for gateways that are missing it.
+    $("sudo-wrap").classList.toggle("hidden", !needsSudoPrompt());
   }
 
   async function refreshTargets() {
@@ -62,16 +69,24 @@
   }
 
   async function confirmRemove() {
+    const typed = ($("rm-sudo").value || "").trim();
+    if (needsSudoPrompt() && !typed) {
+      $("rm-msg").innerHTML =
+        `<div class="err">Gateway sudo password required for gateways without a saved password. Save it under Gateways → Settings, or enter it here.</div>`;
+      return;
+    }
     $("rm-msg").textContent = "Removing…";
     $("btn-rm-confirm").disabled = true;
     try {
+      const body = {
+        gateway: true,
+        monitoring: true,
+      };
+      // Only send a typed override; backend uses each gateway's keyring sudo.
+      if (typed) body.sudo_password = typed;
       const data = await api("/api/wizard/uninstall", {
         method: "POST",
-        body: JSON.stringify({
-          gateway: true,
-          monitoring: true,
-          sudo_password: $("rm-sudo").value || undefined,
-        }),
+        body: JSON.stringify(body),
       });
       const notes = (data.notes || []).join(" · ");
       $("rm-msg").innerHTML = `<div class="okmsg">${escapeHtml(

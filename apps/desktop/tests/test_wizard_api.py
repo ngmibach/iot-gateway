@@ -83,6 +83,8 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("monitoring panel", settings_html.lower())
         self.assertIn("Loki, Prometheus, and Grafana", settings_html)
         self.assertIn("Local app data", settings_html)
+        self.assertIn("rm-sudo", settings_html)
+        self.assertIn("saved sudo password", settings_html)
         self.assertNotIn("Gateway only", settings_html)
         self.assertNotIn("Gateways → Clean up", settings_html)
         self.assertIn("settings.js", settings_html)
@@ -281,6 +283,9 @@ class WizardApiTests(unittest.TestCase):
             sjs = resp.read().decode("utf-8")
         self.assertIn("/api/wizard/uninstall", sjs)
         self.assertIn("monitoring: true", sjs)
+        self.assertIn("needs_sudo_prompt", sjs)
+        self.assertIn("sudo_present", sjs)
+        self.assertIn("needsSudoPrompt", sjs)
         with urllib.request.urlopen(self.base + "/gateways.js", timeout=5) as resp:
             gjs = resp.read().decode("utf-8")
         self.assertIn("/api/wizard/provision", gjs)
@@ -942,6 +947,79 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn("gw-a", ids)
         self.assertIn("gw-b", ids)
         self.assertIn("monitoring_hint", data)
+        self.assertIn("needs_sudo_prompt", data)
+        for g in data.get("gateways") or []:
+            self.assertIn("sudo_present", g)
+            self.assertFalse(g["sudo_present"])
+        self.assertTrue(data["needs_sudo_prompt"])
+
+        from shell import keyring_store
+
+        with mock.patch.object(keyring_store, "_keyring_usable", return_value=False):
+            keyring_store.set_secret("gw-a", "sudo-a", kind="sudo")
+            keyring_store.set_secret("gw-b", "sudo-b", kind="sudo")
+            data2 = self._get("/api/wizard/uninstall/targets")
+        by_id = {g["id"]: g for g in data2.get("gateways") or []}
+        self.assertTrue(by_id["gw-a"]["sudo_present"])
+        self.assertTrue(by_id["gw-b"]["sudo_present"])
+        self.assertFalse(data2["needs_sudo_prompt"])
+
+    def test_uninstall_monitoring_uses_per_gateway_keyring_sudo(self) -> None:
+        """Monitoring wipe uses each gateway's saved sudo; no body password needed."""
+        from pathlib import Path
+        from unittest import mock
+
+        from registry.registry import Registry
+        from shell import keyring_store, uninstall as uninstall_mod
+        from shell.paths import ensure_data_dir
+
+        reg_path = ensure_data_dir() / "registry.sqlite"
+        reg = Registry(str(reg_path))
+        try:
+            reg.upsert_gateway(
+                "gw-a",
+                host="192.168.1.10",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="aa",
+            )
+            reg.upsert_gateway(
+                "gw-b",
+                host="192.168.1.11",
+                ssh_user="ubuntu",
+                install_root="/opt/iot-gateway-agent",
+                fingerprint="bb",
+            )
+        finally:
+            reg.close()
+
+        seen: list[tuple[str, str]] = []
+
+        def _fake_ssh(**kwargs):
+            seen.append((kwargs["gateway_id"], kwargs["sudo_password"]))
+            return ["stopped"]
+
+        with mock.patch.object(keyring_store, "_keyring_usable", return_value=False):
+            keyring_store.set_secret("gw-a", "sudo-a", kind="sudo")
+            keyring_store.set_secret("gw-b", "sudo-b", kind="sudo")
+            with mock.patch.object(
+                uninstall_mod, "uninstall_gateway_over_ssh", side_effect=_fake_ssh
+            ):
+                with mock.patch.object(uninstall_mod, "clear_local_secrets"):
+                    out = uninstall_mod.run_uninstall(
+                        gateway=False,
+                        monitoring=True,
+                        sudo_password="",
+                        stop_telemetry=lambda: None,
+                        stop_services=lambda: None,
+                        telemetry_uninstall=lambda: {
+                            "ok": True,
+                            "root": str(Path(self._td.name) / "telemetry"),
+                            "errors": [],
+                        },
+                    )
+        self.assertTrue(out.get("ok"))
+        self.assertEqual(sorted(seen), [("gw-a", "sudo-a"), ("gw-b", "sudo-b")])
 
     def test_uninstall_monitoring_removes_all_registry_gateways(self) -> None:
         from pathlib import Path
