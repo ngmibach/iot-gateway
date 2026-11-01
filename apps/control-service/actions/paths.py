@@ -81,6 +81,16 @@ class GatewayPaths:
         return f"{self.data_dir}/fake"
 
     @property
+    def auto_prevent_policy(self) -> str:
+        """Per-device Auto prevent policy map (agent-enforced)."""
+        return f"{self.data_dir}/auto_prevent.json"
+
+    @property
+    def auto_prevent_state(self) -> str:
+        """Agent quarantine state written after firewall DROP trips."""
+        return f"{self.data_dir}/auto_prevent_state.json"
+
+    @property
     def fake_ip_map(self) -> str:
         """Allocator state: device_id → bridge IP / veth names."""
         return f"{self.data_dir}/fake/ip-map.json"

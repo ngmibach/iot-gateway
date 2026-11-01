@@ -297,7 +297,117 @@
     $("btn-ctl-unblock").classList.toggle("hidden", !blocked);
     $("ctl-purge-confirm").checked = false;
     $("btn-ctl-purge").disabled = true;
+    fillAutoPreventForm(device);
     if ($("ctl-msg")) $("ctl-msg").textContent = "";
+  }
+
+  function fillAutoPreventForm(device) {
+    const ap = (device && device.auto_prevent) || {};
+    const enabled = !!ap.enabled;
+    const limit = Number(ap.limit) > 0 ? Number(ap.limit) : 10;
+    const windowS = Number(ap.window_s) > 0 ? Number(ap.window_s) : 300;
+    const windowMin = Math.max(1, Math.round(windowS / 60));
+    const quarantined = !!(ap.tripped_at || ap.quarantine_ip);
+    if ($("ctl-ap-enabled")) $("ctl-ap-enabled").checked = enabled;
+    if ($("ctl-ap-limit")) $("ctl-ap-limit").value = String(limit);
+    if ($("ctl-ap-window")) $("ctl-ap-window").value = String(windowMin);
+    const status = $("ctl-ap-status");
+    const detail = $("ctl-ap-status-detail");
+    if (status) {
+      if (quarantined) {
+        status.textContent = "Quarantined";
+        status.className = "badge bad";
+      } else if (enabled) {
+        status.textContent = "Armed";
+        status.className = "badge warn";
+      } else {
+        status.textContent = "Off";
+        status.className = "badge";
+      }
+    }
+    if (detail) {
+      if (quarantined) {
+        const ip = ap.quarantine_ip || device.ip || "—";
+        const when = ap.tripped_at
+          ? formatEpoch(ap.tripped_at)
+          : "";
+        detail.textContent = when
+          ? `(IP ${ip}, since ${when})`
+          : `(IP ${ip})`;
+      } else if (enabled) {
+        detail.textContent = `(${limit} invalid / ${windowMin} min)`;
+      } else {
+        detail.textContent = "";
+      }
+    }
+    if ($("btn-ctl-ap-lift")) {
+      $("btn-ctl-ap-lift").classList.toggle("hidden", !quarantined);
+    }
+  }
+
+  async function controlSaveAutoPrevent() {
+    const gid = requireGateway();
+    const device_id = ($("ctl-device").value || "").trim();
+    if (!device_id) throw new Error("Select a sensor first.");
+    const enabled = !!( $("ctl-ap-enabled") && $("ctl-ap-enabled").checked );
+    const limit = Number(($("ctl-ap-limit") && $("ctl-ap-limit").value) || 10);
+    const windowMin = Number(
+      ($("ctl-ap-window") && $("ctl-ap-window").value) || 5
+    );
+    if (!Number.isFinite(limit) || limit < 1) {
+      throw new Error("Invalid message limit must be at least 1.");
+    }
+    if (!Number.isFinite(windowMin) || windowMin < 1) {
+      throw new Error("Window must be at least 1 minute.");
+    }
+    $("ctl-msg").textContent = "Saving auto prevent…";
+    if ($("btn-ctl-ap-save")) $("btn-ctl-ap-save").disabled = true;
+    try {
+      const data = await control(
+        "PUT",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/control/auto-prevent`,
+        {
+          body: {
+            enabled,
+            limit: Math.floor(limit),
+            window_minutes: Math.floor(windowMin),
+          },
+        }
+      );
+      $("ctl-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || "Auto prevent policy saved."
+      )}</div>`;
+      await refreshControlDevices();
+      if ($("ctl-device")) $("ctl-device").value = device_id;
+      const still = (controlDevices || []).find((d) => d.id === device_id);
+      if (still) fillControlForm(still);
+    } finally {
+      if ($("btn-ctl-ap-save")) $("btn-ctl-ap-save").disabled = false;
+    }
+  }
+
+  async function controlLiftAutoPrevent() {
+    const gid = requireGateway();
+    const device_id = ($("ctl-device").value || "").trim();
+    if (!device_id) throw new Error("Select a sensor first.");
+    $("ctl-msg").textContent = "Lifting quarantine…";
+    if ($("btn-ctl-ap-lift")) $("btn-ctl-ap-lift").disabled = true;
+    try {
+      const data = await control(
+        "POST",
+        `/api/v1/gateways/${encodeURIComponent(gid)}/devices/${encodeURIComponent(device_id)}/control/auto-prevent/lift`,
+        { body: {} }
+      );
+      $("ctl-msg").innerHTML = `<div class="okmsg">${escapeHtml(
+        data.message || "Quarantine lifted."
+      )}</div>`;
+      await refreshControlDevices();
+      if ($("ctl-device")) $("ctl-device").value = device_id;
+      const still = (controlDevices || []).find((d) => d.id === device_id);
+      if (still) fillControlForm(still);
+    } finally {
+      if ($("btn-ctl-ap-lift")) $("btn-ctl-ap-lift").disabled = false;
+    }
   }
 
   async function refreshControlDevices() {
@@ -1570,6 +1680,16 @@
     if ($("btn-ctl-block")) {
       $("btn-ctl-block").addEventListener("click", () =>
         controlBlockUnblock("block").catch(showErr)
+      );
+    }
+    if ($("btn-ctl-ap-save")) {
+      $("btn-ctl-ap-save").addEventListener("click", () =>
+        controlSaveAutoPrevent().catch(showErr)
+      );
+    }
+    if ($("btn-ctl-ap-lift")) {
+      $("btn-ctl-ap-lift").addEventListener("click", () =>
+        controlLiftAutoPrevent().catch(showErr)
       );
     }
     if ($("btn-ctl-unblock")) {

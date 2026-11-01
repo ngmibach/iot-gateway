@@ -24,6 +24,7 @@ from actions.fake_sensors import (
     update_fake_config,
 )
 from actions.kafka_capacity import kafka_topic_name
+from actions.auto_prevent import lift_device_quarantine, push_device_policy
 from actions.device_control import (
     block_device_publish,
     purge_device_kafka,
@@ -50,12 +51,16 @@ from .deps import (
     require_token,
 )
 from .device_meta import (
+    auto_prevent_block,
     is_fake_meta,
     is_publish_blocked_meta,
     merge_device_meta,
+    normalize_auto_prevent,
     parse_meta,
 )
 from .schemas import (
+    AutoPreventOut,
+    AutoPreventRequest,
     CreateFakeDeviceRequest,
     DeleteDeviceRequest,
     DeviceControlRequest,
@@ -234,6 +239,26 @@ def _feed_and_record(
     return fed, device
 
 
+def _auto_prevent_out(meta: dict[str, Any]) -> AutoPreventOut | None:
+    block = auto_prevent_block(meta)
+    if not block:
+        return None
+    norm = normalize_auto_prevent(block)
+    tripped = norm.get("tripped_at")
+    try:
+        tripped_i = int(tripped) if tripped is not None else None
+    except (TypeError, ValueError):
+        tripped_i = None
+    qip = norm.get("quarantine_ip")
+    return AutoPreventOut(
+        enabled=bool(norm.get("enabled")),
+        limit=int(norm.get("limit") or 10),
+        window_s=int(norm.get("window_s") or 300),
+        tripped_at=tripped_i,
+        quarantine_ip=str(qip).strip() if qip else None,
+    )
+
+
 def _device_out(row: dict[str, Any]) -> DeviceOut:
     meta = _meta_dict(row)
     kafka_topic = meta.get("kafka_topic")
@@ -254,6 +279,7 @@ def _device_out(row: dict[str, Any]) -> DeviceOut:
         is_fake=fake,
         fake=_fake_out(meta) if fake else None,
         publish_blocked=is_publish_blocked_meta(meta),
+        auto_prevent=_auto_prevent_out(meta),
     )
 
 
@@ -1648,6 +1674,144 @@ def control_unblock_publish(
         device=_device_out(device),
         status=result.status,
         message=result.message or "publish allowed",
+    )
+
+
+@router.put(
+    "/gateways/{gid}/devices/{device_id}/control/auto-prevent",
+    response_model=DeviceControlResponse,
+)
+def control_auto_prevent(
+    gid: str,
+    device_id: str,
+    body: AutoPreventRequest,
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DeviceControlResponse:
+    """Save Auto prevent policy and push it to the gateway agent."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    row = _require_device(registry, gid, device_id)
+    window_s = body.resolved_window_s()
+    sudo_password = body.sudo_password
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = push_device_policy(
+                ssh,
+                user_id=device_id,
+                enabled=bool(body.enabled),
+                limit=int(body.limit),
+                window_s=window_s,
+                install_root=gw["install_root"],
+                sudo_password=sudo_password,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/auto-prevent failed: {exc}",
+        ) from exc
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.message or "auto-prevent policy push failed",
+        )
+
+    new_meta = merge_device_meta(
+        _meta_dict(row),
+        auto_prevent={
+            "enabled": bool(body.enabled),
+            "limit": int(body.limit),
+            "window_s": window_s,
+            # Saving policy does not clear an active quarantine; use lift.
+        },
+    )
+    device = registry.upsert_device(gid, device_id, meta_json=new_meta)
+    registry.audit(
+        "control_auto_prevent",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={
+            "enabled": bool(body.enabled),
+            "limit": int(body.limit),
+            "window_s": window_s,
+        },
+    )
+    return DeviceControlResponse(
+        device=_device_out(device),
+        status=result.status,
+        message=result.message or "Auto prevent policy saved.",
+    )
+
+
+@router.post(
+    "/gateways/{gid}/devices/{device_id}/control/auto-prevent/lift",
+    response_model=DeviceControlResponse,
+)
+def control_auto_prevent_lift(
+    gid: str,
+    device_id: str,
+    body: Optional[DeviceControlRequest] = Body(default=None),
+    state: AppState = Depends(get_state),
+    registry: Registry = Depends(get_registry),
+) -> DeviceControlResponse:
+    """Lift firewall quarantine for a device (does not disable Auto prevent)."""
+    gw = require_gateway(registry, gid)
+    try:
+        device_id = validate_user_id(device_id)
+    except ValueError as exc:
+        raise http_400(exc) from exc
+    row = _require_device(registry, gid, device_id)
+    meta = _meta_dict(row)
+    ap = auto_prevent_block(meta) or {}
+    qip = str(ap.get("quarantine_ip") or row.get("ip") or "").strip() or None
+    sudo_password = body.sudo_password if body is not None else None
+    try:
+        with open_ssh_for(state, gw) as ssh:
+            result = lift_device_quarantine(
+                ssh,
+                user_id=device_id,
+                quarantine_ip=qip,
+                install_root=gw["install_root"],
+                sudo_password=sudo_password,
+            )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"SSH/auto-prevent lift failed: {exc}",
+        ) from exc
+    if not result.ok:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=result.message or "auto-prevent lift failed",
+        )
+
+    new_meta = merge_device_meta(
+        meta,
+        auto_prevent={
+            "enabled": bool(ap.get("enabled", False)),
+            "limit": int(ap.get("limit") or 10),
+            "window_s": int(ap.get("window_s") or 300),
+            "clear_trip": True,
+        },
+    )
+    device = registry.upsert_device(gid, device_id, meta_json=new_meta)
+    registry.audit(
+        "control_auto_prevent_lift",
+        gateway_id=gid,
+        device_id=device_id,
+        detail={"ip": qip},
+    )
+    return DeviceControlResponse(
+        device=_device_out(device),
+        status=result.status,
+        message=result.message or "Auto prevent quarantine lifted.",
     )
 
 

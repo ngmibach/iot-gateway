@@ -9,7 +9,7 @@ import time
 from collections import deque
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -38,10 +38,12 @@ class DenyLog:
         path: Path | str | None = None,
         max_events: int = DEFAULT_MAX_EVENTS,
         gateway_id: str = "",
+        on_record: Callable[[DenyEvent], None] | None = None,
     ) -> None:
         self.path = Path(path) if path else None
         self.max_events = max(50, int(max_events))
         self.gateway_id = (gateway_id or "").strip()
+        self.on_record = on_record
         self._events: deque[DenyEvent] = deque(maxlen=self.max_events)
         self._lock = threading.Lock()
         self._ip_by_device: dict[str, str] = {}
@@ -126,6 +128,11 @@ class DenyLog:
         with self._lock:
             self._events.append(event)
             self._append_jsonl(event)
+        if self.on_record is not None and event.reason != "auto_prevent":
+            try:
+                self.on_record(event)
+            except Exception as exc:  # noqa: BLE001
+                logger.debug("deny_log on_record failed: %s", exc)
         return event
 
     def _append_jsonl(self, event: DenyEvent) -> None:

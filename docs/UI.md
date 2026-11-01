@@ -55,13 +55,14 @@ Empty charts show **No data in range** until Prometheus has scrapes from the age
 Message flow and per-sensor Kafka activity.
 
 1. Select a **gateway** (name only in the dropdown).
-2. **General** — Total msgs, Msgs/sec, Denied; **Avg messages / sec** chart; transmission delay (Latest + Total, MQTT receive → Kafka produce) with delay chart; **Invalid messages** scrollable table (arrival, reason, IP, sensor, gateway) for TLS/ACL/decrypt/schema denials.
-3. **Connected sensors** — table: Device, **Type** (Fake/Real), IP, Kafka topic, Retention, Monitor.
-4. **Sensor detail**
+2. **Alarm banner** (top of Activities) — shows when there are new invalid messages or an Auto prevent quarantine; dismissible. Left-nav **Gateway Activities** turns red with a badge so the alarm is visible from Metric and other pages.
+3. **General** — Total msgs, Msgs/sec, Denied; **Avg messages / sec** chart; transmission delay (Latest + Total, MQTT receive → Kafka produce) with delay chart; **Invalid messages** scrollable table (arrival, reason, IP, sensor, gateway) for TLS/ACL/decrypt/schema denials.
+4. **Connected sensors** — table: Device, **Type** (Fake/Real), IP, Kafka topic, Retention, Monitor.
+5. **Sensor detail**
    - One sensor → detail panel under the table
    - Several sensors → horizontal name tabs (with Fake/Real badge)
    - Each panel: counters, Kafka topic chart, delay chart, per-sensor **Invalid messages** table
-5. **Denied** counts ACL rejects, MQTTS handshake failures (missing/wrong client cert), and decrypt/schema failures. Fake Simulate attacks such as Wrong client certificate or Bad encryption increment Denied and appear in the invalid-message tables.
+6. **Denied** counts ACL rejects, MQTTS handshake failures (missing/wrong client cert), and decrypt/schema failures. Fake Simulate attacks such as Wrong client certificate or Bad encryption increment Denied and appear in the invalid-message tables.
 
 ### Control Plane
 
@@ -118,9 +119,10 @@ Operate on any registered sensor (fake or real). Permanent unregister stays on *
 |--------|--------|
 | **Block publish** | Removes Mosquitto write ACL for the sensor (keeps registration, certs, Kafka slot). Fake units are stopped. |
 | **Allow publish** | Restores write ACL from the registry topics. |
+| **Auto prevent** | Per-sensor toggle + invalid-message limit + window (minutes). When the gateway sees too many invalid messages from that sensor, it **firewall-DROPs the sensor IP** so traffic never reaches MQTT. Fake sensor units keep running (lab attacker). Status: Off / Armed / Quarantined. **Lift quarantine** removes the DROP. |
 | **Clear Kafka data** | Deletes and recreates the sensor Kafka topic (messages cleared; catalog/slot kept). Requires Kafka on the gateway and an explicit confirmation checkbox. |
 
-Publish state is shown as **Allowed** / **Blocked**. Block is reversible; Clear Kafka does not unregister the sensor.
+Publish state is shown as **Allowed** / **Blocked**. Block is reversible; Clear Kafka does not unregister the sensor. Auto prevent is enforced by the gateway agent from `auto_prevent.json` (update/reinstall the agent for the firewall helper).
 
 ### Grafana
 

@@ -467,6 +467,48 @@
           <button type="button" class="primary hidden" id="btn-ctl-unblock">Allow publish</button>
         </div>
 
+        <h3>Auto prevent</h3>
+        <p class="muted">
+          When this sensor exceeds the invalid-message limit, the gateway drops its IP at the
+          firewall so traffic never reaches MQTT. Test sensors keep running.
+        </p>
+        <div class="row">
+          <input type="checkbox" id="ctl-ap-enabled" />
+          <label for="ctl-ap-enabled" style="min-width:auto">
+            Enable auto prevent
+            <span class="field-help" tabindex="0" aria-label="What is Auto prevent?">?
+              <span class="field-help-tip">Gateway firewall quarantine after too many invalid messages in the time window.</span>
+            </span>
+          </label>
+        </div>
+        <div class="row">
+          <label for="ctl-ap-limit">
+            Invalid message limit
+            <span class="field-help" tabindex="0" aria-label="What is Invalid message limit?">?
+              <span class="field-help-tip">How many invalid messages from this sensor in the window before quarantine.</span>
+            </span>
+          </label>
+          <input id="ctl-ap-limit" type="number" min="1" max="100000" value="10" />
+        </div>
+        <div class="row">
+          <label for="ctl-ap-window">
+            Window (minutes)
+            <span class="field-help" tabindex="0" aria-label="What is Window?">?
+              <span class="field-help-tip">Sliding time window for the invalid-message count.</span>
+            </span>
+          </label>
+          <input id="ctl-ap-window" type="number" min="1" max="1440" value="5" />
+        </div>
+        <div class="row">
+          <label>Status</label>
+          <span id="ctl-ap-status" class="badge">Off</span>
+          <span class="muted" id="ctl-ap-status-detail"></span>
+        </div>
+        <div class="row view-actions">
+          <button type="button" class="primary" id="btn-ctl-ap-save">Save auto prevent</button>
+          <button type="button" class="secondary hidden" id="btn-ctl-ap-lift">Lift quarantine</button>
+        </div>
+
         <div class="row">
           <input type="checkbox" id="ctl-purge-confirm" />
           <label for="ctl-purge-confirm" style="min-width:auto">
@@ -476,7 +518,7 @@
         <div class="row view-actions">
           <button type="button" class="danger" id="btn-ctl-purge" disabled>Clear Kafka data</button>
         </div>
-        <p class="muted">Clear Kafka needs Kafka running on the gateway. Block uses Mosquitto ACL only.</p>
+        <p class="muted">Clear Kafka needs Kafka running on the gateway. Block uses Mosquitto ACL only. Auto prevent uses the gateway firewall.</p>
         <div id="ctl-msg"></div>
       </div>
     </section>

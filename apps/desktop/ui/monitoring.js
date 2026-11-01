@@ -14,6 +14,11 @@
   let lastTimeWindow = null;
   /** Per-chart zoom state: { values:[{t,v}], opts, window, sliced }. */
   const chartZoom = Object.create(null);
+  /** Activities alarm: dismissed watermark (arrival_ms) for this session. */
+  const ALARM_STORAGE_KEY = "iotgw.activities.alarmDismissedMs";
+  let alarmDismissedMs = Number(sessionStorage.getItem(ALARM_STORAGE_KEY) || 0) || 0;
+  let lastDeniedFingerprint = "";
+  let lastSeenDeniedMs = 0;
 
   function tabFromHash() {
     const h = (location.hash || "").replace(/^#/, "").toLowerCase();
@@ -748,24 +753,154 @@
       gcm: "GCM auth failed",
       legacy: "Legacy wrapper rejected",
       version: "Envelope version",
+      auto_prevent: "Auto prevent quarantine",
     };
     return map[r] || r.replace(/_/g, " ");
   }
 
   function fillDeniedTable(table, events) {
     if (!table) return;
-    const rows = (events || []).map((ev) => [
-      escapeHtml(formatArrivalMs(ev.arrival_ms)),
-      escapeHtml(reasonLabel(ev.reason)),
-      escapeHtml(ev.source_ip || "—"),
-      escapeHtml(ev.device_id || "—"),
-      escapeHtml(ev.gateway_id || "—"),
-    ]);
-    fillTable(
-      table,
-      ["Arrival", "Reason", "IP", "Sensor", "Gateway"],
-      rows
+    const thead = table.querySelector("thead");
+    const tbody = table.querySelector("tbody");
+    const headers = ["Arrival", "Reason", "IP", "Sensor", "Gateway"];
+    thead.innerHTML = `<tr>${headers.map((h) => `<th>${h}</th>`).join("")}</tr>`;
+    const list = events || [];
+    if (!list.length) {
+      tbody.innerHTML = `<tr><td colspan="${headers.length}" class="muted">No data</td></tr>`;
+      return;
+    }
+    tbody.innerHTML = list
+      .map((ev) => {
+        const ms = Number(ev.arrival_ms) || 0;
+        const isNew = ms > lastSeenDeniedMs;
+        const cells = [
+          escapeHtml(formatArrivalMs(ev.arrival_ms)),
+          escapeHtml(reasonLabel(ev.reason)),
+          escapeHtml(ev.source_ip || "—"),
+          escapeHtml(ev.device_id || "—"),
+          escapeHtml(ev.gateway_id || "—"),
+        ];
+        return `<tr class="${isNew ? "denied-row-new" : ""}">${cells
+          .map((c) => `<td>${c}</td>`)
+          .join("")}</tr>`;
+      })
+      .join("");
+  }
+
+  function deniedEventKey(ev) {
+    return [
+      ev.arrival_ms || 0,
+      ev.device_id || "",
+      ev.reason || "",
+      ev.source_ip || "",
+    ].join("|");
+  }
+
+  function updateActivitiesAlarm(data) {
+    const events = Array.isArray(data.denied_messages) ? data.denied_messages : [];
+    const quarantined = Array.isArray(data.auto_prevent_quarantined)
+      ? data.auto_prevent_quarantined
+      : [];
+    const newestMs = events.reduce(
+      (max, ev) => Math.max(max, Number(ev.arrival_ms) || 0),
+      0
     );
+    const undismissed = events.filter(
+      (ev) => (Number(ev.arrival_ms) || 0) > alarmDismissedMs
+    );
+    const hasQuarantine = quarantined.length > 0;
+    const active = undismissed.length > 0 || hasQuarantine;
+
+    const banner = $("activities-alarm-banner");
+    const body = $("activities-alarm-body");
+    const title = $("activities-alarm-title");
+    if (banner && body) {
+      if (!active) {
+        banner.classList.add("hidden");
+        body.textContent = "";
+      } else {
+        banner.classList.remove("hidden");
+        const parts = [];
+        if (undismissed.length) {
+          const latest = undismissed[0];
+          parts.push(
+            `Alarm: ${undismissed.length} invalid message${
+              undismissed.length === 1 ? "" : "s"
+            } since last dismiss. Latest: ${latest.device_id || "unknown"} — ${reasonLabel(
+              latest.reason
+            )}.`
+          );
+        }
+        quarantined.forEach((q) => {
+          parts.push(
+            `Auto prevent quarantined ${q.device_id || "sensor"}` +
+              (q.ip ? ` (${q.ip})` : "") +
+              " — further traffic dropped at the gateway firewall."
+          );
+        });
+        if (!parts.length && events.length) {
+          parts.push(
+            `Invalid messages in range: ${events.length}. Latest: ${
+              events[0].device_id || "unknown"
+            } — ${reasonLabel(events[0].reason)}.`
+          );
+        }
+        if (title) {
+          title.textContent = hasQuarantine
+            ? "Alarm: auto prevent quarantine"
+            : "Alarm: invalid sensor messages";
+        }
+        body.innerHTML = parts
+          .map((p) => `<div>${escapeHtml(p)}</div>`)
+          .join("");
+      }
+    }
+
+    const count = Math.max(undismissed.length, hasQuarantine ? quarantined.length : 0);
+    if (typeof window.iotgwSetNavAlarm === "function") {
+      window.iotgwSetNavAlarm("activities", {
+        active,
+        count: active ? count || 1 : 0,
+        title: active
+          ? "Invalid messages or auto-prevent quarantine"
+          : "",
+      });
+    }
+    try {
+      sessionStorage.setItem(
+        "iotgw.activities.alarmActive",
+        active ? "1" : "0"
+      );
+      sessionStorage.setItem(
+        "iotgw.activities.alarmCount",
+        String(active ? count || 1 : 0)
+      );
+    } catch (_e) {
+      /* ignore */
+    }
+
+    // Advance "seen" for row highlight after paint (secondary).
+    if (newestMs > lastSeenDeniedMs) {
+      // Keep previous watermark for this paint; bump after a tick.
+      const prev = lastSeenDeniedMs;
+      setTimeout(() => {
+        if (lastSeenDeniedMs === prev) lastSeenDeniedMs = newestMs;
+      }, 2500);
+    }
+    lastDeniedFingerprint = events.map(deniedEventKey).slice(0, 5).join(",");
+  }
+
+  function dismissActivitiesAlarm() {
+    alarmDismissedMs = Math.max(alarmDismissedMs, lastSeenDeniedMs, Date.now());
+    try {
+      sessionStorage.setItem(ALARM_STORAGE_KEY, String(alarmDismissedMs));
+    } catch (_e) {
+      /* ignore */
+    }
+    const banner = $("activities-alarm-banner");
+    if (banner) banner.classList.add("hidden");
+    // Re-fetch so quarantine-only alarms stay on the nav badge.
+    refresh().catch(console.error);
   }
 
   function buildTabs() {
@@ -987,6 +1122,7 @@
     );
     fillDeniedTable($("gw-denied"), data.denied_messages || []);
     renderSensorTabs(activitiesSensors);
+    updateActivitiesAlarm(data);
 
     $("gw-msg").textContent =
       `gateway=${data.gateway_id || gid || "—"} range=${data.range || range}`;
@@ -1109,6 +1245,16 @@
     return data;
   }
 
+  async function refreshActivitiesAlarmOnly() {
+    const range = $("range").value;
+    const gid = ($("gateway-id") && $("gateway-id").value) || "";
+    let path = `/api/v1/query/summaries/gateway?range=${encodeURIComponent(range)}`;
+    if (gid) path += `&gateway_id=${encodeURIComponent(gid)}`;
+    const data = await control(path);
+    updateActivitiesAlarm(data);
+    return data;
+  }
+
   async function refresh() {
     setStatusBadge("warn", "loading…");
     try {
@@ -1116,6 +1262,8 @@
       if (tab === "metric") {
         const data = await refreshRaspi();
         hostUp = data ? !!data.up : false;
+        // Keep Gateway Activities nav alarm fresh even on Metric.
+        refreshActivitiesAlarmOnly().catch(() => {});
       } else {
         await refreshGateway();
       }
@@ -1166,6 +1314,11 @@
       setStatusBadge("bad", "wrong origin");
     }
     $("btn-refresh").addEventListener("click", () => refresh().catch(console.error));
+    if ($("btn-dismiss-alarm")) {
+      $("btn-dismiss-alarm").addEventListener("click", () =>
+        dismissActivitiesAlarm()
+      );
+    }
     $("auto-refresh").addEventListener("change", scheduleAuto);
     $("range").addEventListener("change", () => refresh().catch(console.error));
     $("gateway-id").addEventListener("change", () => {

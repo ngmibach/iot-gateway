@@ -1408,7 +1408,11 @@ def _should_inject_sudo(method: str, path: str) -> bool:
         path.endswith("/control/block")
         or path.endswith("/control/unblock")
         or path.endswith("/control/purge-kafka")
+        or path.endswith("/control/auto-prevent/lift")
     ):
+        return True
+    # Auto prevent policy push writes gateway auto_prevent.json via sudo.
+    if method == "PUT" and path.endswith("/control/auto-prevent"):
         return True
     return False
 

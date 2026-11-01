@@ -169,6 +169,13 @@
 
     <section class="panel mon-panel hidden" data-tab="activities" id="tab-activities">
       <h2>Gateway Activities</h2>
+      <div id="activities-alarm-banner" class="note-box danger activities-alarm hidden" role="alert">
+        <div class="activities-alarm-head">
+          <strong id="activities-alarm-title">Alarm: invalid sensor messages</strong>
+          <button type="button" class="secondary" id="btn-dismiss-alarm">Dismiss</button>
+        </div>
+        <div id="activities-alarm-body" class="activities-alarm-body"></div>
+      </div>
 
       <h3>General information</h3>
       <div class="metrics" id="gw-metrics"></div>
