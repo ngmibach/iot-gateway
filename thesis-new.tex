@@ -1479,7 +1479,7 @@ port~9139.
     elab/.style={font=\small\sffamily\bfseries},
     lbl/.style={font=\scriptsize\sffamily, fill=white, inner sep=1pt}
 ]
-    % Edge: -1.8..1.8   Gateway: 3.2..9.8   Operator: 11.4..14.2
+    % Edge: -1.8..1.8   Gateway: 3.2..9.8   Operator: 11.0..14.6
     \fill[orange!12, rounded corners=3pt]
         (-1.8,-3.5) rectangle (1.8,3.5);
     \draw[dashed, thick, rounded corners=3pt]
@@ -1493,9 +1493,9 @@ port~9139.
     \node[elab] at (6.5,3.9) {Gateway device};
 
     \fill[blue!12, rounded corners=3pt]
-        (11.4,-3.5) rectangle (14.2,3.5);
+        (11.0,-3.9) rectangle (14.6,3.5);
     \draw[dashed, thick, rounded corners=3pt]
-        (11.4,-3.5) rectangle (14.2,3.5);
+        (11.0,-3.9) rectangle (14.6,3.5);
     \node[elab] at (12.8,3.9) {Operator PC};
 
     % ---- Edge publishers ----
@@ -1521,9 +1521,11 @@ port~9139.
     \node[box] (oprom) at (12.8,-2.5) {Operator Prometheus\\:9090};
 
     % ---- Shared MQTTS merge in the gap (paths overlap) ----
+    % Feeders have no arrow tips so nothing stops mid-gap;
+    % only the shared stem into Mosquitto is arrowed.
     \coordinate (merge) at (2.5, 2.2);
-    \draw[archflow] (real.east) -- (2.5,1.4) -- (merge);
-    \draw[archflow] (labs.east) -- (2.5,-1.2) -- (merge);
+    \draw[thick] (real.east) -- (2.5,1.4) -- (merge);
+    \draw[thick] (labs.east) -- (2.5,-1.2) -- (merge);
     \draw[archflow]
         (merge) -- node[lbl, above] {MQTTS} (mosq.west);
 
@@ -1541,7 +1543,7 @@ port~9139.
         node[lbl, above] {scrape} (met.east);
     % ship stays below scrape, then climbs outside Operator PC
     \draw[archflowsoft]
-        (ship.south) -- (5.0,-3.45) -- (14.55,-3.45) -- (14.55,1.0)
+        (ship.south) -- (5.0,-3.45) -- (14.95,-3.45) -- (14.95,1.0)
         -- node[lbl, right, pos=0.4] {ship logs} (oloki.east);
 \end{tikzpicture}%
 }

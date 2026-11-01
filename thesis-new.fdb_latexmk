@@ -1,6 +1,7 @@
 # Fdb version 4
-["pdflatex"] 1793524120.57414 "thesis-new.tex" "thesis-new.pdf" "thesis-new" 1793524123.43191 0
+["pdflatex"] 1793524387.5856 "/home/bach/workspace/iot-gateway/thesis-new.tex" "thesis-new.pdf" "thesis-new" 1793524390.54586 0
   "/etc/texmf/web2c/texmf.cnf" 1793510754.89611 475 c0e671620eb5563b2130f56340a5fde8 ""
+  "/home/bach/workspace/iot-gateway/thesis-new.tex" 1793524380.63422 73219 0db7b1e8afc17a94b39f7236df48b4f1 ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecbx1095.tfm" 1136768653 3584 21b378cca2e40816b0e6d74a4dc98f04 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecbx1200.tfm" 1136768653 3584 402da0b29eafbad07963b1224b222f18 ""
@@ -219,12 +220,12 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1793510792.73349 5472669 54eaf61a88b6b7896ebd0dac973cb29c ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1793510947 8215399 8cfb1104156a308f4958f26d107db1eb ""
   "assets/docs/VGU-Logo.png" 1793511466.70051 26702 94ddbec4bbfacb1b0278c82981e76943 ""
-  "thesis-new.aux" 1793524123.15261 17903 894393ec5097911a05b732f8e572ffd9 "pdflatex"
-  "thesis-new.lof" 1793524123.15661 1479 5f5966a96a58bf6300f0db1bb45bee24 "pdflatex"
-  "thesis-new.lot" 1793524123.16061 917 fa138af20fb8a921dd791160be07ab6c "pdflatex"
-  "thesis-new.out" 1793524123.15661 13089 28880b2e3d2d4ef0e1fbc60efcbe2503 "pdflatex"
-  "thesis-new.tex" 1793524109.44861 73112 4d458feb776182ccbe6e4f74a5e16853 ""
-  "thesis-new.toc" 1793524123.15661 6340 8bb3862dd7caef7b685936d493303818 "pdflatex"
+  "thesis-new.aux" 1793524390.27435 17903 894393ec5097911a05b732f8e572ffd9 "pdflatex"
+  "thesis-new.lof" 1793524390.28235 1479 5f5966a96a58bf6300f0db1bb45bee24 "pdflatex"
+  "thesis-new.lot" 1793524390.28235 917 fa138af20fb8a921dd791160be07ab6c "pdflatex"
+  "thesis-new.out" 1793524390.27835 13089 28880b2e3d2d4ef0e1fbc60efcbe2503 "pdflatex"
+  "thesis-new.tex" 1793524380.63422 73219 0db7b1e8afc17a94b39f7236df48b4f1 ""
+  "thesis-new.toc" 1793524390.28235 6340 8bb3862dd7caef7b685936d493303818 "pdflatex"
   (generated)
   "thesis-new.aux"
   "thesis-new.lof"
