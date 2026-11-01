@@ -6,11 +6,25 @@
 \contentsline {table}{\numberline {3.1}{\ignorespaces Functional requirements for IoT-SecureGate.}}{9}{table.3.1}%
 \contentsline {table}{\numberline {3.2}{\ignorespaces Non-functional requirements for IoT-SecureGate.}}{11}{table.3.2}%
 \addvspace {10\p@ }
-\contentsline {table}{\numberline {4.1}{\ignorespaces Protection layers on the gateway inbound path (overview).}}{19}{table.caption.19}%
+\contentsline {table}{\numberline {4.1}{\ignorespaces Protection layers on the gateway inbound path (overview).}}{20}{table.caption.19}%
 \contentsline {table}{\numberline {4.2}{\ignorespaces Operator PC ports for the monitoring application.}}{21}{table.caption.20}%
 \contentsline {table}{\numberline {4.3}{\ignorespaces Gateway device ports.}}{21}{table.caption.21}%
 \addvspace {10\p@ }
+\contentsline {table}{\numberline {5.1}{\ignorespaces The work the control service divides itself into, and the decision each part owns.}}{26}{table.caption.26}%
+\contentsline {table}{\numberline {5.2}{\ignorespaces State the monitoring application keeps.}}{27}{table.caption.27}%
+\contentsline {table}{\numberline {5.3}{\ignorespaces The stages of installing a gateway.}}{30}{table.caption.29}%
+\contentsline {table}{\numberline {5.4}{\ignorespaces The four control actions and how far each one reaches.}}{37}{table.caption.37}%
 \addvspace {10\p@ }
+\contentsline {table}{\numberline {6.1}{\ignorespaces State the gateway keeps, what each kind decides, and who establishes it.}}{44}{table.caption.40}%
+\contentsline {table}{\numberline {6.2}{\ignorespaces The gates on the inbound path, in the order they apply.}}{49}{table.caption.41}%
+\contentsline {table}{\numberline {6.3}{\ignorespaces Every wait on the inbound path and what bounds it.}}{51}{table.caption.42}%
+\contentsline {table}{\numberline {6.4}{\ignorespaces The actions that change gateway state.}}{54}{table.caption.43}%
+\contentsline {table}{\numberline {6.5}{\ignorespaces Every transmission this gateway can notice, and the name each one carries.}}{57}{table.caption.44}%
+\contentsline {table}{\numberline {6.6}{\ignorespaces Where each refusal is noticed, and the identity it carries.}}{59}{table.caption.45}%
 \addvspace {10\p@ }
+\contentsline {table}{\numberline {7.1}{\ignorespaces The three questions protection answers, and the failure each one cannot catch.}}{64}{table.caption.46}%
 \addvspace {10\p@ }
+\contentsline {table}{\numberline {8.1}{\ignorespaces The two instruments and the line between them.}}{71}{table.caption.49}%
+\contentsline {table}{\numberline {8.2}{\ignorespaces The misuse case set, by the stage that stops it.}}{72}{table.8.2}%
+\contentsline {table}{\numberline {8.3}{\ignorespaces What the gateway reports, against the question each reading answers.}}{77}{table.caption.58}%
 \addvspace {10\p@ }

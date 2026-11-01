@@ -3,16 +3,31 @@
 \addvspace {10\p@ }
 \addvspace {10\p@ }
 \addvspace {10\p@ }
-\contentsline {figure}{\numberline {4.1}{\ignorespaces Top-level architecture of IoT-SecureGate: monitoring application, gateway, and sensors.}}{16}{figure.caption.13}%
+\contentsline {figure}{\numberline {4.1}{\ignorespaces Top-level architecture of IoT-SecureGate.}}{16}{figure.caption.13}%
 \contentsline {figure}{\numberline {4.2}{\ignorespaces Overview of the monitoring application on the operator PC.}}{17}{figure.caption.14}%
 \contentsline {figure}{\numberline {4.3}{\ignorespaces Overview of the gateway runtime and its links to operator observability.}}{18}{figure.caption.15}%
-\contentsline {figure}{\numberline {4.4}{\ignorespaces Control plane (SSH) and data plane (MQTTS and HTTP observability) between operator PC, gateway, and sensors.}}{18}{figure.caption.16}%
-\contentsline {figure}{\numberline {4.5}{\ignorespaces End-to-end inbound path from sensor publish to storage and operator observability.}}{19}{figure.caption.17}%
-\contentsline {figure}{\numberline {4.6}{\ignorespaces Layered protection on the inbound path: MQTTS transport and application envelope v1.}}{20}{figure.caption.18}%
-\contentsline {figure}{\numberline {4.7}{\ignorespaces Deployment topology and principal ports on a trusted LAN.}}{21}{figure.caption.22}%
-\contentsline {figure}{\numberline {4.8}{\ignorespaces Overview of trust material on the operator PC and on the gateway.}}{22}{figure.caption.23}%
+\contentsline {figure}{\numberline {4.4}{\ignorespaces The control and data planes across the three hosts.}}{18}{figure.caption.16}%
+\contentsline {figure}{\numberline {4.5}{\ignorespaces The stages a published message passes on the inbound path.}}{19}{figure.caption.17}%
+\contentsline {figure}{\numberline {4.6}{\ignorespaces Where the material behind each protection layer rests.}}{20}{figure.caption.18}%
+\contentsline {figure}{\numberline {4.7}{\ignorespaces Which side opens each connection across the plant LAN.}}{21}{figure.caption.22}%
+\contentsline {figure}{\numberline {4.8}{\ignorespaces Which machine holds each half of the trust material.}}{22}{figure.caption.23}%
+\contentsline {figure}{\numberline {4.9}{\ignorespaces How one change becomes the one file an operator downloads.}}{23}{figure.caption.24}%
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {5.1}{\ignorespaces Processes, state, and observability listeners of the monitoring application.}}{25}{figure.caption.25}%
+\contentsline {figure}{\numberline {5.2}{\ignorespaces Discovery and installation Gateway UI}}{29}{figure.caption.28}%
+\contentsline {figure}{\numberline {5.3}{\ignorespaces How a host becomes a managed gateway.}}{31}{figure.caption.30}%
+\contentsline {figure}{\numberline {5.4}{\ignorespaces Registering a real sensor UI}}{31}{figure.caption.31}%
+\contentsline {figure}{\numberline {5.5}{\ignorespaces Device registration as a single action.}}{32}{figure.caption.32}%
+\contentsline {figure}{\numberline {5.6}{\ignorespaces Creating a laboratory sensor UI}}{33}{figure.caption.33}%
+\contentsline {figure}{\numberline {5.7}{\ignorespaces The first-run screen}}{34}{figure.caption.34}%
+\contentsline {figure}{\numberline {5.8}{\ignorespaces Gateway Metrics Visualization UI}}{35}{figure.caption.35}%
+\contentsline {figure}{\numberline {5.9}{\ignorespaces Gateway Activities Visualization UI}}{36}{figure.caption.36}%
+\contentsline {figure}{\numberline {5.10}{\ignorespaces Publication control and automatic restriction UI}}{38}{figure.caption.38}%
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {6.1}{\ignorespaces The gateway runtime as deployed, and the state the host keeps.}}{42}{figure.caption.39}%
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {7.1}{\ignorespaces One message sealed on the sensor and opened on the gateway.}}{65}{figure.caption.47}%
+\contentsline {figure}{\numberline {7.2}{\ignorespaces Certificate and credential decide one connection separately.}}{68}{figure.caption.48}%
 \addvspace {10\p@ }
+\contentsline {figure}{\numberline {8.1}{\ignorespaces The misuse behaviours offered against a laboratory sensor}}{72}{figure.caption.51}%
 \addvspace {10\p@ }

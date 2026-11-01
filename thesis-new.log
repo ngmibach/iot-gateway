@@ -1,10 +1,10 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.11.1)  1 NOV 2026 16:13
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.11.1)  1 NOV 2026 23:54
 entering extended mode
  restricted \write18 enabled.
  file:line:error style messages enabled.
  %&-line parsing enabled.
-**/home/bach/workspace/iot-gateway/thesis-new.tex
-(/home/bach/workspace/iot-gateway/thesis-new.tex
+**/home/developer/workspace/Projects/Pi_Gateway/iot-gateway/thesis-new.tex
+(/home/developer/workspace/Projects/Pi_Gateway/iot-gateway/thesis-new.tex
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
 (/usr/share/texlive/texmf-dist/tex/latex/base/report.cls
@@ -43,9 +43,9 @@ Language: english 2017/06/06 v3.3r English support from the babel system
 Package babel Info: Hyphen rules for 'canadian' set to \l@english
 (babel)             (\language0). Reported on input line 102.
 Package babel Info: Hyphen rules for 'australian' set to \l@ukenglish
-(babel)             (\language79). Reported on input line 105.
+(babel)             (\language43). Reported on input line 105.
 Package babel Info: Hyphen rules for 'newzealand' set to \l@ukenglish
-(babel)             (\language79). Reported on input line 108.
+(babel)             (\language43). Reported on input line 108.
 )) (/usr/share/texlive/texmf-dist/tex/generic/babel/locale/en/babel-english.tex
 Package babel Info: Importing font and identification data for english
 (babel)             from babel-en.ini. Reported on input line 11.
@@ -621,7 +621,7 @@ Package uniquecounter Info: New unique counter `rerunfilecheck' on input line 28
 )
 \Hy@SectionHShift=\skip61
 )
-Package hyperref Info: Option `colorlinks' set `true' on input line 62.
+Package hyperref Info: Option `colorlinks' set `true' on input line 56.
  (/usr/share/texlive/texmf-dist/tex/latex/l3backend/l3backend-pdftex.def
 File: l3backend-pdftex.def 2024-01-04 L3 backend support: PDF output (pdfTeX)
 \l__color_backend_stack_int=\count339
@@ -629,24 +629,24 @@ File: l3backend-pdftex.def 2024-01-04 L3 backend support: PDF output (pdfTeX)
 ) (./thesis-new.aux)
 \openout1 = `thesis-new.aux'.
 
-LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
-LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 216.
-LaTeX Font Info:    ... okay on input line 216.
+LaTeX Font Info:    Checking defaults for OML/cmm/m/it on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for OMS/cmsy/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for OT1/cmr/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for T1/cmr/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for TS1/cmr/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for OMX/cmex/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for U/cmr/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for PD1/pdf/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
+LaTeX Font Info:    Checking defaults for PU/pdf/m/n on input line 210.
+LaTeX Font Info:    ... okay on input line 210.
 
 *geometry* driver: auto-detecting
 *geometry* detected driver: pdftex
@@ -705,19 +705,19 @@ Package caption Info: Begin \AtBeginDocument code.
 Package caption Info: hyperref package is loaded.
 Package caption Info: listings package is loaded.
 Package caption Info: End \AtBeginDocument code.
-LaTeX Info: Redefining \microtypecontext on input line 216.
-Package microtype Info: Applying patch `item' on input line 216.
-Package microtype Info: Applying patch `toc' on input line 216.
-Package microtype Info: Applying patch `eqnum' on input line 216.
-Package microtype Info: Applying patch `footnote' on input line 216.
-Package microtype Info: Applying patch `verbatim' on input line 216.
+LaTeX Info: Redefining \microtypecontext on input line 210.
+Package microtype Info: Applying patch `item' on input line 210.
+Package microtype Info: Applying patch `toc' on input line 210.
+Package microtype Info: Applying patch `eqnum' on input line 210.
+Package microtype Info: Applying patch `footnote' on input line 210.
+Package microtype Info: Applying patch `verbatim' on input line 210.
 Package microtype Info: Generating PDF output.
 Package microtype Info: Character protrusion enabled (level 2).
 Package microtype Info: Using default protrusion set `alltext'.
 Package microtype Info: Automatic font expansion enabled (level 2),
 (microtype)             stretch: 20, shrink: 20, step: 1, non-selected.
 Package microtype Info: Using default expansion set `alltext-nott'.
-LaTeX Info: Redefining \showhyphens on input line 216.
+LaTeX Info: Redefining \showhyphens on input line 210.
 Package microtype Info: No adjustment of tracking.
 Package microtype Info: No adjustment of interword spacing.
 Package microtype Info: No adjustment of character kerning.
@@ -725,78 +725,179 @@ Package microtype Info: No adjustment of character kerning.
 File: mt-cmr.cfg 2013/05/19 v2.2 microtype config. file: Computer Modern Roman (RS)
 )
 \c@lstlisting=\count346
-Package hyperref Info: Link coloring ON on input line 216.
- (./thesis-new.out) (./thesis-new.out)
+Package hyperref Info: Link coloring ON on input line 210.
 \@outlinefile=\write4
 \openout4 = `thesis-new.out'.
 
-<assets/docs/VGU-Logo.png, id=284, 308.352pt x 87.6876pt>
-File: assets/docs/VGU-Logo.png Graphic file (type png)
-<use assets/docs/VGU-Logo.png>
-Package pdftex.def Info: assets/docs/VGU-Logo.png  used on input line 231.
-(pdftex.def)             Requested size: 113.81102pt x 32.36494pt.
-LaTeX Font Info:    Trying to load font information for U+msa on input line 232.
+LaTeX Font Info:    Trying to load font information for U+msa on input line 227.
  (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsa.fd
 File: umsa.fd 2013/01/14 v3.01 AMS symbols A
 ) (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msa.cfg
 File: mt-msa.cfg 2006/02/04 v1.1 microtype config. file: AMS symbols (a) (RS)
 )
-LaTeX Font Info:    Trying to load font information for U+msb on input line 232.
+LaTeX Font Info:    Trying to load font information for U+msb on input line 227.
  (/usr/share/texlive/texmf-dist/tex/latex/amsfonts/umsb.fd
 File: umsb.fd 2013/01/14 v3.01 AMS symbols B
 ) (/usr/share/texlive/texmf-dist/tex/latex/microtype/mt-msb.cfg
 File: mt-msb.cfg 2005/06/01 v1.0 microtype config. file: AMS symbols (b) (RS)
 ) [1
 
-{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texmf/fonts/enc/dvips/cm-super/cm-super-t1.enc} <./assets/docs/VGU-Logo.png>] [1]
+{/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map}{/usr/share/texmf/fonts/enc/dvips/cm-super/cm-super-t1.enc}] [1]
 pdfTeX warning (ext4): destination with the same identifier (name{page.i}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.350 \tableofcontents
+l.336 \tableofcontents
                        [1
 
-] (./thesis-new.toc [2
-
-] [3])
+]
+No file thesis-new.toc.
 \tf@toc=\write5
 \openout5 = `thesis-new.toc'.
 
- [4] (./thesis-new.lof)
+[2
+
+]
+No file thesis-new.lof.
 \tf@lof=\write6
 \openout6 = `thesis-new.lof'.
 
- [5
+[3
 
-] (./thesis-new.lot)
+]
+No file thesis-new.lot.
 \tf@lot=\write7
 \openout7 = `thesis-new.lot'.
 
- [6
+[4
 
-] [7
+] [5
 
 
 ]
 Chapter 1.
 
+LaTeX Warning: Citation `mqtt' on page 1 undefined on input line 406.
+
+
 pdfTeX warning (ext4): destination with the same identifier (name{page.1}) has been already used, duplicate ignored
 <to be read again> 
                    \relax 
-l.462     \item \textbf
+l.448     \item \textbf
                        {Weak response to misuse.} [1
 
 
-{/usr/share/texmf/fonts/enc/dvips/cm-super/cm-super-ts1.enc}] [2] [3]
+{/usr/share/texmf/fonts/enc/dvips/cm-super/cm-super-ts1.enc}]
+
+LaTeX Warning: Reference `ch:background' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:requirements' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:architecture' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:monitoring' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:gateway' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:evaluation' on page 2 undefined on input line 555.
+
+
+LaTeX Warning: Reference `ch:conclusion' on page 2 undefined on input line 555.
+
+[2] [3]
 Chapter 2.
+
+LaTeX Warning: Citation `mqtt' on page 4 undefined on input line 582.
+
+
+LaTeX Warning: Citation `tls' on page 4 undefined on input line 611.
+
+
+LaTeX Warning: Citation `x509' on page 4 undefined on input line 621.
+
 [4
 
-] [5] [6] [7]
+]
+
+LaTeX Warning: Citation `mqttsurvey' on page 5 undefined on input line 630.
+
+[5]
+
+LaTeX Warning: Citation `sre' on page 6 undefined on input line 720.
+
+
+LaTeX Warning: Citation `loganalysis' on page 6 undefined on input line 726.
+
+
+LaTeX Warning: Citation `mqtt' on page 6 undefined on input line 747.
+
+
+LaTeX Warning: Citation `mqttsurvey' on page 6 undefined on input line 747.
+
+
+LaTeX Warning: Citation `tls' on page 6 undefined on input line 750.
+
+
+LaTeX Warning: Citation `x509' on page 6 undefined on input line 750.
+
+
+LaTeX Warning: Citation `sre' on page 6 undefined on input line 768.
+
+
+LaTeX Warning: Citation `loganalysis' on page 6 undefined on input line 768.
+
+[6] [7]
 Chapter 3.
+
+LaTeX Warning: Reference `ch:introduction' on page 8 undefined on input line 793.
+
 [8
 
-] [9] [10] [11] [12] [13] [14]
+]
+
+LaTeX Warning: Reference `ch:introduction' on page 9 undefined on input line 864.
+
+[9] [10] [11] [12]
+
+LaTeX Warning: Reference `sec:scope' on page 13 undefined on input line 1205.
+
+
+LaTeX Warning: Reference `ch:architecture' on page 13 undefined on input line 1207.
+
+
+LaTeX Warning: Reference `ch:monitoring' on page 13 undefined on input line 1207.
+
+
+LaTeX Warning: Reference `ch:gateway' on page 13 undefined on input line 1208.
+
+
+LaTeX Warning: Reference `ch:evaluation' on page 13 undefined on input line 1210.
+
+[13] [14]
 Chapter 4.
-LaTeX Font Info:    Trying to load font information for T1+cmss on input line 1342.
+
+LaTeX Warning: Reference `ch:monitoring' on page 15 undefined on input line 1225.
+
+
+LaTeX Warning: Reference `ch:gateway' on page 15 undefined on input line 1226.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 15 undefined on input line 1227.
+
+
+LaTeX Warning: Reference `ch:requirements' on page 15 undefined on input line 1229.
+
+
+LaTeX Warning: Reference `fig:arch-toplevel' on page 15 undefined on input line 1235.
+
+LaTeX Font Info:    Trying to load font information for T1+cmss on input line 1334.
 (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmss.fd
 File: t1cmss.fd 2023/04/13 v2.5m Standard LaTeX font definitions
 )
@@ -804,94 +905,925 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `cmss' (encoding: T1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
- [15
+
+
+LaTeX Warning: Reference `ch:requirements' on page 15 undefined on input line 1340.
+
+[15
 
 ]
-LaTeX Font Info:    Trying to load font information for TS1+cmss on input line 1442.
- (/usr/share/texlive/texmf-dist/tex/latex/base/ts1cmss.fd
+
+LaTeX Warning: Reference `fig:arch-monitoring' on page 16 undefined on input line 1347.
+
+LaTeX Font Info:    Trying to load font information for TS1+cmss on input line 1433.
+(/usr/share/texlive/texmf-dist/tex/latex/base/ts1cmss.fd
 File: ts1cmss.fd 2023/04/13 v2.5m Standard LaTeX font definitions
 )
 Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `cmss' (encoding: TS1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
- [16]
-LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 1456.
- (/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
+
+
+LaTeX Warning: Reference `ch:monitoring' on page 16 undefined on input line 1439.
+
+[16]
+
+LaTeX Warning: Reference `fig:arch-gateway' on page 17 undefined on input line 1446.
+
+LaTeX Font Info:    Trying to load font information for T1+cmtt on input line 1447.
+(/usr/share/texlive/texmf-dist/tex/latex/base/t1cmtt.fd
 File: t1cmtt.fd 2023/04/13 v2.5m Standard LaTeX font definitions
 )
 Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             `cmtt' (encoding: T1).
 (microtype)             For optimal results, create family-specific settings.
 (microtype)             See the microtype manual for details.
- [17] [18] [19] [20]
-Underfull \hbox (badness 10000) in paragraph at lines 1777--1777
-[]|\T1/cmtt/m/n/10.95 127.0.0.1:9140
+
+
+LaTeX Warning: Reference `ch:gateway' on page 17 undefined on input line 1549.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 17 undefined on input line 1551.
+
+[17]
+
+LaTeX Warning: Reference `fig:arch-planes' on page 18 undefined on input line 1559.
+
+[18]
+
+LaTeX Warning: Reference `fig:arch-datapath' on page 19 undefined on input line 1688.
+
+
+LaTeX Warning: Reference `ch:gateway' on page 19 undefined on input line 1795.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 19 undefined on input line 1797.
+
+
+LaTeX Warning: Reference `fig:arch-protection' on page 19 undefined on input line 1803.
+
+
+LaTeX Warning: Reference `tab:arch-protection-layers' on page 19 undefined on input line 1805.
+
+[19]
+
+LaTeX Warning: Reference `ch:encryption' on page 20 undefined on input line 1934.
+
+
+LaTeX Warning: Reference `tab:arch-ports-pc' on page 20 undefined on input line 1941.
+
+
+LaTeX Warning: Reference `tab:arch-ports-gw' on page 20 undefined on input line 1942.
+
+
+LaTeX Warning: Reference `fig:arch-topology' on page 20 undefined on input line 1945.
+
+
+LaTeX Warning: Reference `fig:arch-toplevel' on page 20 undefined on input line 1947.
+
+[20]
+Underfull \hbox (badness 10000) in paragraph at lines 1964--1964
+[]|\T1/cmr/m/n/10.95 (+20) localhost, port 9140
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1794--1794
+Underfull \hbox (badness 10000) in paragraph at lines 1981--1981
 []|\T1/cmr/m/n/10.95 (+20) Mosquitto
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1794--1794
+Underfull \hbox (badness 10000) in paragraph at lines 1981--1981
 []|\T1/cmr/m/n/10.95 (+20) Kafka IN-TER-
  []
 
 
-Underfull \hbox (badness 3872) in paragraph at lines 1794--1794
+Underfull \hbox (badness 3872) in paragraph at lines 1981--1981
 []|\T1/cmr/m/n/10.95 (+20) Kafka EX-TER-
  []
 
-[21] [22]
-Chapter 5.
-[23
 
-]
-Chapter 6.
-[24
-
-]
-Chapter 7.
-[25
-
-]
-Chapter 8.
-[26
-
-]
-Chapter 9.
-[27
-
-]
-Underfull \hbox (badness 7613) in paragraph at lines 2073--2076
-[]\T1/cmr/m/n/12 (+20) Eclipse Mosquitto, \T1/cmr/m/it/12 (+20) mosquitto.conf Man Page\T1/cmr/m/n/12 (+20) . [][]$https : / / mosquitto . org / man /
+Underfull \hbox (badness 3769) in paragraph at lines 1981--1981
+[]|\T1/cmr/m/n/10.95 (+20) gateway ad-dress, port
  []
 
-[28
+
+LaTeX Warning: Reference `fig:arch-secrets' on page 21 undefined on input line 2073.
+
+[21]
+
+LaTeX Warning: Reference `fig:arch-delivery' on page 22 undefined on input line 2181.
+
+[22]
+
+LaTeX Warning: Reference `ch:monitoring' on page 23 undefined on input line 2269.
+
+
+LaTeX Warning: Reference `fig:arch-monitoring' on page 23 undefined on input line 2273.
+
+
+LaTeX Warning: Reference `fig:arch-planes' on page 23 undefined on input line 2274.
+
+
+LaTeX Warning: Reference `fig:arch-secrets' on page 23 undefined on input line 2274.
+
+
+LaTeX Warning: Reference `ch:gateway' on page 23 undefined on input line 2275.
+
+
+LaTeX Warning: Reference `fig:arch-gateway' on page 23 undefined on input line 2279.
+
+
+LaTeX Warning: Reference `fig:arch-datapath' on page 23 undefined on input line 2280.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 23 undefined on input line 2281.
+
+
+LaTeX Warning: Reference `fig:arch-protection' on page 23 undefined on input line 2285.
+
+[23]
+Chapter 5.
+
+LaTeX Warning: Reference `sec:monitoring-architecture' on page 24 undefined on input line 2304.
+
+
+LaTeX Warning: Reference `sec:monitoring-interaction' on page 24 undefined on input line 2308.
+
+
+LaTeX Warning: Reference `sec:monitoring-functions' on page 24 undefined on input line 2312.
+
+
+LaTeX Warning: Reference `fig:mon-processes' on page 24 undefined on input line 2350.
+
+[24
+
+] [25]
+
+LaTeX Warning: Reference `tab:mon-modules' on page 26 undefined on input line 2456.
+
+
+Underfull \hbox (badness 3148) in paragraph at lines 2497--2497
+[]|\T1/cmr/m/n/10.95 (+20) Feeding lab-o-ra-tory
+ []
+
+
+LaTeX Warning: Reference `sec:monitoring-fakes' on page 26 undefined on input line 2497.
+
+
+LaTeX Warning: Reference `tab:mon-state' on page 26 undefined on input line 2518.
+
+[26]
+Underfull \hbox (badness 2418) in paragraph at lines 2561--2561
+[]|\T1/cmr/m/n/10.95 (+20) The setup steps and
+ []
+
+[27]
+
+LaTeX Warning: Reference `fig:mon-ui-gateway' on page 28 undefined on input line 2649.
+
+[28]
+
+LaTeX Warning: Reference `tab:mon-install' on page 29 undefined on input line 2681.
+
+
+Underfull \hbox (badness 1009) in paragraph at lines 2736--2736
+[]|\T1/cmr/m/n/10.95 (+20) Refuses at once; the
+ []
+
+
+Underfull \hbox (badness 2698) in paragraph at lines 2736--2736
+\T1/cmr/m/n/10.95 (+20) the host is re-moved
+ []
+
+
+Underfull \hbox (badness 3009) in paragraph at lines 2736--2736
+[]|\T1/cmr/m/n/10.95 (+20) Stops at that stage;
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 2736--2736
+[]|\T1/cmr/m/n/10.95 (+20) Storage bud-get
+ []
+
+
+Underfull \hbox (badness 1028) in paragraph at lines 2736--2736
+[]|\T1/cmr/m/n/10.95 (+20) Stops; a retry starts
+ []
+
+[29]
+
+LaTeX Warning: Reference `sec:mon-state' on page 30 undefined on input line 2821.
+
+
+LaTeX Warning: Reference `fig:mon-install-flow' on page 30 undefined on input line 2826.
+
+[30]
+
+LaTeX Warning: Reference `fig:mon-ui-register' on page 31 undefined on input line 2858.
+
+
+LaTeX Warning: Reference `fig:mon-onboard' on page 31 undefined on input line 2875.
+
+[31]
+
+LaTeX Warning: Reference `fig:mon-ui-fake' on page 32 undefined on input line 2974.
+
+[32]
+
+LaTeX Warning: Reference `fig:mon-ui-prep' on page 33 undefined on input line 3033.
+
+[33]
+
+LaTeX Warning: Reference `sec:mon-telemetry' on page 34 undefined on input line 3047.
+
+
+LaTeX Warning: Reference `sec:mon-lifecycle' on page 34 undefined on input line 3079.
+
+[34]
+
+LaTeX Warning: Reference `sec:mon-modules' on page 35 undefined on input line 3094.
+
+
+LaTeX Warning: Reference `fig:mon-ui-metric' on page 35 undefined on input line 3104.
+
+
+LaTeX Warning: Reference `sec:mon-control' on page 35 undefined on input line 3129.
+
+
+LaTeX Warning: Reference `fig:mon-ui-activities' on page 35 undefined on input line 3131.
+
+[35]
+
+LaTeX Warning: Reference `tab:mon-control' on page 36 undefined on input line 3178.
+
+
+Underfull \hbox (badness 3646) in paragraph at lines 3211--3211
+[]|\T1/cmr/m/n/10.95 (+20) Registration, pass-word,
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 3211--3211
+\T1/cmr/m/n/10.95 (+20) cer-tifi-cate, re-served
+ []
+
+
+Underfull \hbox (badness 5022) in paragraph at lines 3211--3211
+[]|\T1/cmr/m/n/10.95 (+20) Arm au-to-matic re-
+ []
+
+
+Underfull \hbox (badness 1852) in paragraph at lines 3211--3211
+[]|\T1/cmr/m/n/10.95 (+20) The rule, which stays
+ []
+
+[36]
+
+LaTeX Warning: Reference `fig:mon-ui-control' on page 37 undefined on input line 3243.
+
+
+LaTeX Warning: Reference `sec:monitoring-fakes' on page 37 undefined on input line 3251.
+
+[37]
+
+LaTeX Warning: Reference `sec:arch-delivery' on page 38 undefined on input line 3301.
+
+[38]
+
+LaTeX Warning: Reference `sec:mon-localprep' on page 39 undefined on input line 3331.
+
+[39]
+Chapter 6.
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 40 undefined on input line 3360.
+
+
+LaTeX Warning: Reference `sec:gateway-agent' on page 40 undefined on input line 3364.
+
+
+LaTeX Warning: Reference `sec:gateway-inbound' on page 40 undefined on input line 3369.
+
+
+LaTeX Warning: Reference `sec:gateway-apis' on page 40 undefined on input line 3374.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 40 undefined on input line 3378.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 40 undefined on input line 3386.
+
+[40
+
+]
+
+LaTeX Warning: Reference `ch:monitoring' on page 41 undefined on input line 3459.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 41 undefined on input line 3476.
+
+
+LaTeX Warning: Reference `fig:gw-processes' on page 41 undefined on input line 3479.
+
+
+LaTeX Warning: Reference `fig:arch-topology' on page 41 undefined on input line 3483.
+
+[41]
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 42 undefined on input line 3591.
+
+[42]
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 43 undefined on input line 3600.
+
+
+LaTeX Warning: Reference `ch:architecture' on page 43 undefined on input line 3633.
+
+
+LaTeX Warning: Reference `tab:gw-state' on page 43 undefined on input line 3646.
+
+
+Underfull \hbox (badness 6741) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) reg-is-tra-tion; re-moved
+ []
+
+
+Underfull \hbox (badness 2401) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) Re-placed as a whole
+ []
+
+
+Underfull \hbox (badness 1127) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) rather than edited in
+ []
+
+
+Underfull \hbox (badness 3417) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) place, so the bro-ker
+ []
+
+
+Underfull \hbox (badness 1242) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) never acts on a half-
+ []
+
+
+LaTeX Warning: Reference `ch:encryption' on page 43 undefined on input line 3691.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 3691--3691
+[]|\T1/cmr/m/n/10.95 (+20) The con-trol plane,
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) checked against the
+ []
+
+
+Underfull \hbox (badness 3029) in paragraph at lines 3691--3691
+\T1/cmr/m/n/10.95 (+20) host's re-main-ing disk
+ []
+
+
+Underfull \hbox (badness 1953) in paragraph at lines 3691--3691
+[]|\T1/cmr/m/n/10.95 (+20) The con-trol plane at
+ []
+
+[43]
+
+LaTeX Warning: Reference `sec:gateway-apis' on page 44 undefined on input line 3706.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 44 undefined on input line 3721.
+
+
+LaTeX Warning: Reference `ch:monitoring' on page 44 undefined on input line 3724.
+
+[44]
+
+LaTeX Warning: Reference `sec:monitoring-interaction' on page 45 undefined on input line 3764.
+
+[45]
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 46 undefined on input line 3828.
+
+[46]
+
+LaTeX Warning: Reference `sec:gw-detect-kinds' on page 47 undefined on input line 3895.
+
+
+LaTeX Warning: Reference `sec:encryption-envelope' on page 47 undefined on input line 3896.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 47 undefined on input line 3898.
+
+[47]
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 48 undefined on input line 3916.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 48 undefined on input line 3964.
+
+[48]
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 49 undefined on input line 3981.
+
+
+LaTeX Warning: Reference `sec:gw-in-timing' on page 49 undefined on input line 3985.
+
+
+LaTeX Warning: Reference `sec:gw-in-signals' on page 49 undefined on input line 3988.
+
+
+LaTeX Warning: Reference `sec:gw-in-guarantees' on page 49 undefined on input line 3992.
+
+
+LaTeX Warning: Reference `tab:gw-inbound-steps' on page 49 undefined on input line 4004.
+
+[49]
+
+LaTeX Warning: Reference `sec:gw-admission' on page 50 undefined on input line 4088.
+
+
+LaTeX Warning: Reference `sec:encryption-envelope' on page 50 undefined on input line 4091.
+
+
+LaTeX Warning: Reference `sec:gw-detect-kinds' on page 50 undefined on input line 4093.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 4133--4133
+[]|\T1/cmr/m/n/10.95 (+20) States re-com-puted at
+ []
+
+[50]
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 51 undefined on input line 4172.
+
+[51]
+
+LaTeX Warning: Reference `sec:gw-accept' on page 52 undefined on input line 4213.
+
+
+LaTeX Warning: Reference `sec:gw-api-read' on page 52 undefined on input line 4244.
+
+
+LaTeX Warning: Reference `sec:gw-api-write' on page 52 undefined on input line 4248.
+
+
+LaTeX Warning: Reference `sec:gw-api-split' on page 52 undefined on input line 4252.
+
+[52]
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 53 undefined on input line 4295.
+
+
+LaTeX Warning: Reference `sec:gw-units' on page 53 undefined on input line 4308.
+
+
+LaTeX Warning: Reference `sec:gw-api-write' on page 53 undefined on input line 4310.
+
+
+LaTeX Warning: Reference `ch:architecture' on page 53 undefined on input line 4325.
+
+[53]
+
+LaTeX Warning: Reference `sec:monitoring-interaction' on page 54 undefined on input line 4335.
+
+
+LaTeX Warning: Reference `tab:gw-actions' on page 54 undefined on input line 4335.
+
+
+Underfull \hbox (badness 1122) in paragraph at lines 4389--4389
+[]|\T1/cmr/m/n/10.95 (+20) Broker reload only. The
+ []
+
+
+Underfull \hbox (badness 2644) in paragraph at lines 4389--4389
+[]|\T1/cmr/m/n/10.95 (+20) Withdraw a de-
+ []
+
+
+LaTeX Warning: Reference `sec:gw-agent-process' on page 54 undefined on input line 4401.
+
+[54]
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 55 undefined on input line 4426.
+
+
+LaTeX Warning: Reference `sec:gateway-detection' on page 55 undefined on input line 4450.
+
+
+LaTeX Warning: Reference `sec:gateway-inbound' on page 55 undefined on input line 4462.
+
+[55]
+
+LaTeX Warning: Reference `sec:gw-detect-kinds' on page 56 undefined on input line 4473.
+
+
+LaTeX Warning: Reference `sec:gw-detect-events' on page 56 undefined on input line 4477.
+
+
+LaTeX Warning: Reference `sec:gw-detect-signals' on page 56 undefined on input line 4481.
+
+
+LaTeX Warning: Reference `sec:gw-detect-auto-prevent' on page 56 undefined on input line 4485.
+
+
+LaTeX Warning: Reference `tab:gw-detect-kinds' on page 56 undefined on input line 4501.
+
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 56 undefined on input line 4503.
+
+
+LaTeX Warning: Reference `sec:encryption-envelope' on page 56 undefined on input line 4504.
+
+
+Underfull \hbox (badness 1783) in paragraph at lines 4602--4602
+[]|\T1/cmr/m/n/10 (+20) Wrapper that will not
+ []
+
+
+Underfull \hbox (badness 1173) in paragraph at lines 4602--4602
+[]|\T1/cmr/m/n/10 (+20) Half un-read-able or un-
+ []
+
+
+LaTeX Warning: Reference `sec:gw-in-guarantees' on page 56 undefined on input line 4602.
+
+
+Underfull \hbox (badness 3635) in paragraph at lines 4602--4602
+[]|\T1/cmr/m/n/10 (+20) Day un-known or mis-
+ []
+
+
+Underfull \hbox (badness 1968) in paragraph at lines 4602--4602
+[]|\T1/cmr/m/n/10 (+20) Content key un-re-cov-er-
+ []
+
+
+LaTeX Warning: Reference `sec:gw-routing' on page 56 undefined on input line 4634.
+
+
+LaTeX Warning: Reference `sec:gw-detect-signals' on page 56 undefined on input line 4639.
+
+[56] [57]
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 58 undefined on input line 4649.
+
+
+LaTeX Warning: Reference `tab:gw-refusals' on page 58 undefined on input line 4658.
+
+
+LaTeX Warning: Reference `sec:gw-detect-kinds' on page 58 undefined on input line 4659.
+
+
+Underfull \hbox (badness 2809) in paragraph at lines 4697--4697
+[]|\T1/cmr/m/n/10.95 (+20) A cre-den-tial that
+ []
+
+
+Underfull \hbox (badness 1577) in paragraph at lines 4697--4697
+[]|\T1/cmr/m/n/10.95 (+20) The de-vice, if the line
+ []
+
+
+Underfull \hbox (badness 4416) in paragraph at lines 4697--4697
+\T1/cmr/m/n/10.95 (+20) names one. Counted
+ []
+
+[58] [59]
+
+LaTeX Warning: Reference `ch:monitoring' on page 60 undefined on input line 4741.
+
+
+LaTeX Warning: Reference `sec:gw-accept' on page 60 undefined on input line 4742.
+
+
+LaTeX Warning: Reference `sec:gateway-architecture' on page 60 undefined on input line 4751.
+
+
+LaTeX Warning: Reference `sec:gw-api-read' on page 60 undefined on input line 4760.
+
+
+LaTeX Warning: Reference `sec:gw-api-read' on page 60 undefined on input line 4773.
+
+
+LaTeX Warning: Reference `sec:gw-in-signals' on page 60 undefined on input line 4779.
+
+
+LaTeX Warning: Reference `sec:gw-api-write' on page 60 undefined on input line 4798.
+
+[60]
+
+LaTeX Warning: Reference `sec:gw-api-write' on page 61 undefined on input line 4822.
+
+
+LaTeX Warning: Reference `tab:gw-actions' on page 61 undefined on input line 4853.
+
+[61] [62]
+Chapter 7.
+
+LaTeX Warning: Reference `sec:encryption-model' on page 63 undefined on input line 4878.
+
+
+LaTeX Warning: Reference `sec:encryption-envelope' on page 63 undefined on input line 4882.
+
+
+LaTeX Warning: Reference `sec:encryption-mtls' on page 63 undefined on input line 4886.
+
+
+LaTeX Warning: Reference `tab:enc-questions' on page 63 undefined on input line 4903.
+
+
+Underfull \hbox (badness 5460) in paragraph at lines 4927--4927
+\T1/cmr/m/n/10.95 (+20) any of this plat-
+ []
+
+[63
+
+] [64]
+
+LaTeX Warning: Reference `fig:enc-sealopen' on page 65 undefined on input line 4991.
+
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 65 undefined on input line 5093.
+
+[65]
+
+LaTeX Warning: Reference `sec:encryption-model' on page 66 undefined on input line 5116.
+
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 66 undefined on input line 5133.
+
+
+LaTeX Warning: Reference `sec:encryption-model' on page 66 undefined on input line 5155.
+
+
+LaTeX Warning: Reference `sec:gw-in-order' on page 66 undefined on input line 5157.
+
+[66]
+
+LaTeX Warning: Reference `tab:enc-questions' on page 67 undefined on input line 5165.
+
+
+LaTeX Warning: Reference `sec:gw-broker-decisions' on page 67 undefined on input line 5180.
+
+
+LaTeX Warning: Reference `fig:arch-secrets' on page 67 undefined on input line 5203.
+
+[67]
+
+LaTeX Warning: Reference `fig:enc-mtls' on page 68 undefined on input line 5227.
+
+
+LaTeX Warning: Reference `sec:gw-admission' on page 68 undefined on input line 5238.
+
+
+/home/developer/workspace/Projects/Pi_Gateway/iot-gateway/thesis-new.tex:5294: LaTeX Error: Something's wrong--perhaps a missing \item.
+
+See the LaTeX manual or LaTeX Companion for explanation.
+Type  H <return>  for immediate help.
+ ...                                              
+                                                  
+l.5294 }
+        
+Try typing  <return>  to proceed.
+If that doesn't work, type  X <return>  to quit.
+
+
+LaTeX Warning: Reference `sec:gw-agent-client' on page 68 undefined on input line 5302.
+
+
+LaTeX Warning: Reference `tab:enc-questions' on page 68 undefined on input line 5312.
+
+[68] [69]
+Chapter 8.
+
+LaTeX Warning: Reference `ch:requirements' on page 70 undefined on input line 5326.
+
+
+LaTeX Warning: Reference `sec:threat-boundaries' on page 70 undefined on input line 5327.
+
+
+LaTeX Warning: Reference `sec:eval-method' on page 70 undefined on input line 5348.
+
+
+LaTeX Warning: Reference `sec:eval-admission' on page 70 undefined on input line 5352.
+
+
+LaTeX Warning: Reference `sec:eval-protection' on page 70 undefined on input line 5356.
+
+
+LaTeX Warning: Reference `sec:eval-monitoring' on page 70 undefined on input line 5361.
+
+
+LaTeX Warning: Reference `sec:eval-resources' on page 70 undefined on input line 5365.
+
+
+LaTeX Warning: Reference `tab:eval-instruments' on page 70 undefined on input line 5377.
+
+[70
+
+]
+
+LaTeX Warning: Reference `sec:monitoring-fakes' on page 71 undefined on input line 5393.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5431--5431
+[]|\T1/cmr/m/n/10.95 (+20) Automated test
+ []
+
+
+Underfull \hbox (badness 2735) in paragraph at lines 5431--5431
+\T1/cmr/m/n/10.95 (+20) suites be-side each
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5431--5431
+[]|\T1/cmr/m/n/10.95 (+20) On-system mis-use
+ []
+
+[71]
+
+LaTeX Warning: Reference `tab:eval-cases' on page 72 undefined on input line 5468.
+
+
+LaTeX Warning: Reference `fig:eval-simulate' on page 72 undefined on input line 5472.
+
+
+LaTeX Warning: Reference `ch:requirements' on page 72 undefined on input line 5477.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 72 undefined on input line 5486.
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5498--5498
+[]|\T1/cmr/bx/n/12 (+20) Stage that
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5505--5505
+[]|\T1/cmr/bx/n/12 (+20) Stage that
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5515--5515
+[]|\T1/cmr/m/n/12 (+20) Broker ad-mis-
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5519--5519
+[]|\T1/cmr/m/n/12 (+20) Agent, be-fore
+ []
+
+
+Underfull \hbox (badness 7256) in paragraph at lines 5523--5523
+[]|\T1/cmr/m/n/12 (+20) Agent, pair-ing
+ []
+
+
+Underfull \hbox (badness 7256) in paragraph at lines 5525--5525
+[]|\T1/cmr/m/n/12 (+20) Agent, pair-ing
+ []
+
+
+Underfull \hbox (badness 2932) in paragraph at lines 5527--5527
+[]|\T1/cmr/m/n/12 (+20) Agent, bind-ing
+ []
+
+
+Underfull \hbox (badness 2932) in paragraph at lines 5529--5529
+[]|\T1/cmr/m/n/12 (+20) Agent, bind-ing
+ []
+
+
+Underfull \hbox (badness 2932) in paragraph at lines 5531--5531
+[]|\T1/cmr/m/n/12 (+20) Agent, bind-ing
+ []
+
+
+Underfull \hbox (badness 6268) in paragraph at lines 5541--5541
+[]|\T1/cmr/m/n/12 (+20) Accepted un-less
+ []
+
+
+Underfull \hbox (badness 10000) in paragraph at lines 5545--5545
+[]|\T1/cmr/m/n/12 (+20) Compatibility
+ []
+
+
+Underfull \hbox (badness 1062) in paragraph at lines 5545--5545
+[]|\T1/cmr/m/n/12 (+20) Accepted by de-
+ []
+
+[72]
+
+LaTeX Warning: Reference `tab:eval-cases' on page 73 undefined on input line 5551.
+
+
+LaTeX Warning: Reference `sec:gw-broker-decisions' on page 73 undefined on input line 5566.
+
+
+LaTeX Warning: Reference `sec:gw-broker-decisions' on page 73 undefined on input line 5578.
+
+
+LaTeX Warning: Reference `sec:eval-monitoring' on page 73 undefined on input line 5587.
+
+[73]
+
+LaTeX Warning: Reference `sec:eval-resources' on page 74 undefined on input line 5601.
+
+
+LaTeX Warning: Reference `sec:gw-in-signals' on page 74 undefined on input line 5612.
+
+
+LaTeX Warning: Reference `ch:encryption' on page 74 undefined on input line 5645.
+
+[74]
+
+LaTeX Warning: Reference `sec:eval-resources' on page 75 undefined on input line 5664.
+
+[75]
+
+LaTeX Warning: Reference `tab:eval-observability' on page 76 undefined on input line 5731.
+
+
+LaTeX Warning: Reference `sec:eval-method' on page 76 undefined on input line 5797.
+
+
+LaTeX Warning: Reference `ch:monitoring' on page 76 undefined on input line 5808.
+
+[76] [77] [78]
+
+LaTeX Warning: Reference `ch:conclusion' on page 79 undefined on input line 5935.
+
+[79]
+Chapter 9.
+[80
+
+]
+
+LaTeX Warning: Reference `sec:eval-resources' on page 81 undefined on input line 5999.
+
+[81]
+
+LaTeX Warning: Reference `sec:eval-resources' on page 82 undefined on input line 6079.
+
+
+LaTeX Warning: Reference `ch:requirements' on page 82 undefined on input line 6085.
+
+
+LaTeX Warning: Citation `lightgbm' on page 82 undefined on input line 6095.
+
+
+LaTeX Warning: Citation `mqttset' on page 82 undefined on input line 6098.
+
+
+LaTeX Warning: Citation `nbaiot' on page 82 undefined on input line 6100.
+
+
+LaTeX Warning: Reference `sec:arch-delivery' on page 82 undefined on input line 6123.
+
+[82]
+
+LaTeX Warning: Citation `x509' on page 83 undefined on input line 6184.
+
+[83] [84] [85
 
 ] (./thesis-new.aux)
  ***********
 LaTeX2e <2023-11-01> patch level 1
 L3 programming layer <2024-01-22>
  ***********
-Package rerunfilecheck Info: File `thesis-new.out' has not changed.
-(rerunfilecheck)             Checksum: 28880B2E3D2D4EF0E1FBC60EFCBE2503;13089.
+
+
+LaTeX Warning: There were undefined references.
+
+
+LaTeX Warning: Label(s) may have changed. Rerun to get cross-references right.
+
+
+Package rerunfilecheck Warning: File `thesis-new.out' has changed.
+(rerunfilecheck)                Rerun to get outlines right
+(rerunfilecheck)                or use package `bookmark'.
+
+Package rerunfilecheck Info: Checksums for `thesis-new.out':
+(rerunfilecheck)             Before: <no file>
+(rerunfilecheck)             After:  4F0C998FC66ECD36C8B26136A52DB78D;18434.
  ) 
 Here is how much of TeX's memory you used:
- 29263 strings out of 474222
- 535820 string characters out of 5748733
- 1943975 words of memory out of 5000000
- 50710 multiletter control sequences out of 15000+600000
- 584479 words of font info for 183 fonts, out of 8000000 for 9000
+ 29837 strings out of 474222
+ 544218 string characters out of 5748733
+ 1948975 words of memory out of 5000000
+ 51030 multiletter control sequences out of 15000+600000
+ 593534 words of font info for 262 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
- 84i,11n,87p,1040b,941s stack positions out of 10000i,1000n,20000p,200000b,200000s
-</usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy8.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1440.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1728.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx2488.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1440.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfss0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfsx1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1200.pfb>
-Output written on thesis-new.pdf (37 pages, 453140 bytes).
+ 84i,11n,87p,1065b,952s stack positions out of 10000i,1000n,20000p,200000b,200000s
+</usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmr12.pfb></usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmsy10.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1440.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1728.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx2488.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1440.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfss0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfsx1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1000.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sftt1200.pfb>
+Output written on thesis-new.pdf (92 pages, 694621 bytes).
 PDF statistics:
- 787 PDF objects out of 1000 (max. 8388607)
- 687 compressed objects within 7 object streams
- 140 named destinations out of 1000 (max. 500000)
- 46650 words of extra memory for PDF output out of 51595 (max. 10000000)
+ 747 PDF objects out of 1000 (max. 8388607)
+ 604 compressed objects within 7 object streams
+ 260 named destinations out of 1000 (max. 500000)
+ 58381 words of extra memory for PDF output out of 61914 (max. 10000000)
 
