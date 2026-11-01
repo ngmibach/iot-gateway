@@ -1,0 +1,74 @@
+\babel@toc {english}{}\relax 
+\contentsline {chapter}{Acknowledgements}{i}{section*.2}%
+\contentsline {chapter}{Abbreviations}{vii}{section*.7}%
+\contentsline {chapter}{\numberline {1}Introduction}{1}{chapter.1}%
+\contentsline {section}{\numberline {1.1}Background and Motivation}{1}{section.1.1}%
+\contentsline {section}{\numberline {1.2}Problem Statement}{1}{section.1.2}%
+\contentsline {section}{\numberline {1.3}Project Aim and Objectives}{2}{section.1.3}%
+\contentsline {section}{\numberline {1.4}Report Organization}{3}{section.1.4}%
+\contentsline {chapter}{\numberline {2}Technical Background and Related Work}{4}{chapter.2}%
+\contentsline {section}{\numberline {2.1}MQTT and Edge Messaging}{4}{section.2.1}%
+\contentsline {section}{\numberline {2.2}Transport Security and Mutual TLS}{4}{section.2.2}%
+\contentsline {subsection}{\numberline {2.2.1}Confidentiality and integrity on the wire}{4}{subsection.2.2.1}%
+\contentsline {subsection}{\numberline {2.2.2}Mutual authentication}{5}{subsection.2.2.2}%
+\contentsline {subsection}{\numberline {2.2.3}Operational limits of transport security}{5}{subsection.2.2.3}%
+\contentsline {section}{\numberline {2.3}Application-Layer Message Protection}{5}{section.2.3}%
+\contentsline {section}{\numberline {2.4}Metrics, Logs, and Operational Visibility}{6}{section.2.4}%
+\contentsline {section}{\numberline {2.5}Related Work}{6}{section.2.5}%
+\contentsline {subsection}{\numberline {2.5.1}Secure MQTT at the broker}{6}{subsection.2.5.1}%
+\contentsline {subsection}{\numberline {2.5.2}Edge monitoring with metrics and logs}{7}{subsection.2.5.2}%
+\contentsline {subsection}{\numberline {2.5.3}Position of this work}{7}{subsection.2.5.3}%
+\contentsline {chapter}{\numberline {3}System Requirements}{8}{chapter.3}%
+\contentsline {section}{\numberline {3.1}Operational Context}{8}{section.3.1}%
+\contentsline {section}{\numberline {3.2}Functional Requirements}{9}{section.3.2}%
+\contentsline {section}{\numberline {3.3}Non-Functional Requirements}{11}{section.3.3}%
+\contentsline {section}{\numberline {3.4}Scope}{12}{section.3.4}%
+\contentsline {subsection}{\numberline {3.4.1}In scope}{12}{subsection.3.4.1}%
+\contentsline {subsection}{\numberline {3.4.2}Out of scope}{13}{subsection.3.4.2}%
+\contentsline {section}{\numberline {3.5}Threat Boundaries}{13}{section.3.5}%
+\contentsline {paragraph}{Security perimeter.}{13}{section*.9}%
+\contentsline {paragraph}{Assumed environment.}{13}{section*.10}%
+\contentsline {paragraph}{Threats addressed at the edge.}{13}{section*.11}%
+\contentsline {paragraph}{Threats outside this perimeter.}{13}{section*.12}%
+\contentsline {chapter}{\numberline {4}General System Architecture}{15}{chapter.4}%
+\contentsline {section}{\numberline {4.1}System Top-Level Architecture}{15}{section.4.1}%
+\contentsline {section}{\numberline {4.2}Monitoring Application Overview}{16}{section.4.2}%
+\contentsline {section}{\numberline {4.3}Gateway Overview}{17}{section.4.3}%
+\contentsline {section}{\numberline {4.4}Control Plane and Data Plane}{18}{section.4.4}%
+\contentsline {section}{\numberline {4.5}End-to-End Inbound Path}{18}{section.4.5}%
+\contentsline {section}{\numberline {4.6}Layered Message Protection Overview}{19}{section.4.6}%
+\contentsline {section}{\numberline {4.7}Deployment Topology and Ports}{21}{section.4.7}%
+\contentsline {section}{\numberline {4.8}Trust Material and Secrets}{22}{section.4.8}%
+\contentsline {section}{\numberline {4.9}Relation to Following Chapters}{22}{section.4.9}%
+\contentsline {chapter}{\numberline {5}Monitoring Application}{23}{chapter.5}%
+\contentsline {section}{\numberline {5.1}Architecture of the Monitoring Application}{23}{section.5.1}%
+\contentsline {section}{\numberline {5.2}Interaction with the Gateway}{23}{section.5.2}%
+\contentsline {subsection}{\numberline {5.2.1}Gateway discovery and installation}{23}{subsection.5.2.1}%
+\contentsline {subsection}{\numberline {5.2.2}Sensor and fake-sensor onboarding}{23}{subsection.5.2.2}%
+\contentsline {section}{\numberline {5.3}Functions and Operational Workflows}{23}{section.5.3}%
+\contentsline {subsection}{\numberline {5.3.1}Local monitoring preparation}{23}{subsection.5.3.1}%
+\contentsline {subsection}{\numberline {5.3.2}Observing metrics and transmission activity}{23}{subsection.5.3.2}%
+\contentsline {subsection}{\numberline {5.3.3}Control and laboratory exercise}{23}{subsection.5.3.3}%
+\contentsline {subsection}{\numberline {5.3.4}Lifecycle of the operator installation}{23}{subsection.5.3.4}%
+\contentsline {chapter}{\numberline {6}Gateway}{24}{chapter.6}%
+\contentsline {section}{\numberline {6.1}Architecture of the Gateway}{24}{section.6.1}%
+\contentsline {section}{\numberline {6.2}Agent Operation and MQTT Handling}{24}{section.6.2}%
+\contentsline {section}{\numberline {6.3}Inbound Processing Path}{24}{section.6.3}%
+\contentsline {section}{\numberline {6.4}Gateway APIs and Control Interfaces}{24}{section.6.4}%
+\contentsline {section}{\numberline {6.5}Detection and Response Behaviour}{24}{section.6.5}%
+\contentsline {chapter}{\numberline {7}Encryption and Decryption}{25}{chapter.7}%
+\contentsline {section}{\numberline {7.1}Protection Model}{25}{section.7.1}%
+\contentsline {section}{\numberline {7.2}Transport Security and Mutual TLS}{25}{section.7.2}%
+\contentsline {section}{\numberline {7.3}Application-Layer Envelope}{25}{section.7.3}%
+\contentsline {section}{\numberline {7.4}Encryption and Decryption Workflow}{25}{section.7.4}%
+\contentsline {section}{\numberline {7.5}Schema Validation and Accepted Storage}{25}{section.7.5}%
+\contentsline {chapter}{\numberline {8}Evaluation}{26}{chapter.8}%
+\contentsline {section}{\numberline {8.1}Evaluation Goals and Method}{26}{section.8.1}%
+\contentsline {section}{\numberline {8.2}Admission and Authentication}{26}{section.8.2}%
+\contentsline {section}{\numberline {8.3}Protected Transmission and Storage}{26}{section.8.3}%
+\contentsline {section}{\numberline {8.4}Monitoring and Detection}{26}{section.8.4}%
+\contentsline {section}{\numberline {8.5}Resource Use and Limitations}{26}{section.8.5}%
+\contentsline {chapter}{\numberline {9}Conclusion and Future Work}{27}{chapter.9}%
+\contentsline {section}{\numberline {9.1}Summary}{27}{section.9.1}%
+\contentsline {section}{\numberline {9.2}Contributions}{27}{section.9.2}%
+\contentsline {section}{\numberline {9.3}Future Work}{27}{section.9.3}%

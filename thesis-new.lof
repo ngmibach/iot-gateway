@@ -1,0 +1,18 @@
+\babel@toc {english}{}\relax 
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\contentsline {figure}{\numberline {4.1}{\ignorespaces Top-level architecture of IoT-SecureGate: monitoring application, gateway, and sensors.}}{16}{figure.caption.13}%
+\contentsline {figure}{\numberline {4.2}{\ignorespaces Overview of the monitoring application on the operator PC.}}{17}{figure.caption.14}%
+\contentsline {figure}{\numberline {4.3}{\ignorespaces Overview of the gateway runtime and its links to operator observability.}}{18}{figure.caption.15}%
+\contentsline {figure}{\numberline {4.4}{\ignorespaces Control plane (SSH) and data plane (MQTTS and HTTP observability) between operator PC, gateway, and sensors.}}{18}{figure.caption.16}%
+\contentsline {figure}{\numberline {4.5}{\ignorespaces End-to-end inbound path from sensor publish to storage and operator observability.}}{19}{figure.caption.17}%
+\contentsline {figure}{\numberline {4.6}{\ignorespaces Layered protection on the inbound path: MQTTS transport and application envelope v1.}}{20}{figure.caption.18}%
+\contentsline {figure}{\numberline {4.7}{\ignorespaces Deployment topology and principal ports on a trusted LAN.}}{21}{figure.caption.22}%
+\contentsline {figure}{\numberline {4.8}{\ignorespaces Overview of trust material on the operator PC and on the gateway.}}{22}{figure.caption.23}%
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }
+\addvspace {10\p@ }

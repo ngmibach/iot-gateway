@@ -53,6 +53,7 @@ Shared docs/UI changes ship on `windows` then `linux` (`docs(windows):` / `docs(
 | [`docs/architecture.md`](docs/architecture.md) | Mermaid overview: system, monitoring app, gateway, data path, encryption, operations |
 | [`docs/details.md`](docs/details.md) | Ports, paths, APIs, Kafka capacity, envelope v1 crypto, fake sensors |
 | [`docs/UI.md`](docs/UI.md) | How to use Wizard and every Monitoring / Gateways / Settings feature |
+| [`docs/AI-PLATFORM-KNOWLEDGE.md`](docs/AI-PLATFORM-KNOWLEDGE.md) | AI/thesis knowledge base: IoT-SecureGate context, architecture, function map, UI, implemented vs planned |
 | [`docs/samples/`](docs/samples/) | Sample payloads (for example Simulate manufacturing JSON) |
 
 ---

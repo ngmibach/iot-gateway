@@ -1,5 +1,3 @@
-# Leftover local Docker data (remove with: sudo rm -rf monitoring)
-monitoring/
 *.crt
 *.key
 *.csr
@@ -15,3 +13,5 @@ apps/desktop/src-tauri/target/
 apps/desktop/build/
 apps/desktop/dist/
 .venv/
+*.tex
+assets/docs/
