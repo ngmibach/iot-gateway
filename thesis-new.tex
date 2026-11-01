@@ -1,0 +1,2135 @@
+\documentclass[12pt,a4paper]{report}
+
+% =========================================================
+% IoT-SecureGate — ground-up thesis draft
+% Write the shared platform story here.
+% Use thesis.tex only as a reference quarry (metadata, bib, phrasing).
+% Knowledge base: docs/AI-PLATFORM-KNOWLEDGE.md
+% =========================================================
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage[english]{babel}
+\usepackage[margin=2.5cm]{geometry}
+
+\usepackage{graphicx}
+\usepackage{amsmath,amssymb}
+
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{longtable}
+
+\usepackage{float}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[section]{placeins}
+
+\usepackage{microtype}
+\usepackage{enumitem}
+\usepackage{listings}
+\usepackage{xcolor}
+
+\usepackage{tikz}
+\usetikzlibrary{
+    arrows.meta,
+    positioning,
+    shapes.geometric,
+    fit,
+    backgrounds,
+    calc
+}
+
+\usepackage{url}
+\usepackage{hyperref}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    citecolor=blue,
+    urlcolor=blue,
+    pdftitle={IoT-SecureGate Unified Software Platform},
+    pdfsubject={Bachelor Thesis Project},
+    pdfkeywords={
+        IoT,
+        MQTT,
+        authentication,
+        intrusion detection,
+        gateway management,
+        monitoring,
+        IoT-SecureGate
+    }
+}
+
+\setcounter{secnumdepth}{2}
+\setcounter{tocdepth}{2}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{6pt}
+\setlength{\emergencystretch}{3em}
+
+\renewcommand{\arraystretch}{1.2}
+\urlstyle{same}
+
+\setlist[itemize,1]{
+    label=\textbullet,
+    leftmargin=2em,
+    labelsep=0.5em,
+    itemindent=0pt,
+    listparindent=0pt,
+    topsep=6pt,
+    itemsep=6pt,
+    parsep=0pt,
+    partopsep=0pt
+}
+
+\setlist[itemize,2]{
+    label=\textendash,
+    leftmargin=1.8em,
+    labelsep=0.5em,
+    itemindent=0pt,
+    listparindent=0pt,
+    topsep=3pt,
+    itemsep=3pt,
+    parsep=0pt,
+    partopsep=0pt
+}
+
+\setlist[enumerate]{
+    leftmargin=2em,
+    labelsep=0.5em,
+    itemindent=0pt,
+    listparindent=0pt,
+    topsep=6pt,
+    itemsep=4pt,
+    parsep=0pt,
+    partopsep=0pt
+}
+
+\newcolumntype{Y}{
+    >{\raggedright\arraybackslash}X
+}
+
+\newcolumntype{P}[1]{
+    >{\raggedright\arraybackslash}p{#1}
+}
+
+\definecolor{codebackground}{rgb}{0.96,0.96,0.96}
+
+\lstset{
+    basicstyle=\ttfamily\small,
+    backgroundcolor=\color{codebackground},
+    breaklines=true,
+    frame=single,
+    columns=fullflexible,
+    keepspaces=true,
+    showstringspaces=false,
+    captionpos=b,
+    tabsize=4
+}
+
+\tikzset{
+    box/.style={
+        draw,
+        rounded corners,
+        align=center,
+        text width=10cm,
+        minimum height=9mm,
+        font=\small
+    },
+    flow/.style={
+        -{Latex[length=2mm]},
+        thick
+    },
+    archbox/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        font=\scriptsize\sffamily,
+        inner sep=4pt,
+        minimum height=8mm
+    },
+    archcomp/.style={
+        archbox,
+        fill=gray!8,
+        text width=2.5cm
+    },
+    archhost/.style={
+        draw,
+        dashed,
+        rounded corners=3pt,
+        inner sep=8pt,
+        align=center,
+        font=\small\sffamily\bfseries
+    },
+    archlabel/.style={
+        font=\scriptsize\sffamily,
+        align=center
+    },
+    archflow/.style={
+        -{Latex[length=1.8mm]},
+        thick,
+        font=\scriptsize\sffamily
+    },
+    archflowsoft/.style={
+        -{Latex[length=1.8mm]},
+        thick,
+        dashed,
+        font=\scriptsize\sffamily
+    }
+}
+
+% Screenshots from assets/docs/
+\newcommand{\appshot}[4][]{%
+    \begin{figure}[htbp]
+        \centering
+        \IfFileExists{#2}{%
+            \includegraphics[
+                width=0.96\linewidth,
+                height=0.68\textheight,
+                keepaspectratio
+            ]{#2}%
+        }{%
+            \fbox{%
+                \parbox{0.88\linewidth}{%
+                    \centering
+                    \vspace{0.4cm}
+                    Image file not found:\\[4pt]
+                    \texttt{\detokenize{#2}}\\[6pt]
+                    Place the file under \texttt{assets/docs/}.
+                    \vspace{0.4cm}
+                }%
+            }%
+        }%
+        \caption[#3]{#3.}%
+        \label{#4}%
+    \end{figure}%
+}
+
+\newcommand{\ReportHeading}{
+    IoT-SecureGate: Unified Software Platform
+    for Secure Edge IoT Gateways
+}
+
+\newcommand{\SubmissionYear}{2026}
+
+\begin{document}
+
+% =========================================================
+% TITLE PAGE — shared project team
+% =========================================================
+\begin{titlepage}
+    \centering
+
+    \noindent
+    \begin{minipage}{\textwidth}
+        \raggedright
+        \IfFileExists{assets/docs/VGU-Logo.png}{
+            \includegraphics[width=4cm]{assets/docs/VGU-Logo.png}
+        }{
+            \vspace*{1cm}
+        }
+    \end{minipage}
+
+    \vspace{0.8cm}
+
+    {\large Vietnamese-German University\par}
+
+    \vspace{0.15cm}
+
+    {\large
+        Electrical and Computer Engineering Study Program
+        \par
+    }
+
+    \vfill
+
+    {\huge\bfseries Title:\par}
+
+    \vspace{0.4cm}
+
+    {\Large\bfseries \ReportHeading\par}
+
+    \vspace{0.4cm}
+
+    {\large
+        Monitoring Application and Secure Edge Gateway
+        \par
+    }
+
+    \vfill
+
+    {\large By\par}
+
+    \vspace{0.4cm}
+
+    \begin{tabular}{lc}
+        \toprule
+        \textbf{Name} & \textbf{Student ID} \\
+        \midrule
+        Nguyen Tran Son Tung & 10222035 \\
+        Nguyen Minh Bach     & 10222002 \\
+        Pham Huynh Tri Thuc  & 10222058 \\
+        \bottomrule
+    \end{tabular}
+
+    \vspace{0.8cm}
+
+    \begin{tabular}{ll}
+        First Supervisor:
+        & Assoc. Prof. Dr. Chan Thai Truyen Dai \\[0.2cm]
+
+        Second Supervisor:
+        & Mr. Tran Quang Nhu \\
+    \end{tabular}
+
+    \vfill
+
+    {\large\bfseries BACHELOR THESIS PROJECT\par}
+
+    \vspace{0.5cm}
+
+    {\large
+        An integrated account of the IoT-SecureGate platform.
+        \par
+    }
+
+    \vfill
+
+    {\large
+        Vietnamese-German University, \SubmissionYear
+        \par
+    }
+\end{titlepage}
+
+% =========================================================
+% FRONT MATTER
+% =========================================================
+\pagenumbering{roman}
+
+\begin{abstract}
+
+In manufacturing and other factory-floor IoT deployments, edge sensors
+continuously send measurements into internal systems that drive monitoring,
+control, and production decisions. Those edge devices sit outside the trusted
+core of the plant network, so unauthorized clients, stolen credentials, or
+malicious publishers can inject false data or abuse messaging channels.
+Without a controlled entry point, the plant cannot reliably decide which
+devices may speak, what they may publish, or when a source should be cut off.
+
+IoT-SecureGate is a security gateway for this setting. It sits between edge
+devices and the internal network and gives administrators a single place to
+govern incoming sensor messages, monitor the gateway and data path through
+operational metrics, and detect denied or invalid traffic so misuse can be
+stopped. The platform authenticates and authorizes devices before they may
+publish, protects inbound transmission, keeps the health of that path
+visible, and supports operator response when traffic is denied or abnormal.
+
+This thesis presents the design and implementation of that secure gateway.
+Relative to earlier research prototypes, the work also delivers the gateway
+as a ready-to-use software package for operators. The report evaluates the
+gateway functions in operation and notes directions in which the system can
+be improved in future work.
+
+\medskip
+\noindent
+\textbf{Keywords:}
+IoT security, edge gateway, MQTT, device authentication,
+manufacturing IoT, gateway monitoring.
+
+\end{abstract}
+
+\chapter*{Acknowledgements}
+\phantomsection
+\addcontentsline{toc}{chapter}{Acknowledgements}
+
+We would like to thank our supervisors for their guidance, feedback, and support throughout this project.
+We also thank the academic staff who provided advice during the development and preparation of this thesis.
+
+
+\tableofcontents
+\listoffigures
+\listoftables
+
+\clearpage
+
+\chapter*{Abbreviations}
+\phantomsection
+\addcontentsline{toc}{chapter}{Abbreviations}
+
+\begin{tabularx}{\textwidth}{|P{2.5cm}|Y|}
+    \hline
+    \textbf{Term} & \textbf{Meaning} \\
+    \hline
+    ACL & Access Control List \\
+    \hline
+    API & Application Programming Interface \\
+    \hline
+    CA & Certificate Authority \\
+    \hline
+    CPU & Central Processing Unit \\
+    \hline
+    CSR & Certificate Signing Request \\
+    \hline
+    DMEC & Daily Message Encryption Certificate \\
+    \hline
+    GUI & Graphical User Interface \\
+    \hline
+    IDS & Intrusion Detection System \\
+    \hline
+    IoT & Internet of Things \\
+    \hline
+    JSON & JavaScript Object Notation \\
+    \hline
+    MQTT & Message Queuing Telemetry Transport \\
+    \hline
+    mTLS & Mutual Transport Layer Security \\
+    \hline
+    PKI & Public Key Infrastructure \\
+    \hline
+    RAM & Random Access Memory \\
+    \hline
+    SSH & Secure Shell \\
+    \hline
+    TLS & Transport Layer Security \\
+    \hline
+    UI & User Interface \\
+    \hline
+\end{tabularx}
+
+\clearpage
+\pagenumbering{arabic}
+
+% =========================================================
+% CHAPTERS — write the platform story here
+% =========================================================
+
+\chapter{Introduction}
+\label{ch:introduction}
+
+\section{Background and Motivation}
+
+Modern manufacturing and factory environments rely on
+Internet of Things (IoT) edge devices---sensors on
+machines, lines, and cells---to stream measurements into
+internal monitoring and control systems. That inbound
+telemetry supports production visibility, quality checks,
+and operational decisions. The communication pattern is
+typically publish/subscribe over MQTT: many constrained
+clients send data through a broker toward applications
+inside the plant~\cite{mqtt}.
+
+The edge is also an exposed surface. Devices may be
+physically accessible, credentials may leak, and a
+compromised or spoofed publisher can inject false readings
+or abuse messaging channels that reach systems behind the
+plant boundary. As factories connect more sensors, the
+risk is no longer limited to a single host: an untrusted
+edge client that can publish freely becomes a path into
+the internal data path that operators and receivers depend
+on.
+
+A security gateway is therefore required at the boundary
+between edge devices and the internal network. Its job is
+to decide which devices may transmit, under which
+identity and topic policy, with which cryptographic
+protections, and to keep that inbound path observable so
+that misuse can be detected and stopped. IoT-SecureGate
+is developed for that role: a secure edge gateway that
+authenticates devices, controls transmission into the
+plant side, protects message content, and supports
+operator response when traffic is denied or invalid.
+
+\section{Problem Statement}
+
+Without a dedicated gateway, factory IoT traffic often
+arrives through a broker that accepts clients with weak
+or manually maintained credentials, little binding between
+device identity and allowed topics, and limited visibility
+into failed or abusive publishes. Operators then face
+three concrete failures:
+
+\begin{itemize}
+    \item \textbf{Uncontrolled admission.}
+    Unknown or poorly identified devices can reach the
+    broker and publish toward internal consumers.
+    \item \textbf{Unprotected or weakly protected
+    transmission.}
+    Payloads may travel without mutual authentication,
+    without application-layer confidentiality after TLS
+    termination, or without checks that the message shape
+    matches what the gateway expects.
+    \item \textbf{Weak response to misuse.}
+    Denied connections and invalid messages may leave only
+    raw broker logs, with no clear path to alert the
+    operator, revoke publish rights, or quarantine a
+    hostile source.
+\end{itemize}
+
+The central problem of this thesis is how to operate a
+secure gateway end to end for such environments: admit
+only registered edge devices, enforce authentication and
+authorization on the path into the internal network,
+protect and validate messages, observe gateway and message
+activity, and restrict devices that violate policy.
+
+\section{Project Aim and Objectives}
+
+The aim is to design, implement, and evaluate
+IoT-SecureGate as one secure gateway system that governs
+edge device access and inbound data transmission for
+factory and similar IoT deployments. The thesis describes
+that system as a whole: the operator monitoring
+application and the gateway that admits, protects,
+observes, and responds on the inbound sensor path.
+
+The concrete objectives follow that function:
+
+\begin{itemize}
+    \item \textbf{Objective 1: Secure device admission.}
+    Ensure that only registered devices with valid
+    credentials and certificates can connect and publish
+    on allowed topics.
+
+    \item \textbf{Objective 2: Controlled and protected
+    transmission.}
+    Carry inbound sensor data over MQTTS, decrypt and
+    validate envelopes on the gateway, and forward
+    accepted data onto the internal storage and messaging
+    path.
+
+    \item \textbf{Objective 3: Monitor gateway metrics and
+    transmission activity.}
+    Observe the health and metrics of the gateway and the live behaviour of inbound
+    transmission flows for analysis.
+
+    \item \textbf{Objective 4: Alert and automatically
+    restrict invalid sensors.}
+    Detect denied and invalid messages, alert the
+    administrator when such traffic appears, and provide
+    mechanisms that can automatically block invalid sensors,
+    with manual controls when the operator needs to intervene.
+\end{itemize}
+
+Building on earlier Senior Project prototypes, this work
+also delivers the gateway as a ready-to-use software
+package (desktop operator application and gateway agent)
+so that the security functions above can be deployed and
+operated without reconstructing the system from separate
+research scripts.
+
+\section{Report Organization}
+
+\begin{table}[H]
+\centering
+\begin{tabularx}{\textwidth}{|c|Y|Y|}
+\hline
+\textbf{Ch.} & \textbf{Title} & \textbf{Content} \\
+\hline
+\ref{ch:background}
+& Technical Background and Related Work
+& Messaging, transport security, message protection,
+  monitoring building blocks, and related research. \\
+\hline
+\ref{ch:requirements}
+& System Requirements
+& Operational context, functional and non-functional
+  requirements, scope, and threat boundaries. \\
+\hline
+\ref{ch:architecture}
+& General System Architecture
+& System overview diagrams: two runtimes, planes,
+  inbound path, protection layers, ports, and trust
+  material. \\
+\hline
+\ref{ch:monitoring}
+& Monitoring Application
+& Operator runtime architecture, interaction with the
+  gateway, and operational workflows. \\
+\hline
+\ref{ch:gateway}
+& Gateway
+& Edge runtime architecture, agent and MQTT handling,
+  gateway APIs, and detection and response. \\
+\hline
+\ref{ch:encryption}
+& Encryption and Decryption
+& Transport and application-layer message protection
+  workflows on the inbound path. \\
+\hline
+\ref{ch:evaluation}
+& Evaluation
+& Assessment of the system in operation. \\
+\hline
+\ref{ch:conclusion}
+& Conclusion and Future Work
+& Summary of the work and directions for later
+  improvement. \\
+\hline
+\end{tabularx}
+\caption{Organization of the report.}
+\label{tab:report-organization}
+\end{table}
+
+% =========================================================
+% CHAPTERS — system as a whole (not role-split modules)
+% Source of truth: docs/AI-PLATFORM-KNOWLEDGE.md,
+% docs/architecture.md, docs/details.md
+% =========================================================
+
+\chapter{Technical Background and Related Work}
+\label{ch:background}
+
+This chapter introduces the technical ideas needed to
+read the system design that follows. It covers edge
+messaging with MQTT, transport authentication with
+mutual TLS, application-layer message protection,
+and operational metrics and logs. A short related-work
+section places the project next to common practice in
+secure MQTT brokers and edge monitoring.
+Implementation of IoT-SecureGate begins in later
+chapters.
+
+\section{MQTT and Edge Messaging}
+
+MQTT is a lightweight publish/subscribe messaging
+protocol widely used for IoT telemetry~\cite{mqtt}.
+Clients do not send data directly to every consumer.
+They connect to a \emph{broker}, which accepts
+\emph{publish} operations and delivers messages to
+clients that have \emph{subscribed} to matching
+\emph{topics}.
+
+A topic is a hierarchical name. Authorization at
+the broker decides which clients may publish or
+subscribe on which topics. That decision is separate
+from the network path the packets take: a client that
+can open a connection is not automatically allowed to
+use every topic.
+
+In a factory or plant setting, many edge sensors publish
+measurements toward applications inside the internal
+network. The broker---often placed on a local
+gateway---becomes the controlled meeting point for that
+inbound traffic. Understanding MQTT therefore matters
+for any gateway that must admit devices, restrict topic
+use, and forward accepted data further inland.
+
+\section{Transport Security and Mutual TLS}
+
+\subsection{Confidentiality and integrity on the wire}
+
+Without transport protection, MQTT credentials and
+payloads can be observed or altered on the network.
+TLS provides an encrypted and integrity-protected
+channel between client and server~\cite{tls}. When MQTT
+runs over TLS (commonly called MQTTS), the broker
+presents a certificate so the client can verify
+that it is talking to the intended endpoint.
+
+\subsection{Mutual authentication}
+
+Server authentication alone does not prove who the
+client is. Mutual TLS (mTLS) additionally requires the
+client to present an X.509 certificate that the broker
+trusts~\cite{x509}. The broker then binds the TLS
+identity to local policy before accepting the MQTT
+session.
+
+Password authentication at the broker is a second,
+independent check. Mosquitto, for example, can require
+a username and password and can enforce topic access
+control lists (ACLs) that allow or deny publish and
+subscribe operations per client~\cite{mosquitto}.
+Valid passwords do not replace topic ACLs: a client may
+authenticate successfully and still be denied a
+forbidden topic.
+
+The intended access decision can be stated as:
+
+\begin{equation}
+\operatorname{AccessAllowed}
+=
+\operatorname{Authenticated}
+\land
+\operatorname{Authorized}.
+\end{equation}
+
+Authentication establishes the identity claim
+(password and/or client certificate). Authorization
+checks the requested publish or subscribe against
+policy. Both must succeed for the operation to proceed.
+
+\subsection{Operational limits of transport security}
+
+TLS protects data while it travels between endpoints.
+After the broker terminates TLS, the application that
+reads the message sees plaintext unless a further
+protection layer is applied. Certificate lifecycle
+(issuance, renewal, trust store configuration) also
+belongs to operational security: a correct protocol
+choice still fails if devices use expired or untrusted
+certificates.
+
+\section{Application-Layer Message Protection}
+
+Application-layer protection addresses confidentiality
+and integrity of the payload \emph{after} TLS
+termination, and can add checks that transport alone
+does not provide.
+
+A typical pattern is an \emph{envelope}: the sensor
+encrypts the measurement under a content key, wraps
+that key for the gateway, and sends one or more MQTT
+messages that the gateway can unwrap, decrypt, and
+validate. Authenticated encryption (for example
+AES-GCM) binds confidentiality to an integrity tag so
+that modified ciphertext is rejected.
+
+Two further ideas matter for a gateway that must store
+or forward decoded measurements:
+
+\begin{itemize}
+    \item \textbf{Schema validation.}
+    After decrypt, the gateway checks that the JSON (or
+    other) payload matches the shape expected for that
+    device. A cryptographically valid message can still
+    be invalid for the application.
+    \item \textbf{Freshness / replay resistance.}
+    Encryption does not by itself prove that a message
+    is new. An application may reject repeated message
+    identifiers or other freshness tokens so that a
+    captured envelope cannot be replayed successfully.
+\end{itemize}
+
+Transport security and application-layer protection
+answer different questions. MQTTS and mTLS answer who
+may connect and publish. The envelope answers whether
+the measurement remains confidential beyond the TLS
+hop and whether the decoded content is acceptable to
+the gateway.
+
+After a message is accepted and decoded, a gateway
+typically retains it for local audit and forwards it
+onto an inland messaging or storage path so plant-side
+consumers can read the same measurements. The exact
+technologies used by IoT-SecureGate are described in
+the architecture chapters; the background point is that
+admission and decrypt are not the end of the inbound
+path.
+
+\section{Metrics, Logs, and Operational Visibility}
+
+A secure gateway that only enforces policy still leaves
+operators without evidence that the path is healthy.
+Operational visibility usually combines two kinds of
+signal:
+
+\begin{itemize}
+    \item \textbf{Metrics} are numerical time series
+    (CPU use, memory, message rates, processing delays).
+    Prometheus is a common system for scraping metric
+    endpoints and storing those series~\cite{prometheus}.
+    \item \textbf{Logs} are event records (accepted
+    messages, denied connections, decryption failures).
+    Loki is a common system for aggregating and querying
+    such logs~\cite{loki}.
+\end{itemize}
+
+Dashboards (for example Grafana) present metrics and
+logs so that administrators can inspect gateway health
+and transmission activity without reading raw service
+files. For an edge gateway, useful visibility includes
+both \emph{host and service health} and \emph{message-path
+activity}, including signs that traffic was denied or
+failed validation. Those signals are the conceptual
+basis for alerting and for deciding when a misbehaving
+source should be restricted.
+
+\section{Related Work}
+
+\subsection{Secure MQTT at the broker}
+
+Production MQTT deployments commonly combine TLS,
+broker passwords, and topic ACLs so that only known
+clients can publish on allowed
+channels~\cite{mqtt,mosquitto}. Mutual TLS extends
+that model by also requiring a trusted client
+certificate, which is a standard pattern for strong
+device identity on the wire~\cite{tls,x509}. Many
+gateways use password authentication and client
+certificates together with topic ACLs, so that
+transport identity and publish rights are both
+checked before a measurement is accepted.
+
+That line of practice matches the security problems
+addressed later in this thesis: register a device,
+bind it to credentials and certificates, and enforce
+who may connect and publish at the broker. The
+background here is broker-side access control and
+message protection, not a machine-learning intrusion
+pipeline.
+
+\subsection{Edge monitoring with metrics and logs}
+
+On the operations side, scraping numerical metrics and
+collecting service logs is standard for keeping hosts
+and pipelines visible~\cite{prometheus,loki}. Edge
+gateways use the same idea: expose health of the
+broker and processing path, and retain event records
+when a connection or message is rejected.
+
+This thesis builds on that practice for gateway
+metrics and transmission activity. Denied connections
+and invalid messages appear as operational signals on
+that path---something the administrator can see and
+act on through alerts and publish restrictions.
+
+\subsection{Position of this work}
+
+IoT-SecureGate sits at the intersection of those two
+areas: a secure MQTT gateway with explicit device
+admission and message protection, plus operator
+visibility into gateway health and inbound
+transmission. The following chapters describe how
+that system is designed and implemented.
+
+\chapter{System Requirements}
+\label{ch:requirements}
+
+This chapter states what IoT-SecureGate must achieve as a
+secure edge gateway. Requirements follow from the problem
+and objectives in Chapter~\ref{ch:introduction} and from
+the operational setting of factory and similar IoT
+deployments. They describe the behaviour the system must
+provide; architecture and implementation appear in later
+chapters. Functional requirements are labelled
+FR-\textit{n}; non-functional requirements are labelled
+NFR-\textit{n}. Those identifiers are reused when the
+design and evaluation refer back to this chapter. The
+chapter also fixes the thesis scope and the security
+threat boundaries that apply to those requirements.
+
+\section{Operational Context}
+
+IoT-SecureGate sits between edge sensors and the
+internal plant network. Sensors on machines, lines, or
+cells publish measurements toward applications that
+operators and plant systems use for monitoring and
+control. The gateway is the controlled entry point on
+that inbound path: it admits devices, authenticates and
+authorizes publishes, protects and validates message
+content, stores accepted data for internal consumers,
+and keeps the path observable so that denied or invalid
+traffic can be detected and restricted.
+
+The platform has two runtimes that operators treat as
+one system:
+
+\begin{itemize}
+    \item \textbf{Monitoring application (operator PC).}
+    A packaged desktop application with a local control
+    service and a local observability stack
+    (Loki, Prometheus, Grafana). From this application
+    the administrator discovers and provisions gateways,
+    registers devices, watches metrics and transmission
+    activity, and applies day-to-day control actions.
+    \item \textbf{Gateway (edge device).}
+    An agent on a Linux edge host (for example a
+    Raspberry Pi or small Ubuntu machine) together with
+    an MQTTS broker and per-sensor messaging storage.
+    Sensors connect here over MQTTS. The gateway
+    decrypts and validates payloads, appends accepted
+    data to a local log and to Kafka broker, ships logs
+    to the operator stack, and exposes metrics for
+    scraping.
+\end{itemize}
+
+The primary actor is the \emph{administrator}: the
+person who installs the monitoring application,
+provisions gateways over the local network, registers
+sensors, and responds when Activities show denied or
+invalid traffic. Secondary actors are \emph{edge
+sensors} (real devices or laboratory fake publishers
+used for testing). Internal consumers that read stored
+Kafka topics or logs sit behind the gateway; they are
+not operators of the security controls themselves.
+
+The intended deployment is a trusted plant or laboratory
+LAN. The operator PC and the gateway communicate for
+provision and day-2 actions over SSH. Sensor ingress
+uses MQTTS on the gateway. Metrics and logs return to
+the operator PC over HTTP on the same LAN. Routine
+operation is meant for users who can run an installer
+and use a graphical interface, without reconstructing
+the stack from separate research scripts.
+
+\section{Functional Requirements}
+
+Functional requirements cover admission, protected
+transmission, monitoring, detection and response, and
+the operator path that makes those functions deployable.
+They map to the four objectives in
+Chapter~\ref{ch:introduction}: secure device admission,
+controlled and protected transmission, gateway and
+activity monitoring, and alert plus restriction of
+invalid sensors.
+
+\begin{longtable}{@{}p{1.6cm}p{\dimexpr\textwidth-1.6cm-4\tabcolsep\relax}@{}}
+\caption{Functional requirements for IoT-SecureGate.}
+\label{tab:functional-requirements}\\
+\toprule
+\textbf{ID} & \textbf{Requirement} \\
+\midrule
+\endfirsthead
+\caption[]{Functional requirements for IoT-SecureGate
+  (continued).}\\
+\toprule
+\textbf{ID} & \textbf{Requirement} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+FR-1
+& The system shall admit only registered devices to the
+  gateway broker. Registration shall bind a device
+  identity to MQTT credentials, topic permissions, a
+  client certificate under the gateway CA, and a
+  reserved per-sensor storage topic. \\
+\midrule
+FR-2
+& The gateway shall authenticate connecting clients with
+  MQTT password verification and mutual TLS (client
+  certificate required), and shall authorize publishes
+  with topic ACLs so that a device may publish only on
+  its allowed topics. \\
+\midrule
+FR-3
+& Inbound sensor traffic shall use MQTTS on the gateway.
+  After transport termination, the gateway shall decrypt
+  application-layer envelopes (envelope v1), validate
+  message shape against a registered schema, and reject
+  traffic that fails those checks. \\
+\midrule
+FR-4
+& Accepted message shall be written to a local sensor
+  data log and produced to a per-device Kafka topic so
+  that internal consumers and the operator observability
+  path can use the data. \\
+\midrule
+FR-5
+& The monitoring application shall discover and provision
+  a gateway over SSH: install the agent, MQTTS broker
+  configuration, and Kafka service; bootstrap gateway CA
+  and server material; and record the gateway in a local
+  registry with scrape and ship targets toward the
+  operator stack. \\
+\midrule
+FR-6
+& The administrator shall register and unregister devices
+  from the monitoring application. Registration shall
+  apply the admission material on the gateway (password,
+  ACL, client certificate, crypto and schema files,
+  Kafka topic) without requiring manual broker edits. \\
+\midrule
+FR-7
+& The system shall expose gateway host and application
+  health (agent, MQTT, decrypt, shipper, Kafka) as
+  metrics scraped by the operator Prometheus instance,
+  and shall present those metrics in the monitoring
+  application. \\
+\midrule
+FR-8
+& The system shall expose inbound transmission activity
+  (message rates, delays, connected sensors, denied and
+  invalid counts) through logs and summary APIs, and
+  shall present that activity in the monitoring
+  application. \\
+\midrule
+FR-9
+& The gateway shall detect transport denials (failed
+  authentication or ACL) and application-layer invalid
+  messages (decrypt or schema failure), and shall make
+  those events visible to the administrator as alerts in
+  the monitoring application. \\
+\midrule
+FR-10
+& The administrator shall be able to block and restore a
+  device's publish rights (ACL change) from the
+  monitoring application. \\
+\midrule
+FR-11
+& The system shall support automatic restriction of a
+  sensor source after a configurable count of invalid
+  messages in a time window (firewall DROP of the source
+  IP on the gateway), with an operator path to clear that
+  quarantine. \\
+\midrule
+FR-12
+& The system shall provide laboratory fake sensors on
+  the gateway for testing admission, protected
+  transmission, and misuse behaviours (including
+  simulation of attack-like publish patterns) without
+  requiring physical hardware for every test. \\
+\midrule
+FR-13
+& The monitoring application shall install and run a
+  local observability stack (Loki, Prometheus, Grafana)
+  on the operator PC so that metrics and shipped logs
+  are available without a separate monitoring deployment for routine use. \\
+\midrule
+FR-14
+& Secrets used for gateway CA signing, day-2 privileged
+  actions, and local admin functions shall be stored in
+  the operator OS keyring (with a documented file
+  fallback), and shall not be written into ordinary
+  settings files or application logs. \\
+\end{longtable}
+
+FR-1 through FR-4 define the inbound security path on
+the gateway. FR-5, FR-6, FR-13, and FR-14 define the
+operator-side means to deploy and maintain that path.
+FR-7 and FR-8 cover visibility. FR-9 through FR-11 cover
+detection and response. FR-12 supports evaluation and
+laboratory exercise of the same path. A packaged
+machine-learning intrusion-detection module inside the
+installer is outside these requirements; deny and
+invalid-message handling, plus block and Auto prevent,
+are the protection controls in scope.
+
+\section{Non-Functional Requirements}
+
+Non-functional requirements constrain how the functional
+behaviour is delivered: who can operate the system, how
+it is packaged, how resources and capacity are bounded,
+and how trustworthy the operator path remains.
+
+\begin{longtable}{@{}p{1.6cm}p{\dimexpr\textwidth-1.6cm-4\tabcolsep\relax}@{}}
+\caption{Non-functional requirements for IoT-SecureGate.}
+\label{tab:nonfunctional-requirements}\\
+\toprule
+\textbf{ID} & \textbf{Requirement} \\
+\midrule
+\endfirsthead
+\caption[]{Non-functional requirements for IoT-SecureGate
+  (continued).}\\
+\toprule
+\textbf{ID} & \textbf{Requirement} \\
+\midrule
+\endhead
+\bottomrule
+\endlastfoot
+NFR-1
+& \textbf{Usability.}
+  Routine setup and day-to-day operation shall be
+  possible through the packaged graphical monitoring
+  application (install local monitoring, provision a
+  gateway, register devices, view Metric and Activities,
+  apply Control actions) without requiring the
+  administrator to edit source code or maintain a
+  multi-compose research stack for those tasks. \\
+\midrule
+NFR-2
+& \textbf{Deployability.}
+  The monitoring application shall be distributable as
+  native packages for Windows and Linux so that the operator path can
+  be installed on a PC without Docker or WSL as a
+  default dependency. \\
+\midrule
+NFR-3
+& \textbf{Gateway footprint.}
+  The gateway runtime shall run as a service stack on a
+  modest Linux edge host (agent, system Mosquitto,
+  Kafka), suitable for small industrial or laboratory
+  devices such as a Raspberry Pi--class machine. \\
+\midrule
+NFR-4
+& \textbf{Capacity bound.}
+  The number of registered sensors (real and laboratory
+  fake) shall be limited by gateway disk budget for
+  Kafka topic retention so that registration fails
+  clearly when capacity is exhausted rather than filling
+  the device unbounded. \\
+\midrule
+NFR-5
+& \textbf{Data-path integrity.}
+  Only messages that pass authentication, authorization,
+  decryption, and schema validation shall be appended to
+  the sensor data log and produced to Kafka; failed
+  attempts shall contribute to deny / invalid signalling
+  instead of silent acceptance. \\
+\midrule
+NFR-6
+& \textbf{Confidentiality of operator secrets.}
+  CA passphrases, gateway sudo credentials for day-2
+  playbooks, and the local admin PIN shall not appear in
+  settings JSON or routine logs; provision of privileged
+  commands shall pass passwords on SSH standard input
+  rather than on remote process argument lists. \\
+\midrule
+NFR-7
+& \textbf{Operational visibility.}
+  Gateway metrics and shipped activity logs shall be
+  available to the monitoring application through the
+  local Prometheus and Loki instances so that the
+  administrator can inspect health and invalid traffic
+  during normal operation of the LAN deployment. \\
+\midrule
+NFR-8
+& \textbf{Auditability of configuration change.}
+  Device registration, publish block/allow, and related
+  day-2 changes shall leave a durable record in the
+  operator registry (and supporting audit state) so that
+  which gateways and devices are under management remains
+  inspectable after the action completes. \\
+\midrule
+NFR-9
+& \textbf{Trusted-LAN assumption.}
+  Control-plane SSH, Prometheus scrape, Loki push, and
+  the Kafka external listener used by local Grafana are
+  intended for a trusted plant or laboratory network;
+  the system does not claim to be a public
+  Internet-facing broker or multi-tenant cloud gateway. \\
+\midrule
+NFR-10
+& \textbf{Automated delivery.}
+  Changes in the shared codebase shall reach end-user
+  installers through an automated continuous-integration
+  pipeline: a push to the packaging branches
+  builds the Windows executable and the Linux AppImage
+  and publishes them to a release channel, so that distributing an
+  updated monitoring application does not require a
+  manual rebuild on a developer workstation. \\
+\end{longtable}
+
+Together, NFR-1 and NFR-2 express the shift from Senior
+Project prototypes to a usable packaged platform.
+NFR-3 and NFR-4 keep the edge host practical.
+NFR-5 through NFR-8 protect the quality of the security
+and operator path. NFR-9 states the deployment
+assumption that later architecture and evaluation
+sections rely on. NFR-10 requires that packaging and
+release of those installers follow an automated CI
+path from repository change to downloadable
+application.
+
+\section{Scope}
+\label{sec:scope}
+
+This thesis covers IoT-SecureGate as one system: the
+monitoring application on the operator side and the
+gateway on the edge side. The functional and
+non-functional requirements above apply inside this
+scope.
+
+\subsection{In scope}
+
+\begin{itemize}
+    \item The monitoring application on the operator PC,
+    including the desktop interface, control service, and
+    local observability stack.
+    \item Discovery and provision of the gateway,
+    and day-to-day operation of registered gateways.
+    \item Device registration and admission control
+    (identity, MQTT credentials and topic permissions,
+    mutual TLS client certificates).
+    \item Protected inbound transmission on the gateway
+    (MQTTS, application-layer encryption and decryption,
+    schema validation, local log, and per-sensor Kafka
+    topics).
+    \item Monitoring of gateway metrics and of
+    transmission activity on the inbound path.
+    \item Detection of denied and invalid messages,
+    operator alerts, manual block and allow of publish
+    rights, and automatic restriction of invalid sensors.
+    \item Laboratory fake sensors used to exercise
+    admission, transmission, and misuse paths.
+    \item The delivery strategy from source code to the
+    end user, including packaging and automated
+    distribution of the monitoring application for
+    Windows and Linux.
+\end{itemize}
+
+\subsection{Out of scope}
+
+\begin{itemize}
+    \item A full machine-learning intrusion-detection
+    module inside the packaged application (only deny and
+    invalid-message hooks are part of this system).
+    \item Plant-wide systems beyond the gateway boundary,
+    such as MES, SCADA, or cloud backends that consume
+    stored sensor data.
+    \item Sensor device firmware (for example ESP32
+    firmware trees).
+    \item Full backup, restore, and remote-update product
+    wizards beyond the existing remove and wipe flows.
+    \item The earlier Streamlit-based control tooling from
+    the Senior Project (replaced here by the desktop
+    application and control service).
+\end{itemize}
+
+\section{Threat Boundaries}
+\label{sec:threat-boundaries}
+
+Within the scope above, this section states the security
+perimeter and trust assumptions for the requirements.
+It does not repeat the product in/out lists; it states
+which threats the gateway is designed to address on the
+inbound edge path.
+
+\paragraph{Security perimeter.}
+IoT-SecureGate is responsible for the edge admission
+boundary: who may connect and publish, transport and
+application-layer protection of inbound messages,
+local recording of accepted data, visibility of denied
+and invalid traffic, and operator controls that block
+or quarantine misbehaving sources. FR-1 through FR-14
+and NFR-1 through NFR-10 describe that perimeter in
+requirement form.
+
+\paragraph{Assumed environment.}
+The design assumes a plant or laboratory LAN in which
+the operator PC can reach the gateway for SSH and HTTP
+observability, and sensors can reach the gateway MQTTS
+port (NFR-9). Host firewall and network segmentation on
+that LAN remain under site administration. The Kafka
+external listener used by local Grafana is intended for
+that trusted LAN only.
+
+\paragraph{Threats addressed at the edge.}
+The requirements target misuse on the inbound sensor
+path: unknown or weakly identified publishers, failed
+authentication or authorization, unprotected or invalid
+payloads after TLS termination, and repeated invalid
+traffic that should alert the administrator and trigger
+restriction.
+
+\paragraph{Threats outside this perimeter.}
+Compromise of plant backends after data leaves gateway
+storage, physical destruction of hosts, supply-chain
+compromise of device firmware, and operation as a public
+Internet-facing or multi-tenant cloud broker remain
+outside the security claims of this thesis. Those
+exclusions align with the out-of-scope items in
+Section~\ref{sec:scope}.
+
+Chapters~\ref{ch:architecture}, \ref{ch:monitoring},
+and~\ref{ch:gateway} describe how the architecture meets
+FR-1--FR-14 and NFR-1--NFR-10 within these boundaries.
+Chapter~\ref{ch:evaluation} assesses the resulting
+system against the same requirements.
+
+\chapter{General System Architecture}
+\label{ch:architecture}
+
+This chapter gives the architectural overview of
+IoT-SecureGate as one system with two runtimes: the
+monitoring application on the operator PC and the
+gateway on the edge device. The figures show how the
+parts relate, which planes carry control and data, how
+an inbound message moves through the gateway, and where
+ports and trust material sit. Later chapters expand the
+monitoring application
+(Chapter~\ref{ch:monitoring}), the gateway
+(Chapter~\ref{ch:gateway}), and encryption and
+decryption (Chapter~\ref{ch:encryption}). The design
+realises the requirements of
+Chapter~\ref{ch:requirements} inside the scope and
+threat boundaries stated there.
+
+\section{System Top-Level Architecture}
+\label{sec:arch-toplevel}
+
+Figure~\ref{fig:arch-toplevel} shows the whole platform
+at a glance. Edge sensors (or laboratory fake sensors)
+publish into the gateway over MQTTS. The gateway agent
+admits and processes that traffic together with Mosquitto
+and Kafka, then returns metrics and logs to the operator
+PC. The monitoring application on that PC provisions and
+operates the gateway over SSH and presents operational
+views from a local observability stack
+(Loki, Prometheus, and Grafana).
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    every node/.style={font=\scriptsize\sffamily},
+    box/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        inner sep=3pt,
+        minimum height=8mm,
+        text width=2.6cm,
+        fill=white
+    },
+    elab/.style={font=\small\sffamily\bfseries},
+    lbl/.style={font=\scriptsize\sffamily, fill=white, inner sep=1pt}
+]
+    % Frames with padding around inner boxes; gaps stay clear
+    % Edge: -1.6..1.6   Gateway: 3.3..6.5   PC: 8.7..12.3
+    \fill[orange!12, rounded corners=3pt]
+        (-1.6,-3.7) rectangle (1.6,3.7);
+    \draw[dashed, thick, rounded corners=3pt]
+        (-1.6,-3.7) rectangle (1.6,3.7);
+    \node[elab] at (0,4.1) {Edge sensors};
+
+    \fill[green!12, rounded corners=3pt]
+        (3.3,-3.7) rectangle (6.5,3.7);
+    \draw[dashed, thick, rounded corners=3pt]
+        (3.3,-3.7) rectangle (6.5,3.7);
+    \node[elab] at (4.9,4.1) {Gateway device};
+
+    \fill[blue!12, rounded corners=3pt]
+        (8.7,-3.7) rectangle (12.3,3.7);
+    \draw[dashed, thick, rounded corners=3pt]
+        (8.7,-3.7) rectangle (12.3,3.7);
+    \node[elab] at (10.5,4.1) {Operator PC};
+
+    % ---- Edge ----
+    \node[box, text width=2.4cm] (sensors) at (0,0)
+        {Sensors /\\fake sensors};
+
+    % ---- Gateway (stack), inset from the dashed frame ----
+    \node[box, text width=2.3cm] (mqtt)  at (4.9, 2.0)
+        {Mosquitto\\MQTTS :8883};
+    \node[box, text width=2.3cm] (agent) at (4.9, 0.0)
+        {iot-gateway-agent\\:9139};
+    \node[box, text width=2.3cm] (kafka) at (4.9,-2.0)
+        {Kafka KRaft\\:9092/:9094};
+
+    % ---- Operator PC (single stack), inset from the frame ----
+    \node[box, text width=2.4cm] (ui)   at (10.5, 2.15)
+        {Desktop UI\\:9138};
+    \node[box, text width=2.4cm] (cs)   at (10.5, 0.95)
+        {Control service\\:9137};
+    \node[box, text width=2.4cm] (prom) at (10.5,-0.25)
+        {Prometheus\\:9090};
+    \node[box, text width=2.4cm] (loki) at (10.5,-1.45)
+        {Loki\\:3100};
+    \node[box, text width=2.4cm] (graf) at (10.5,-2.65)
+        {Grafana\\:9140};
+
+    % Vertical internals only
+    \draw[archflow] (mqtt) -- (agent);
+    \draw[archflow] (agent) -- (kafka);
+    \draw[archflow] (ui) -- (cs);
+    \draw[archflow] (cs) -- (prom);
+    \draw[archflow] (prom) -- (loki);
+    \draw[archflowsoft] (loki) -- (graf);
+
+    % Interface points sit in the gap (not on the Gateway border)
+    \coordinate (gSSH) at (7.2, 0.95);
+    \coordinate (gSCR) at (7.2,-0.25);
+    \coordinate (gSHP) at (7.2,-1.45);
+
+    % ---- Cross-links: horizontals only in the gaps ----
+    \draw[archflow]
+        (sensors.east) -- (2.45,0) -- (2.45,2.0) --
+        node[lbl, above, pos=0.55] {MQTTS} (mqtt.west);
+
+    \draw[archflow]
+        (cs.west) -- node[lbl, above] {SSH} (gSSH)
+        -- (agent.north east);
+    \draw[archflowsoft]
+        (prom.west) -- node[lbl, above] {scrape} (gSCR)
+        -- (agent.east);
+    \draw[archflowsoft]
+        (agent.south east) -- (gSHP)
+        -- node[lbl, below] {ship logs} (loki.west);
+\end{tikzpicture}%
+}
+\caption{Top-level architecture of IoT-SecureGate: monitoring
+application, gateway, and sensors.}
+\label{fig:arch-toplevel}
+\end{figure}
+
+The split matches the operational context of
+Chapter~\ref{ch:requirements}: one product, two runtimes,
+with the gateway as the controlled entry point for inbound
+plant telemetry.
+
+\section{Monitoring Application Overview}
+\label{sec:arch-monitoring-overview}
+
+Figure~\ref{fig:arch-monitoring} summarises the operator
+runtime as two regions on the PC. The desktop package
+holds the Wizard/UI, control service, local registry,
+OS keyring, and the FakeCertRenewer used for laboratory
+fakes. Beside it, a local observability stack runs Loki,
+Prometheus, and Grafana as native processes under the
+application data directory so routine use does not depend
+on Docker (FR-13, NFR-1, NFR-2). The control service
+queries Loki and Prometheus; the UI opens Grafana in the
+system browser. Sensitive material for CA signing and
+day-2 privilege lives in the OS keyring (FR-14, NFR-6).
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    every node/.style={font=\scriptsize\sffamily},
+    box/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        inner sep=3pt,
+        minimum height=8mm,
+        text width=2.4cm,
+        fill=white
+    },
+    elab/.style={font=\small\sffamily\bfseries},
+    lbl/.style={font=\scriptsize\sffamily, fill=white, inner sep=1pt}
+]
+    % architecture.md §2: desktop package | local observability
+    \fill[blue!10, rounded corners=3pt]
+        (-0.3,-3.9) rectangle (6.8,3.6);
+    \draw[dashed, thick, rounded corners=3pt]
+        (-0.3,-3.9) rectangle (6.8,3.6);
+    \node[elab] at (3.25,4.0)
+        {IoT Gateway Monitor};
+
+    \fill[cyan!10, rounded corners=3pt]
+        (8.8,-3.9) rectangle (12.6,3.6);
+    \draw[dashed, thick, rounded corners=3pt]
+        (8.8,-3.9) rectangle (12.6,3.6);
+    \node[elab] at (10.7,4.0) {Local observability};
+
+    % ---- Desktop package (two columns, padded) ----
+    \node[box] (wiz)   at (1.4, 2.1) {Wizard / UI\\:9138};
+    \node[box] (ctrl)  at (4.7, 2.1) {Control service\\:9137};
+    \node[box] (reg)   at (1.4, 0.0) {registry.sqlite\\gateways + devices};
+    \node[box] (key)   at (4.7, 0.0) {OS keyring\\CA · sudo · PIN};
+    \node[box] (renew) at (4.7,-2.1) {FakeCertRenewer\\(fakes only)};
+
+    % ---- Local observability (aligned with cross-link lanes) ----
+    \node[box] (loki) at (10.7, 2.1) {Loki\\:3100};
+    \node[box] (prom) at (10.7, 0.0) {Prometheus\\:9090};
+    \node[box] (graf) at (10.7,-2.1) {Grafana HTTPS\\:9140};
+
+    % ---- Intra-desktop ----
+    \draw[archflow] (wiz) -- (ctrl);
+    \draw[archflow] (wiz) -- (reg);
+    \draw[archflow] (ctrl) -- (key);
+    \draw[archflow] (key) -- (renew);
+    \draw[archflow] (reg.east) -- (key.west);
+
+    % Gap waypoints (clear of both frame borders)
+    \coordinate (gLoki) at (7.8, 2.1);
+    \coordinate (gProm) at (7.8, 0.0);
+    \coordinate (gGraf) at (7.8,-2.1);
+
+    % Control → Loki / Prometheus (query APIs)
+    \draw[archflow]
+        (ctrl.east) -- node[lbl, above] {query} (gLoki)
+        -- (loki.west);
+    \draw[archflow]
+        (key.east) -- node[lbl, above] {query} (gProm)
+        -- (prom.west);
+
+    % Wizard / UI → Grafana (system browser): mid-aisle down,
+    % under FakeCertRenewer, label only in the inter-frame gap
+    \draw[archflowsoft]
+        (wiz.east) -- (3.05,2.1) -- (3.05,-3.35) --
+        node[lbl, below, pos=0.72] {open browser}
+        (7.8,-3.35) -- (gGraf) -- (graf.west);
+
+    % Grafana reads the local stack
+    \draw[archflowsoft] (graf) -- (prom);
+    \draw[archflowsoft] (prom) -- (loki);
+\end{tikzpicture}%
+}
+\caption{Overview of the monitoring application on the
+operator PC.}
+\label{fig:arch-monitoring}
+\end{figure}
+
+Chapter~\ref{ch:monitoring} details how this runtime is
+prepared, how it installs gateways and onboards devices,
+and how its operational workflows use the local stack.
+
+\section{Gateway Overview}
+\label{sec:arch-gateway-overview}
+
+Figure~\ref{fig:arch-gateway} summarises the edge
+runtime from \texttt{architecture.md}. Real sensors and
+laboratory fakes share one MQTTS ingress into Mosquitto
+(fakes reach the broker through the on-gateway
+\texttt{iotgw-fake} bridge). The decrypt worker opens
+accepted envelopes, writes \texttt{sensor\_data.log}, and
+produces Kafka topics. The Loki shipper pushes log lines
+to the operator PC; Prometheus scrapes agent metrics on
+port~9139.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{\textwidth}{!}{%
+\begin{tikzpicture}[
+    every node/.style={font=\scriptsize\sffamily},
+    box/.style={
+        draw,
+        rounded corners=2pt,
+        align=center,
+        inner sep=4pt,
+        minimum height=10mm,
+        text width=2.8cm,
+        fill=white
+    },
+    elab/.style={font=\small\sffamily\bfseries},
+    lbl/.style={font=\scriptsize\sffamily, fill=white, inner sep=1pt}
+]
+    % Edge: -1.8..1.8   Gateway: 3.2..9.8   Operator: 11.4..14.2
+    \fill[orange!12, rounded corners=3pt]
+        (-1.8,-3.5) rectangle (1.8,3.5);
+    \draw[dashed, thick, rounded corners=3pt]
+        (-1.8,-3.5) rectangle (1.8,3.5);
+    \node[elab] at (0,3.9) {Edge publishers};
+
+    \fill[green!12, rounded corners=3pt]
+        (3.2,-3.9) rectangle (9.8,3.5);
+    \draw[dashed, thick, rounded corners=3pt]
+        (3.2,-3.9) rectangle (9.8,3.5);
+    \node[elab] at (6.5,3.9) {Gateway device};
+
+    \fill[blue!12, rounded corners=3pt]
+        (11.4,-3.5) rectangle (14.2,3.5);
+    \draw[dashed, thick, rounded corners=3pt]
+        (11.4,-3.5) rectangle (14.2,3.5);
+    \node[elab] at (12.8,3.9) {Operator PC};
+
+    % ---- Edge publishers ----
+    \node[box] (real) at (0,1.4) {Real sensors};
+    \node[box] (labs) at (0,-1.2) {Lab fakes};
+
+    % ---- Gateway: one vertical pipeline + side outputs ----
+    \node[box, text width=3.2cm] (mosq) at (6.5, 2.2)
+        {Mosquitto MQTTS\\:8883 (mTLS)};
+    \node[box, text width=3.2cm] (dec) at (6.5, 0.55)
+        {Decrypt worker};
+    \node[box] (log) at (5.0,-1.0)
+        {sensor\_data.log};
+    \node[box] (kafka) at (8.0,-1.0)
+        {Kafka KRaft\\:9092 / :9094};
+    \node[box] (ship) at (5.0,-2.5)
+        {Loki shipper};
+    \node[box] (met) at (8.0,-2.5)
+        {HTTP :9139\\/metrics · /health};
+
+    % ---- Operator ----
+    \node[box] (oloki) at (12.8, 1.0) {Operator Loki\\:3100};
+    \node[box] (oprom) at (12.8,-2.5) {Operator Prometheus\\:9090};
+
+    % ---- Shared MQTTS merge in the gap (paths overlap) ----
+    \coordinate (merge) at (2.5, 2.2);
+    \draw[archflow] (real.east) -- (2.5,1.4) -- (merge);
+    \draw[archflow] (labs.east) -- (2.5,-1.2) -- (merge);
+    \draw[archflow]
+        (merge) -- node[lbl, above] {MQTTS} (mosq.west);
+
+    % ---- Intra-gateway pipeline ----
+    \draw[archflow] (mosq) -- (dec);
+    \draw[archflow] (dec.south) -- (6.5,-0.3) -- (5.0,-0.3)
+        -- (log.north);
+    \draw[archflow] (dec.south) -- (6.5,-0.3) -- (8.0,-0.3)
+        -- (kafka.north);
+    \draw[archflow] (log) -- (ship);
+
+    % ---- Operator links ----
+    \draw[archflowsoft]
+        (oprom.west) --
+        node[lbl, above] {scrape} (met.east);
+    % ship stays below scrape, then climbs outside Operator PC
+    \draw[archflowsoft]
+        (ship.south) -- (5.0,-3.45) -- (14.55,-3.45) -- (14.55,1.0)
+        -- node[lbl, right, pos=0.4] {ship logs} (oloki.east);
+\end{tikzpicture}%
+}
+\caption{Overview of the gateway runtime and its links to
+operator observability.}
+\label{fig:arch-gateway}
+\end{figure}
+
+Operational health views use the canonical application
+order Agent $\rightarrow$ MQTT $\rightarrow$ Decrypt
+$\rightarrow$ Shipper $\rightarrow$ Kafka.
+Chapter~\ref{ch:gateway} expands how the agent and
+broker handle inbound traffic;
+Chapter~\ref{ch:encryption} expands how envelopes are
+opened and validated.
+
+\section{Control Plane and Data Plane}
+\label{sec:arch-planes}
+
+IoT-SecureGate separates \emph{control} actions from
+\emph{data} movement, as shown in
+Figure~\ref{fig:arch-planes}.
+
+\begin{itemize}
+    \item \textbf{Control plane.}
+    The monitoring application reaches the gateway over
+    SSH to provision the agent stack and to apply day-2
+    changes such as device registration, ACL updates,
+    certificate work, and Auto prevent policy. Registry
+    state and operator secrets stay on the PC.
+    \item \textbf{Data plane.}
+    Sensors publish on MQTTS into Mosquitto. After decrypt
+    and schema validation, accepted plaintext is stored
+    locally and in Kafka. Metrics are scraped over HTTP
+    from the agent; logs are pushed to operator Loki.
+\end{itemize}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=8mm and 14mm]
+    \node[archcomp, text width=3.0cm] (op)
+        {Operator\\monitoring app};
+    \node[archcomp, text width=3.0cm, right=26mm of op] (gw)
+        {Gateway\\agent + Mosquitto};
+    \node[archcomp, text width=2.5cm, below left=11mm and 0mm of gw] (s)
+        {Sensors};
+    \node[archcomp, text width=2.8cm, below=12mm of op] (obs)
+        {Loki · Prometheus\\· Grafana};
+
+    \draw[archflow] (op) -- node[above, archlabel] {Control: SSH} (gw);
+    \draw[archflow] (s) -- node[below, archlabel] {Data: MQTTS} (gw);
+    \draw[archflowsoft] (gw) -- node[right, archlabel, align=left]
+        {Data: scrape\\\& ship} (obs);
+    \draw[archflowsoft] (op) -- (obs);
+\end{tikzpicture}
+\caption{Control plane (SSH) and data plane (MQTTS and
+HTTP observability) between operator PC, gateway, and
+sensors.}
+\label{fig:arch-planes}
+\end{figure}
+
+That separation keeps privileged configuration off the
+sensor path and keeps high-volume telemetry off the SSH
+session used for administration.
+
+\section{End-to-End Inbound Path}
+\label{sec:arch-datapath}
+
+Figure~\ref{fig:arch-datapath} is the inbound path that
+FR-1 through FR-4 require. A device may publish only after
+registration has placed MQTT credentials, ACL entries, a
+client certificate, and a Kafka topic on the gateway. The
+broker enforces authentication and authorization. The
+decrypt worker opens the application envelope (or legacy
+Fernet where still accepted), validates the schema, then
+writes plaintext to \texttt{sensor\_data.log} and to a
+per-device Kafka topic
+\texttt{sensor.\textless{}device\_id\textgreater{}}. The
+shipper tails the log toward operator Loki; Prometheus
+scrapes agent metrics independently.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[
+    node distance=4.5mm,
+    stage/.style={archcomp, text width=14cm, minimum height=7mm}
+]
+    \node[stage] (s1)
+        {1.\ Sensor connects with MQTT password + client certificate (MQTTS :8883)};
+    \node[stage, below=of s1] (s2)
+        {2.\ Mosquitto checks password, mTLS, and topic ACL};
+    \node[stage, below=of s2] (s3)
+        {3.\ Sensor publishes envelope (or legacy) topics};
+    \node[stage, below=of s3] (s4)
+        {4.\ Decrypt worker pairs/opens payload and validates schema};
+    \node[stage, below=of s4] (s5)
+        {5.\ Append plaintext to sensor\_data.log and produce Kafka topic};
+    \node[stage, below=of s5] (s6)
+        {6.\ Shipper pushes log lines to operator Loki; Prometheus scrapes :9139};
+
+    \draw[archflow] (s1) -- (s2);
+    \draw[archflow] (s2) -- (s3);
+    \draw[archflow] (s3) -- (s4);
+    \draw[archflow] (s4) -- (s5);
+    \draw[archflow] (s5) -- (s6);
+\end{tikzpicture}
+\caption{End-to-end inbound path from sensor publish to
+storage and operator observability.}
+\label{fig:arch-datapath}
+\end{figure}
+
+Failed authentication, authorization, decrypt, or schema
+checks do not enter the accepted storage path; they feed
+deny and invalid signalling used for operator visibility
+and response (FR-9--FR-11). Chapter~\ref{ch:gateway}
+describes this path as gateway behaviour;
+Chapter~\ref{ch:encryption} describes the envelope open
+in detail.
+
+\section{Layered Message Protection Overview}
+\label{sec:arch-protection}
+
+Inbound protection uses independent layers, summarised in
+Figure~\ref{fig:arch-protection} and
+Table~\ref{tab:arch-protection-layers}. Transport
+security answers who may connect and publish.
+Application-layer encryption answers confidentiality of
+the JSON payload after TLS terminates on the gateway.
+Schema validation answers whether the recovered message
+has the expected shape.
+
+\begin{figure}[htbp]
+\centering
+\resizebox{0.95\textwidth}{!}{%
+\begin{tikzpicture}[node distance=6mm and 5mm]
+    \node[archcomp, text width=3.0cm] (tls)
+        {Transport\\MQTTS :8883\\password + client cert};
+    \node[archcomp, text width=2.3cm, right=6mm of tls] (key)
+        {env/key topic};
+    \node[archcomp, text width=2.3cm, right=5mm of key] (data)
+        {env/data topic};
+    \node[archcomp, text width=2.5cm, below=8mm of key] (unwrap)
+        {Unwrap CEK\\PSK or DMEC};
+    \node[archcomp, text width=2.3cm, below=7mm of unwrap] (gcm)
+        {AES-128-GCM};
+    \node[archcomp, text width=2.3cm, below=7mm of gcm] (schema)
+        {Schema validate};
+    \node[archcomp, text width=3.2cm, below=7mm of schema] (out)
+        {sensor\_data.log · Kafka · Loki};
+
+    \begin{scope}[on background layer]
+        \node[archhost, fit=(key)(data)(unwrap)(gcm)(schema),
+            label={[archlabel]above:Application envelope v1}] {};
+        \node[archhost, fit=(tls),
+            label={[archlabel]above:Transport}] {};
+    \end{scope}
+
+    \draw[archflow] (tls) -- (key);
+    \draw[archflow] (tls) -- (data);
+    \draw[archflow] (key) -- (unwrap);
+    \draw[archflow] (data) -- (unwrap);
+    \draw[archflow] (unwrap) -- (gcm);
+    \draw[archflow] (gcm) -- (schema);
+    \draw[archflow] (schema) -- (out);
+\end{tikzpicture}%
+}
+\caption{Layered protection on the inbound path: MQTTS
+transport and application envelope v1.}
+\label{fig:arch-protection}
+\end{figure}
+
+\begin{table}[H]
+\centering
+{\small
+\begin{tabularx}{\textwidth}{@{}p{2.4cm}Y Y@{}}
+\toprule
+\textbf{Layer} & \textbf{Mechanism} & \textbf{Answers} \\
+\midrule
+Transport
+& MQTTS with mutual TLS, Mosquitto password, and topic ACL
+& Who may connect and publish \\
+\midrule
+Application
+& Envelope v1 (\texttt{v1-psk} / \texttt{v1-ecdhe})
+& Confidentiality after TLS termination \\
+\midrule
+Schema
+& Registered JSON schema on the gateway
+& Message shape after decrypt \\
+\midrule
+Day material
+& Daily Message Encryption Certificate (DMEC)
+& Day-scoped wrap for \texttt{v1-ecdhe} \\
+\bottomrule
+\end{tabularx}}
+\caption{Protection layers on the gateway inbound path
+(overview).}
+\label{tab:arch-protection-layers}
+\end{table}
+
+Profiles, topic pairing, replay resistance, and the full
+encrypt/decrypt workflow are specified in
+Chapter~\ref{ch:encryption}. Legacy Fernet remains
+accepted only where still configured; the architectural
+target is envelope v1 on MQTTS.
+
+\section{Deployment Topology and Ports}
+\label{sec:arch-ports}
+
+Table~\ref{tab:arch-ports-pc} and
+Table~\ref{tab:arch-ports-gw} list the default binds for
+a trusted plant or laboratory LAN (NFR-9). The operator
+stack listens on the PC; each gateway exposes MQTTS,
+agent HTTP, and Kafka. Figure~\ref{fig:arch-topology}
+places those ports on the same top-level split as
+Figure~\ref{fig:arch-toplevel}.
+
+\begin{table}[H]
+\centering
+{\small
+\begin{tabularx}{\textwidth}{@{}p{2.8cm}p{3.2cm}Y@{}}
+\toprule
+\textbf{Component} & \textbf{Bind} & \textbf{Role} \\
+\midrule
+Control service & \texttt{127.0.0.1:9137} & FastAPI registry, playbooks, queries \\
+Wizard / UI & \texttt{127.0.0.1:9138} & Desktop interface and API proxy \\
+Loki & \texttt{:3100} & Log target for gateway shipper \\
+Prometheus & \texttt{:9090} & Scrapes gateway agent metrics \\
+Grafana & \texttt{127.0.0.1:9140} (HTTPS) & Local dashboards in system browser \\
+\bottomrule
+\end{tabularx}}
+\caption{Operator PC ports for the monitoring application.}
+\label{tab:arch-ports-pc}
+\end{table}
+
+\begin{table}[H]
+\centering
+{\small
+\begin{tabularx}{\textwidth}{@{}p{2.8cm}p{3.2cm}Y@{}}
+\toprule
+\textbf{Component} & \textbf{Bind} & \textbf{Role} \\
+\midrule
+Agent HTTP & \texttt{:9139} & Metrics, health, day-crypto helpers \\
+Mosquitto MQTTS & \texttt{:8883} & Sensor ingress (password + client cert) \\
+Kafka INTERNAL & \texttt{127.0.0.1:9092} & Agent produce path \\
+Kafka EXTERNAL & gateway IP \texttt{:9094} & Trusted-LAN Grafana datasource \\
+\bottomrule
+\end{tabularx}}
+\caption{Gateway device ports.}
+\label{tab:arch-ports-gw}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=10mm and 16mm]
+    \node[archcomp, text width=4.0cm] (pc)
+        {Operator PC\\UI :9138 · Control :9137\\Loki :3100 · Prom :9090\\Grafana :9140};
+    \node[archcomp, text width=4.0cm, right=18mm of pc] (gw)
+        {Gateway\\Agent :9139\\MQTTS :8883\\Kafka :9092 / :9094};
+    \node[archcomp, text width=3.0cm, below=11mm of gw] (s)
+        {Sensors\\$\rightarrow$ :8883};
+    \draw[archflow] (pc) -- node[above, archlabel] {SSH · scrape · ship} (gw);
+    \draw[archflow] (s) -- (gw);
+\end{tikzpicture}
+\caption{Deployment topology and principal ports on a
+trusted LAN.}
+\label{fig:arch-topology}
+\end{figure}
+
+\section{Trust Material and Secrets}
+\label{sec:arch-secrets}
+
+Figure~\ref{fig:arch-secrets} shows where trust material
+lives. The gateway holds its CA, server certificate,
+device client certificates, ACL and password files, and
+per-device crypto material under the agent data
+directory. The operator PC stores gateway and device
+records in \texttt{registry.sqlite} and keeps CA
+passphrases, gateway sudo credentials, and the local
+admin PIN in the OS keyring (with a documented file
+fallback). Provision passes privileged passwords on SSH
+standard input rather than on remote argument lists
+(NFR-6). The local proxy injects keyring secrets into
+control-service requests when the operator does not
+re-enter them for every day-2 action.
+
+\begin{figure}[htbp]
+\centering
+\begin{tikzpicture}[node distance=8mm and 12mm]
+    \node[archcomp, text width=3.5cm] (reg)
+        {registry.sqlite\\gateways · devices};
+    \node[archcomp, text width=3.5cm, right=11mm of reg] (key)
+        {OS keyring\\ca: · sudo: · admin PIN};
+    \node[archcomp, text width=3.6cm, below=11mm of reg] (gcerts)
+        {Gateway data dir\\CA · server/client certs\\ACL · passwords · crypto};
+    \node[archcomp, text width=3.3cm, right=11mm of gcerts] (ssh)
+        {SSH day-2 playbooks\\sudo via stdin};
+
+    \begin{scope}[on background layer]
+        \node[archhost, fit=(reg)(key),
+            label={[archlabel]above:Operator PC}] {};
+        \node[archhost, fit=(gcerts)(ssh),
+            label={[archlabel]above:Gateway}] {};
+    \end{scope}
+
+    \draw[archflow] (key) -- (ssh);
+    \draw[archflow] (ssh) -- (gcerts);
+    \draw[archflowsoft] (reg) -- (gcerts);
+\end{tikzpicture}
+\caption{Overview of trust material on the operator PC and
+on the gateway.}
+\label{fig:arch-secrets}
+\end{figure}
+
+Ordinary settings files and application logs are not the
+store for those secrets. Certificate lifecycle and
+related workflows are detailed with the runtimes that
+implement them.
+
+\section{Relation to Following Chapters}
+\label{sec:arch-roadmap}
+
+The figures in this chapter are the map of the system.
+The next chapters zoom into each concern without
+repeating the same overview diagrams:
+
+\begin{itemize}
+    \item Chapter~\ref{ch:monitoring} details the
+    monitoring application: architecture, interaction
+    with the gateway for installation and device
+    onboarding, and operational workflows---building on
+    Figures~\ref{fig:arch-monitoring},
+    \ref{fig:arch-planes}, and~\ref{fig:arch-secrets}.
+    \item Chapter~\ref{ch:gateway} details the gateway:
+    agent and MQTT handling, the inbound processing path,
+    APIs and control interfaces, and detection and
+    response---building on
+    Figures~\ref{fig:arch-gateway} and
+    \ref{fig:arch-datapath}.
+    \item Chapter~\ref{ch:encryption} details transport
+    and application-layer protection, the
+    encrypt/decrypt workflow, and schema validation after
+    decrypt---building on
+    Figure~\ref{fig:arch-protection}.
+\end{itemize}
+\chapter{Monitoring Application}
+\label{ch:monitoring}
+
+% Operator-PC runtime. Broader sections: architecture,
+% how the app interacts with the gateway, and functions
+% as workflows. Sources: architecture.md §2/§6,
+% knowledge base §4.1--4.2 and §5.
+
+\section{Architecture of the Monitoring Application}
+\label{sec:monitoring-architecture}
+% Desktop shell, control service, local observability stack
+% (Loki/Prometheus/Grafana), registry, and keyring.
+% Builds on fig:arch-monitoring from Chapter~\ref{ch:architecture}.
+
+\section{Interaction with the Gateway}
+\label{sec:monitoring-interaction}
+% How the monitoring application reaches and configures a
+% gateway over the control plane (SSH playbooks).
+
+\subsection{Gateway discovery and installation}
+% Find host, establish trust, provision agent + Mosquitto +
+% Kafka, record gateway in local registry.
+% Workflow-focused; builds on fig:arch-planes.
+
+\subsection{Sensor and fake-sensor onboarding}
+% Register real sensors and create laboratory fake sensors
+% on a provisioned gateway (credentials, certs, topics,
+% capacity). Workflow from operator action to gateway state.
+
+\section{Functions and Operational Workflows}
+\label{sec:monitoring-functions}
+% What the monitoring application does in day-to-day
+% operation, described as processes rather than screen tours.
+
+\subsection{Local monitoring preparation}
+% First-run install and start of the local observability
+% stack on the operator PC.
+
+\subsection{Observing metrics and transmission activity}
+% How Metric and Activities consume gateway metrics/logs
+% and present health and inbound behaviour.
+
+\subsection{Control and laboratory exercise}
+% Block/allow, Auto prevent, and Simulate workflows used to
+% restrict misuse or exercise the path with fake sensors.
+
+\subsection{Lifecycle of the operator installation}
+% Certificates for local Grafana HTTPS, packaging/delivery
+% of the desktop application, and removal/wipe of the local
+% install.
+
+\chapter{Gateway}
+\label{ch:gateway}
+
+% Edge runtime without a deep encryption chapter here.
+% Focus: what the gateway handles, how the agent works,
+% APIs that expose/control that work, and detection/response.
+% Encryption/decryption: Chapter~\ref{ch:encryption}.
+% Sources: architecture.md §3--4, knowledge base §4.3--4.4,
+% details.md (ports/APIs).
+
+\section{Architecture of the Gateway}
+\label{sec:gateway-architecture}
+% Agent, system Mosquitto MQTTS, Kafka, optional fake bridge,
+% metrics/health HTTP. Builds on fig:arch-gateway.
+% Canonical processing order at overview level only.
+
+\section{Agent Operation and MQTT Handling}
+\label{sec:gateway-agent}
+% How the agent runs with the broker: admission material on
+% the gateway (users, ACL, certs), MQTTS connect/publish
+% checks, decrypt-worker handoff at process level (crypto
+% detail deferred), local log and Kafka produce, shipper and
+% metrics exposure.
+
+\section{Inbound Processing Path}
+\label{sec:gateway-inbound}
+% End-to-end handling of an inbound publish on the gateway
+% up to storage and observability hooks.
+% Builds on fig:arch-datapath; points to Chapter~\ref{ch:encryption}
+% for envelope open and schema rules.
+
+\section{Gateway APIs and Control Interfaces}
+\label{sec:gateway-apis}
+% HTTP and related interfaces used with the agent and with
+% the operator control plane: health/metrics, day-crypto
+% helpers as applicable, and the playbook/API actions that
+% change gateway state (register, block/allow, auto-prevent,
+% fake lifecycle). Present as a structured list mapped to
+% gateway responsibilities.
+
+\section{Detection and Response Behaviour}
+\label{sec:gateway-detection}
+% Denied connections and invalid messages as gateway
+% behaviour; signals toward the operator; block/allow and
+% Auto prevent on the gateway side.
+
+\chapter{Encryption and Decryption}
+\label{ch:encryption}
+
+% Separate chapter for message protection on the inbound
+% path. Builds on fig:arch-protection and Chapter~\ref{ch:background}.
+% Sources: architecture.md §5, knowledge base §3.4,
+% details.md Encryption.
+
+\section{Protection Model}
+\label{sec:encryption-model}
+% Why transport and application layers are separate; what
+% each layer answers (connect/publish vs payload
+% confidentiality after TLS termination).
+
+\section{Transport Security and Mutual TLS}
+\label{sec:encryption-transport}
+% MQTTS, password + client certificate, relation to ACL
+% authorization at the broker (identity on the wire).
+
+\section{Application-Layer Envelope}
+\label{sec:encryption-envelope}
+% Envelope v1 overview: dual topics, content key, profiles
+% (v1-psk / v1-ecdhe), DMEC, replay resistance at overview
+% depth.
+
+\section{Encryption and Decryption Workflow}
+\label{sec:encryption-workflow}
+% Seal on the publisher side and open on the gateway:
+% pair, unwrap, AES-GCM, then hand off to schema validation
+% and storage. Sequence/workflow figure.
+
+\section{Schema Validation and Accepted Storage}
+\label{sec:encryption-schema}
+% Validation after decrypt; only accepted plaintext reaches
+% sensor_data.log and Kafka; failures feed invalid/deny
+% signalling.
+
+\chapter{Evaluation}
+\label{ch:evaluation}
+
+\section{Evaluation Goals and Method}
+% What is measured on the running system.
+
+\section{Admission and Authentication}
+% Register device; connect with valid and invalid
+% credentials/certs; confirm broker enforcement.
+
+\section{Protected Transmission and Storage}
+% Publish accepted envelopes; confirm decrypt, log, Kafka,
+% and operator-side visibility.
+
+\section{Monitoring and Detection}
+% Metrics/activities reflect live traffic; denied/invalid
+% cases appear; response actions take effect.
+
+\section{Resource Use and Limitations}
+% Gateway and operator footprint; known limits; future
+% improvements at a high level.
+
+\chapter{Conclusion and Future Work}
+\label{ch:conclusion}
+
+\section{Summary}
+% Restate the gateway problem and the system delivered.
+
+\section{Contributions}
+% End-to-end secure gateway with monitoring application and
+% gateway runtime as one system.
+
+\section{Future Work}
+% Directions for later improvement of the system.
+
+% =========================================================
+% BIBLIOGRAPHY — starter set mined from thesis.tex; extend as needed
+% =========================================================
+\begin{thebibliography}{99}
+
+\bibitem{mqtt}
+OASIS,
+\emph{MQTT Version 5.0},
+OASIS Standard, 7 March 2019.
+\url{https://docs.oasis-open.org/mqtt/mqtt/v5.0/os/mqtt-v5.0-os.html}
+
+\bibitem{mosquitto}
+Eclipse Mosquitto,
+\emph{mosquitto.conf Man Page}.
+\url{https://mosquitto.org/man/mosquitto-conf-5.html}
+
+\bibitem{tls}
+E. Rescorla,
+\emph{The Transport Layer Security (TLS) Protocol Version 1.3},
+RFC 8446, 2018.
+\url{https://www.rfc-editor.org/rfc/rfc8446}
+
+\bibitem{x509}
+D. Cooper, S. Santesson, S. Farrell, S. Boeyen,
+R. Housley, and W. Polk,
+\emph{Internet X.509 Public Key Infrastructure Certificate
+and Certificate Revocation List (CRL) Profile},
+RFC 5280, 2008.
+\url{https://www.rfc-editor.org/rfc/rfc5280}
+
+\bibitem{prometheus}
+Prometheus Authors,
+\emph{Overview}.
+\url{https://prometheus.io/docs/introduction/overview/}
+
+\bibitem{loki}
+Grafana Labs,
+\emph{Loki Overview}.
+\url{https://grafana.com/docs/loki/latest/get-started/overview/}
+
+\bibitem{ace}
+C. Sengul and A. Kirby,
+\emph{Message Queuing Telemetry Transport (MQTT)
+and Transport Layer Security (TLS) Profile
+of Authentication and Authorization for
+Constrained Environments (ACE) Framework},
+RFC 9431, 2023.
+\url{https://www.rfc-editor.org/rfc/rfc9431}
+
+\bibitem{mqttset}
+I. Vaccari, G. Chiola, M. Aiello, M. Mongelli,
+and E. Cambiaso,
+``MQTTset, a New Dataset for Machine Learning
+Techniques on MQTT,''
+\emph{Sensors}, vol. 20, no. 22,
+article 6578, 2020.
+\url{https://doi.org/10.3390/s20226578}
+
+\bibitem{nbaiot}
+Y. Meidan, M. Bohadana, Y. Mathov, Y. Mirsky,
+D. Breitenbacher, A. Shabtai, and Y. Elovici,
+``N-BaIoT: Network-based Detection of IoT Botnet
+Attacks Using Deep Autoencoders,''
+arXiv:1805.03409, 2018.
+\url{https://arxiv.org/abs/1805.03409}
+
+\bibitem{lightgbm}
+G. Ke, Q. Meng, T. Finley, T. Wang, W. Chen,
+W. Ma, Q. Ye, and T.-Y. Liu,
+``LightGBM: A Highly Efficient Gradient Boosting Decision Tree,''
+\emph{Advances in Neural Information Processing Systems},
+vol. 30, 2017.
+\url{https://proceedings.neurips.cc/paper/6907-lightgbm-a-highly-efficient-gradient-boosting-decision-tree.pdf}
+
+\end{thebibliography}
+
+\end{document}

@@ -1,5 +1,5 @@
 # Fdb version 4
-["pdflatex"] 1793523978.90095 "thesis-new.tex" "thesis-new.pdf" "thesis-new" 1793523981.5469 0
+["pdflatex"] 1793524120.57414 "thesis-new.tex" "thesis-new.pdf" "thesis-new" 1793524123.43191 0
   "/etc/texmf/web2c/texmf.cnf" 1793510754.89611 475 c0e671620eb5563b2130f56340a5fde8 ""
   "/usr/share/texlive/texmf-dist/fonts/map/fontname/texfonts.map" 1577235249 3524 cb3e574dea2d1052e39280babc910dc8 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecbx1095.tfm" 1136768653 3584 21b378cca2e40816b0e6d74a4dc98f04 ""
@@ -13,7 +13,6 @@
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecrm1440.tfm" 1136768653 3584 3169d30142b88a27d4ab0e3468e963a2 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecrm1728.tfm" 1136768653 3584 3c76ccb63eda935a68ba65ba9da29f1a ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecrm2488.tfm" 1136768653 3584 406ad7b70d9a41f7833f92b6313150c8 ""
-  "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecsi0800.tfm" 1136768653 3584 3dfe0566d0b48ead5866d1b455f67a43 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecss0800.tfm" 1136768653 3584 885a9b5d0df19657ad7066a0c4430437 ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecss1095.tfm" 1136768653 3584 8ece407347b270c252c46fdfaef5a9ef ""
   "/usr/share/texlive/texmf-dist/fonts/tfm/jknappen/ec/ecsx1095.tfm" 1136768653 3584 380f45aff25ba25cf53bd1991ce4247b ""
@@ -211,7 +210,6 @@
   "/usr/share/texmf/fonts/type1/public/cm-super/sfrm1095.pfb" 1793510777.96616 145929 f25e56369a345c4ff583b067cd87ce8e ""
   "/usr/share/texmf/fonts/type1/public/cm-super/sfrm1200.pfb" 1793510777.9703 136101 f533469f523533d38317ab5729d00c8a ""
   "/usr/share/texmf/fonts/type1/public/cm-super/sfrm1440.pfb" 1793510777.9703 131078 d96015a2fa5c350129e933ca070b2484 ""
-  "/usr/share/texmf/fonts/type1/public/cm-super/sfsi0800.pfb" 1793510778.00344 106155 4e16f416d5fdb93b4f46066a1e2489e8 ""
   "/usr/share/texmf/fonts/type1/public/cm-super/sfss0800.pfb" 1793510778.07801 95441 e322369dec2b43bb317c506a4a44deaa ""
   "/usr/share/texmf/fonts/type1/public/cm-super/sfsx1095.pfb" 1793510778.11944 145807 7e6525044e63a61de8529743665d16c8 ""
   "/usr/share/texmf/fonts/type1/public/cm-super/sfti1200.pfb" 1793510778.16915 198221 ca5aa71411090ef358a6cc78b7458365 ""
@@ -221,12 +219,12 @@
   "/var/lib/texmf/fonts/map/pdftex/updmap/pdftex.map" 1793510792.73349 5472669 54eaf61a88b6b7896ebd0dac973cb29c ""
   "/var/lib/texmf/web2c/pdftex/pdflatex.fmt" 1793510947 8215399 8cfb1104156a308f4958f26d107db1eb ""
   "assets/docs/VGU-Logo.png" 1793511466.70051 26702 94ddbec4bbfacb1b0278c82981e76943 ""
-  "thesis-new.aux" 1793523981.29649 17903 894393ec5097911a05b732f8e572ffd9 "pdflatex"
-  "thesis-new.lof" 1793523981.30043 1479 5f5966a96a58bf6300f0db1bb45bee24 "pdflatex"
-  "thesis-new.lot" 1793523981.30436 917 fa138af20fb8a921dd791160be07ab6c "pdflatex"
-  "thesis-new.out" 1793523981.30043 13089 28880b2e3d2d4ef0e1fbc60efcbe2503 "pdflatex"
-  "thesis-new.tex" 1793523950.40091 73300 98b2a5a8d988466c4d12a53d8b29458b ""
-  "thesis-new.toc" 1793523981.30043 6340 8bb3862dd7caef7b685936d493303818 "pdflatex"
+  "thesis-new.aux" 1793524123.15261 17903 894393ec5097911a05b732f8e572ffd9 "pdflatex"
+  "thesis-new.lof" 1793524123.15661 1479 5f5966a96a58bf6300f0db1bb45bee24 "pdflatex"
+  "thesis-new.lot" 1793524123.16061 917 fa138af20fb8a921dd791160be07ab6c "pdflatex"
+  "thesis-new.out" 1793524123.15661 13089 28880b2e3d2d4ef0e1fbc60efcbe2503 "pdflatex"
+  "thesis-new.tex" 1793524109.44861 73112 4d458feb776182ccbe6e4f74a5e16853 ""
+  "thesis-new.toc" 1793524123.15661 6340 8bb3862dd7caef7b685936d493303818 "pdflatex"
   (generated)
   "thesis-new.aux"
   "thesis-new.lof"

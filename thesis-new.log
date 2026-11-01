@@ -1,4 +1,4 @@
-This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.11.1)  1 NOV 2026 16:06
+This is pdfTeX, Version 3.141592653-2.6-1.40.25 (TeX Live 2023/Debian) (preloaded format=pdflatex 2026.11.1)  1 NOV 2026 16:08
 entering extended mode
  restricted \write18 enabled.
  %&-line parsing enabled.
@@ -1021,22 +1021,22 @@ Package microtype Info: Loading generic protrusion settings for font family
 (microtype)             See the microtype manual for details.
  [17] [18] [19]
 [20]
-Underfull \hbox (badness 10000) in paragraph at lines 1778--1778
+Underfull \hbox (badness 10000) in paragraph at lines 1775--1775
 []|\T1/cmtt/m/n/10.95 127.0.0.1:9140
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1795--1795
+Underfull \hbox (badness 10000) in paragraph at lines 1792--1792
 []|\T1/cmr/m/n/10.95 (+20) Mosquitto
  []
 
 
-Underfull \hbox (badness 10000) in paragraph at lines 1795--1795
+Underfull \hbox (badness 10000) in paragraph at lines 1792--1792
 []|\T1/cmr/m/n/10.95 (+20) Kafka IN-TER-
  []
 
 
-Underfull \hbox (badness 3872) in paragraph at lines 1795--1795
+Underfull \hbox (badness 3872) in paragraph at lines 1792--1792
 []|\T1/cmr/m/n/10.95 (+20) Kafka EX-TER-
  []
 
@@ -1061,7 +1061,7 @@ Chapter 9.
 [27
 
 ]
-Underfull \hbox (badness 7613) in paragraph at lines 2074--2077
+Underfull \hbox (badness 7613) in paragraph at lines 2071--2074
 []\T1/cmr/m/n/12 (+20) Eclipse Mosquitto, \T1/cmr/m/it/12 (+20) mosquitto.conf 
 Man Page\T1/cmr/m/n/12 (+20) . [][]$https : / / mosquitto . org / man /
  []
@@ -1077,11 +1077,11 @@ Package rerunfilecheck Info: File `thesis-new.out' has not changed.
 (rerunfilecheck)             Checksum: 28880B2E3D2D4EF0E1FBC60EFCBE2503;13089.
  ) 
 Here is how much of TeX's memory you used:
- 29272 strings out of 474222
- 535875 string characters out of 5748733
- 1944975 words of memory out of 5000000
- 50715 multiletter control sequences out of 15000+600000
- 585553 words of font info for 186 fonts, out of 8000000 for 9000
+ 29262 strings out of 474222
+ 535723 string characters out of 5748733
+ 1943975 words of memory out of 5000000
+ 50710 multiletter control sequences out of 15000+600000
+ 584479 words of font info for 183 fonts, out of 8000000 for 9000
  1141 hyphenation exceptions out of 8191
  84i,11n,87p,1007b,941s stack positions out of 10000i,1000n,20000p,200000b,200000s
 </usr/share/texlive/texmf-dist/fonts/type1/public/amsfonts/cm/cmmi12.pfb></us
@@ -1094,15 +1094,14 @@ r/sfbx1200.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfbx1440.pfb></usr
 ype1/public/cm-super/sfbx2488.pfb></usr/share/texmf/fonts/type1/public/cm-super
 /sfrm1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfrm1200.pfb></usr/
 share/texmf/fonts/type1/public/cm-super/sfrm1440.pfb></usr/share/texmf/fonts/ty
-pe1/public/cm-super/sfsi0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/
-sfss0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfsx1095.pfb></usr/s
-hare/texmf/fonts/type1/public/cm-super/sfti1200.pfb></usr/share/texmf/fonts/typ
-e1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/s
-ftt1200.pfb>
-Output written on thesis-new.pdf (37 pages, 464617 bytes).
+pe1/public/cm-super/sfss0800.pfb></usr/share/texmf/fonts/type1/public/cm-super/
+sfsx1095.pfb></usr/share/texmf/fonts/type1/public/cm-super/sfti1200.pfb></usr/s
+hare/texmf/fonts/type1/public/cm-super/sftt1095.pfb></usr/share/texmf/fonts/typ
+e1/public/cm-super/sftt1200.pfb>
+Output written on thesis-new.pdf (37 pages, 453165 bytes).
 PDF statistics:
- 792 PDF objects out of 1000 (max. 8388607)
- 690 compressed objects within 7 object streams
+ 787 PDF objects out of 1000 (max. 8388607)
+ 687 compressed objects within 7 object streams
  140 named destinations out of 1000 (max. 500000)
- 48698 words of extra memory for PDF output out of 51595 (max. 10000000)
+ 46650 words of extra memory for PDF output out of 51595 (max. 10000000)
 

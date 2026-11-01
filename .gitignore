@@ -13,5 +13,4 @@ apps/desktop/src-tauri/target/
 apps/desktop/build/
 apps/desktop/dist/
 .venv/
-*.tex
 assets/docs/
