@@ -5,6 +5,7 @@ from __future__ import annotations
 import shlex
 import tempfile
 import time
+import uuid
 from pathlib import Path
 from typing import Optional
 
@@ -19,6 +20,7 @@ _APT_PACKAGES = (
     "mosquitto-clients",
     "python3-venv",
     "python3-pip",
+    "libgomp1",
 )
 
 
@@ -612,19 +614,38 @@ def _upload_agent_tree(
     *,
     sudo_password: str,
 ) -> None:
-    """Upload iot_gateway_agent package + requirements + unit file."""
+    """Upload the agent and a staged, replaceable IDS runtime tree."""
     if not agent_src.is_dir():
         raise AgentInstallError(f"agent source missing: {agent_src}")
+    pkg = agent_src / "iot_gateway_agent"
+    if not pkg.is_dir():
+        raise AgentInstallError(f"missing package dir: {pkg}")
+    ids_src = agent_src.parent / "ids"
+    required_ids = (
+        ids_src / "ids_gateway",
+        ids_src / "models" / "ids_model.joblib",
+        ids_src / "models" / "feature_scaler.joblib",
+        ids_src / "models" / "model_metadata.json",
+        ids_src / "configs" / "ids_config.yaml",
+        ids_src / "requirements-runtime.txt",
+        ids_src / "iot-gateway-ids.service",
+    )
+    missing = [str(path) for path in required_ids if not path.exists()]
+    if missing:
+        raise AgentInstallError(
+            "IDS deployment assets missing from AppImage/repository: "
+            + ", ".join(missing)
+        )
     owner = _remote_login_owner(ssh)
     pkg_remote = f"{remote_root}/iot_gateway_agent"
-    # Resolve owner outside sudo: under ``sudo sh -c``, ``$(id -un)`` is root and
-    # leaves /opt/iot-gateway-agent root-owned so the login user cannot extract.
-    # Wipe the package dir so retries are not blocked by leftover root files.
+    ids_stage = f"{remote_root}/.ids-stage-{uuid.uuid4().hex}"
     prepare = sudo_run(
         ssh,
         f"mkdir -p {shlex.quote(remote_root)} && "
         f"rm -rf {shlex.quote(pkg_remote)} && "
         f"mkdir -p {shlex.quote(pkg_remote)} && "
+        f"rm -rf {shlex.quote(ids_stage)} && "
+        f"mkdir -p {shlex.quote(ids_stage)} && "
         f"chown -R {shlex.quote(owner)} {shlex.quote(remote_root)}",
         sudo_password=sudo_password,
         timeout=60.0,
@@ -634,10 +655,26 @@ def _upload_agent_tree(
             f"prepare {remote_root} failed: "
             f"{(prepare.stderr or prepare.stdout).strip()[:200]}"
         )
-    pkg = agent_src / "iot_gateway_agent"
-    if not pkg.is_dir():
-        raise AgentInstallError(f"missing package dir: {pkg}")
     ssh.upload_tree(pkg, pkg_remote)
+    ssh.upload_tree(ids_src, ids_stage)
+    ids_live = f"{remote_root}/ids"
+    ids_backup = f"{remote_root}/.ids-backup-{uuid.uuid4().hex}"
+    replace_ids = sudo_run(
+        ssh,
+        f"if [ -e {shlex.quote(ids_live)} ]; then "
+        f"mv {shlex.quote(ids_live)} {shlex.quote(ids_backup)} || exit 1; fi; "
+        f"if mv {shlex.quote(ids_stage)} {shlex.quote(ids_live)}; then "
+        f"rm -rf {shlex.quote(ids_backup)}; else "
+        f"if [ -e {shlex.quote(ids_backup)} ]; then "
+        f"mv {shlex.quote(ids_backup)} {shlex.quote(ids_live)}; fi; exit 1; fi",
+        sudo_password=sudo_password,
+        timeout=120.0,
+    )
+    if not replace_ids.ok:
+        raise AgentInstallError(
+            "replacing gateway IDS runtime failed: "
+            f"{(replace_ids.stderr or replace_ids.stdout).strip()[:300]}"
+        )
     req = agent_src / "requirements.txt"
     if req.is_file():
         ssh.upload_file(req, f"{remote_root}/requirements.txt")
@@ -650,6 +687,197 @@ def _upload_agent_tree(
     _install_auto_prevent_helper(
         ssh, agent_src, remote_root, sudo_password=sudo_password
     )
+
+
+def _ensure_ids_runtime(
+    ssh: SSHSession, remote_root: str, *, sudo_password: str
+) -> str:
+    """Install pinned IDS dependencies in an isolated gateway-side venv."""
+    platform = ssh.run(
+        "uname -s && uname -m && python3 --version",
+        timeout=15.0,
+    )
+    if not platform.ok:
+        raise AgentInstallError(
+            "could not detect gateway OS/CPU/Python for IDS deployment: "
+            f"{(platform.stderr or platform.stdout).strip()[:240]}"
+        )
+    lines = [line.strip() for line in platform.stdout.splitlines() if line.strip()]
+    if len(lines) < 3 or lines[0].lower() != "linux":
+        raise AgentInstallError(
+            "gateway IDS deployment requires Linux; detected "
+            f"{platform.stdout.strip() or 'unknown platform'}"
+        )
+    arch = lines[1].lower()
+    if arch not in {"x86_64", "aarch64"}:
+        raise AgentInstallError(
+            f"unsupported IDS gateway CPU architecture '{arch}'. "
+            "Supported: x86_64 and 64-bit ARM (aarch64); 32-bit ARM is not supported."
+        )
+    libgomp = ssh.run(
+        "if ldconfig -p 2>/dev/null | grep -q 'libgomp.so.1'; then echo OK; fi",
+        timeout=15.0,
+    )
+    if "OK" not in libgomp.stdout:
+        update = sudo_run(
+            ssh,
+            "env DEBIAN_FRONTEND=noninteractive apt-get update -qq",
+            sudo_password=sudo_password,
+            timeout=300.0,
+        )
+        if not update.ok:
+            raise AgentInstallError(
+                "apt-get update failed while preparing IDS native dependencies: "
+                f"{(update.stderr or update.stdout).strip()[:300]}"
+            )
+        install = sudo_run(
+            ssh,
+            "env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq libgomp1",
+            sudo_password=sudo_password,
+            timeout=300.0,
+        )
+        if not install.ok:
+            raise AgentInstallError(
+                "could not install IDS native dependency libgomp1: "
+                f"{(install.stderr or install.stdout).strip()[:300]}"
+            )
+
+    ids_root = f"{remote_root}/ids"
+    venv = f"{remote_root}/ids-venv"
+    create = ssh.run(
+        f"test -x {shlex.quote(venv)}/bin/python || "
+        f"python3 -m venv {shlex.quote(venv)}",
+        timeout=120.0,
+    )
+    if not create.ok:
+        raise AgentInstallError(
+            "could not create isolated IDS Python environment; install the gateway "
+            "python3-venv package and retry: "
+            f"{(create.stderr or create.stdout).strip()[:300]}"
+        )
+    deps = ssh.run(
+        f"{shlex.quote(venv)}/bin/python -m pip install -q -U pip && "
+        f"{shlex.quote(venv)}/bin/python -m pip install -q -r "
+        f"{shlex.quote(ids_root)}/requirements-runtime.txt",
+        timeout=900.0,
+    )
+    if not deps.ok:
+        raise AgentInstallError(
+            f"IDS dependency installation failed on Linux/{arch} "
+            f"({lines[2]}): {(deps.stderr or deps.stdout).strip()[:500]}. "
+            "Check gateway internet access, Python wheel support, and available disk."
+        )
+
+    validation = (
+        "import json; "
+        "from ids_gateway.features import FEATURE_NAMES, empty_feature_vector; "
+        "from ids_gateway.model import IDSModel; "
+        "meta=json.load(open('models/model_metadata.json', encoding='utf-8')); "
+        "assert meta.get('feature_columns') == FEATURE_NAMES, "
+        "'bundled model feature order does not match IDS runtime'; "
+        "model=IDSModel('models/ids_model.joblib', "
+        "'models/feature_scaler.joblib', FEATURE_NAMES); "
+        "score=model.predict_attack_probability(empty_feature_vector()); "
+        "assert 0.0 <= score <= 1.0, 'model returned invalid probability'"
+    )
+    probe = ssh.run(
+        f"cd {shlex.quote(ids_root)} && {shlex.quote(venv + '/bin/python')} "
+        f"-c {shlex.quote(validation)}",
+        timeout=120.0,
+    )
+    if not probe.ok:
+        raise AgentInstallError(
+            "IDS model/runtime validation failed on the gateway; service was not "
+            f"reported ready: {(probe.stderr or probe.stdout).strip()[:500]}"
+        )
+    return f"IDS runtime ready on Linux/{arch} ({lines[2]})"
+
+
+def _prepare_ids_config(
+    ssh: SSHSession,
+    *,
+    remote_root: str,
+    data_dir: str,
+    sudo_password: str,
+) -> bool:
+    ids_root = f"{remote_root}/ids"
+    config_path = f"{data_dir}/ids_config.yaml"
+    logs_dir = f"{data_dir}/logs"
+    command = (
+        f"mkdir -p {shlex.quote(logs_dir)} && "
+        f"cd {shlex.quote(ids_root)} && "
+        f"{shlex.quote(remote_root + '/ids-venv/bin/python')} "
+        "-m ids_gateway.install_config "
+        f"--config {shlex.quote(config_path)} "
+        f"--event-log {shlex.quote(logs_dir + '/ids_events.jsonl')} "
+        f"--alert-log {shlex.quote(logs_dir + '/ids_alerts.log')} "
+        "--mosquitto-log /var/log/mosquitto/mosquitto.log"
+    )
+    result = sudo_run(
+        ssh,
+        command,
+        sudo_password=sudo_password,
+        timeout=60.0,
+    )
+    if not result.ok:
+        raise AgentInstallError(
+            "preparing gateway IDS config failed: "
+            f"{(result.stderr or result.stdout).strip()[:400]}"
+        )
+    return "enabled=true" in result.stdout.splitlines()
+
+
+def _install_ids_service(
+    ssh: SSHSession,
+    *,
+    ids_src: Path,
+    remote_root: str,
+    enabled: bool,
+    sudo_password: str,
+) -> None:
+    unit_source = ids_src / "iot-gateway-ids.service"
+    if not unit_source.is_file():
+        raise AgentInstallError(f"IDS systemd service unit missing: {unit_source}")
+    unit = unit_source.read_text(encoding="utf-8").replace(
+        DEFAULT_AGENT_ROOT, remote_root
+    )
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".service", delete=False, encoding="utf-8", newline="\n"
+    ) as tmp:
+        tmp.write(unit)
+        local_unit = Path(tmp.name)
+    remote_tmp = f"/tmp/iotgw-ids-unit-{uuid.uuid4().hex}.service"
+    try:
+        ssh.upload_file(local_unit, remote_tmp, mode=0o644)
+        action = (
+            "systemctl enable iot-gateway-ids.service && "
+            "systemctl restart iot-gateway-ids.service && "
+            "if ! systemctl is-active --quiet iot-gateway-ids.service; then "
+            "journalctl -u iot-gateway-ids.service -n 40 --no-pager; exit 1; fi"
+            if enabled
+            else "systemctl disable --now iot-gateway-ids.service"
+        )
+        command = (
+            f"install -o root -g root -m 0644 {shlex.quote(remote_tmp)} "
+            "/etc/systemd/system/iot-gateway-ids.service && "
+            f"rm -f {shlex.quote(remote_tmp)} && "
+            "systemctl daemon-reload && "
+            f"{action}"
+        )
+        result = sudo_run(
+            ssh,
+            command,
+            sudo_password=sudo_password,
+            timeout=120.0,
+        )
+        if not result.ok:
+            detail = (result.stderr or result.stdout).strip()[:800]
+            raise AgentInstallError(
+                "gateway IDS systemd install/start failed"
+                + (f": {detail}" if detail else "")
+            )
+    finally:
+        local_unit.unlink(missing_ok=True)
 
 
 def _install_auto_prevent_helper(
@@ -733,9 +961,11 @@ def _write_env(
     data_dir: str = DEFAULT_AGENT_DATA,
     decrypt_password: str | None = None,
     mqtt_port: int = MQTT_TLS_PORT,
+    gateway_host: str = "",
 ) -> None:
     lines = [
         f"MONITORING_IP={monitoring_ip}",
+        f"IOTGW_GATEWAY_HOST={gateway_host}",
         f"IOTGW_AGENT_DATA={data_dir}",
         f"LOKI_URL=http://{monitoring_ip}:3100",
         f"MQTT_PORT={int(mqtt_port)}",
@@ -886,6 +1116,7 @@ def provision_monolithic_agent(
         data_dir=data_dir,
         decrypt_password=decrypt_password,
         mqtt_port=MQTT_TLS_PORT,
+        gateway_host=gateway_ip,
     )
     _install_systemd(ssh, remote_root, sudo_password=sudo_password)
     notes.append("systemd iot-gateway-agent enabled")
@@ -893,6 +1124,27 @@ def provision_monolithic_agent(
     notes.append(
         f"agent healthy; system mosquitto MQTTS on gateway {gateway_ip}:{MQTT_TLS_PORT}, "
         "agent metrics :9139 (--no-broker)"
+    )
+    ids_src = agent_src.parent / "ids"
+    notes.append(
+        _ensure_ids_runtime(ssh, remote_root, sudo_password=sudo_password)
+    )
+    ids_enabled = _prepare_ids_config(
+        ssh,
+        remote_root=remote_root,
+        data_dir=data_dir,
+        sudo_password=sudo_password,
+    )
+    _install_ids_service(
+        ssh,
+        ids_src=ids_src,
+        remote_root=remote_root,
+        enabled=ids_enabled,
+        sudo_password=sudo_password,
+    )
+    notes.append(
+        "gateway IDS systemd service "
+        + ("enabled and running" if ids_enabled else "installed and disabled")
     )
     return notes
 
@@ -939,6 +1191,8 @@ def uninstall_monolithic_agent(
 
     stop = sudo_run(
         ssh,
+        "systemctl stop iot-gateway-ids 2>/dev/null || true; "
+        "systemctl disable iot-gateway-ids 2>/dev/null || true; "
         "systemctl stop iot-gateway-agent 2>/dev/null || true; "
         "systemctl disable iot-gateway-agent 2>/dev/null || true; "
         "systemctl stop iotgw-kafka 2>/dev/null || true; "
@@ -953,6 +1207,7 @@ def uninstall_monolithic_agent(
         "esac; done; "
         "ip link del iotgw-fake 2>/dev/null || true; "
         "rm -f /etc/systemd/system/iot-gateway-agent.service "
+        "/etc/systemd/system/iot-gateway-ids.service "
         "/etc/systemd/system/iotgw-kafka.service "
         "/etc/systemd/system/iotgw-fake@.service "
         "/etc/sudoers.d/iotgw-auto-prevent; "

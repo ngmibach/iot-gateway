@@ -20,6 +20,12 @@
           hash: "activities",
         },
         {
+          id: "security",
+          label: "Security",
+          href: "security.html",
+          page: "security",
+        },
+        {
           id: "control",
           label: "Control Plane",
           href: "actions.html",
@@ -84,6 +90,7 @@
     const name = (location.pathname.split("/").pop() || "").toLowerCase();
     if (name.indexOf("wizard") === 0) return "wizard";
     if (name.indexOf("monitoring") === 0) return "monitoring";
+    if (name.indexOf("security") === 0) return "security";
     if (name.indexOf("actions") === 0) return "actions";
     if (name.indexOf("gateways") === 0) return "gateways";
     if (name.indexOf("certificates") === 0) return "certificates";

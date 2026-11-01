@@ -6,7 +6,7 @@ Left-rail layout after install:
 
 | Section | Items |
 |---------|-------|
-| **Monitoring** | Gateway Metric · Gateway Activities · Control Plane · Grafana |
+| **Monitoring** | Gateway Metric · Gateway Activities · Security · Control Plane · Grafana |
 | **Gateways** | Registration · Settings · Clean up |
 | **Settings** | Remove · Certificates · Admin |
 
@@ -63,6 +63,15 @@ Message flow and per-sensor Kafka activity.
    - Several sensors → horizontal name tabs (with Fake/Real badge)
    - Each panel: counters, Kafka topic chart, delay chart, per-sensor **Invalid messages** table
 6. **Denied** counts ACL rejects, MQTTS handshake failures (missing/wrong client cert), and decrypt/schema failures. Fake Simulate attacks such as Wrong client certificate or Bad encryption increment Denied and appear in the invalid-message tables.
+
+### Security / IDS
+
+1. Select a registered gateway. The page shows the IDS configured state separately from its systemd service and model/runtime readiness.
+2. Enable or disable the detector, behavioral rules, or ML detection. Tune the supported thresholds and click **Apply IDS settings**. Success appears only after the remote systemd operation and runtime status are confirmed. If sudo is not saved in Gateways → Settings, enter the gateway sudo password.
+3. Newly recorded alerts refresh automatically every 15 seconds; **Refresh status and alerts** forces a refresh. Time range, severity, and text search filter the displayed records.
+4. The page distinguishes no alerts from IDS disabled, not installed, runtime failure, gateway status unavailable, and Loki query errors. Alert values are rendered as text; alerts do not block or quarantine devices.
+
+An uninstalled gateway must be provisioned or updated before IDS controls are available. IDS continues to run on the gateway after the desktop app closes. See [`ids.md`](ids.md) for supported targets, data flow, and known unavailable signals.
 
 ### Control Plane
 

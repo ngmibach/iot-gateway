@@ -56,6 +56,8 @@ Wrong job names (for example legacy `node`) yield empty Metric panels while HTTP
 | Path | Purpose |
 |------|---------|
 | `/opt/iot-gateway-agent` | Agent package, venv, unit files |
+| `/opt/iot-gateway-agent/ids` | Versioned IDS runtime, model assets, config template, and service unit |
+| `/opt/iot-gateway-agent/ids-venv` | Isolated gateway-only IDS Python environment |
 | `/var/lib/iot-gateway-agent` | Data: certs, mosquitto ACL/passwords, kafka catalog, crypto, schemas, fake runtime, logs |
 | `/opt/kafka` | Apache Kafka KRaft single-node |
 | `/etc/iot-gateway-agent.env` | Agent environment (LF newlines) |
@@ -66,6 +68,7 @@ Wrong job names (for example legacy `node`) yield empty Metric panels while HTTP
 | Unit / process | Role |
 |----------------|------|
 | `iot-gateway-agent` | Monolithic agent (`--no-broker`); health, metrics, decrypt, shipper |
+| `iot-gateway-ids.service` | Independent IDS detector; reads structured accepted events and writes JSONL alerts |
 | `mosquitto.service` | System Mosquitto; MQTTS `:8883` with `require_certificate` |
 | `iotgw-kafka` | Kafka KRaft; heap 128–256M |
 | `iotgw-fake@<id>` | Optional fake sensor simulator |
@@ -380,12 +383,16 @@ Netns/bridge/unit and some day-2 Mosquitto/Kafka file writes need sudo on the ga
 | `GET /api/v1/query/summaries/gateway?gateway_id=&range=` | Gateway Activities |
 | `GET /api/v1/gateways` | Gateway selectors |
 | `GET /api/v1/gateways/{id}/devices` | Control Plane / Activities sensors |
+| `GET /api/v1/gateways/{id}/ids/status` | Security page configured state, systemd health, and model/runtime readiness |
+| `GET /api/v1/gateways/{id}/ids/config` | Security page IDS configuration |
+| `POST /api/v1/gateways/{id}/ids/config` | Validated IDS settings; starts, restarts, or stops only `iot-gateway-ids.service` |
+| `GET /api/v1/ids/alerts?gateway_id={id}&range=1h` | Security page alert query from Loki (`job=ids-alerts`) |
 
 ### Metric series (high level)
 
 - Host: node_exporter-compat gauges from agent `/proc` scrape
 - Apps: `iotgw_app_up{app=…}`, CPU/mem where available; MQTT via TCP probe; Kafka may fall back to `iotgw_kafka_up`
-- Activities: `iotgw_decrypt_*`, `iotgw_device_*`, denied/IDS; Kafka topic labels from registry + live `topics.json` SSH sync; Loki as fallback for some legacy queries
+- Activities: `iotgw_decrypt_*`, `iotgw_device_*`, and denied counters; IDS alert records are queried separately from Loki by the Security page. Kafka topic labels come from registry + live `topics.json` SSH sync; Loki is a fallback for some legacy queries.
 - Envelope: `iotgw_envelope_messages_total{result=…}`
 
 Chart frames stay visible with “No data in range” until scrapes fill in.

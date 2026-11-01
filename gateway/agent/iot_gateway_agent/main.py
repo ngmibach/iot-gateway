@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     broker = MosquittoSupervisor(conf)
     worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
+    ids_shipper: LokiShipper | None = None
     kafka: SensorKafkaProducer | None = None
     denied: DeniedWatcher | None = None
     gateway_id = (args.gateway_id or "").strip() or os.environ.get(
@@ -247,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
     sensor_log = data / "logs" / "sensor_data.log"
+    ids_event_log = data / "logs" / "ids_events.jsonl"
     if not args.no_decrypt:
         # Prefer TLS on :8883; warn if client certs are missing but still attempt TLS.
         tls_kwargs: dict = {}
@@ -282,6 +284,7 @@ def main(argv: list[str] | None = None) -> int:
             username=args.decrypt_user,
             password=args.decrypt_password,
             log_path=sensor_log,
+            ids_event_log_path=ids_event_log,
             kafka=kafka,
             data_dir=data,
             deny_log=deny_log,
@@ -297,17 +300,27 @@ def main(argv: list[str] | None = None) -> int:
                 Path("/var/log/mosquitto/mosquitto.log"),
                 Path("/var/log/mosquitto.log"),
             ],
-            ids_log_paths=[data / "logs" / "ids_alerts.log"],
             deny_log=deny_log,
         )
         denied.start()
         metrics.denied_watcher = denied
 
     loki = args.loki_url.strip() or f"http://{args.monitoring_ip}:3100"
+    gateway_host = os.environ.get("IOTGW_GATEWAY_HOST", "").strip()
+    gateway_labels = {"gateway": gateway_host} if gateway_host else {}
     if not args.no_shipper:
-        shipper = LokiShipper(sensor_log, loki_url=loki)
+        shipper = LokiShipper(
+            sensor_log, loki_url=loki, extra_labels=gateway_labels
+        )
         shipper.start()
         metrics.shipper = shipper
+        ids_shipper = LokiShipper(
+            data / "logs" / "ids_alerts.log",
+            loki_url=loki,
+            job="ids-alerts",
+            extra_labels=gateway_labels,
+        )
+        ids_shipper.start()
 
     mdns_handle = None
     mdns_enabled = False
@@ -440,6 +453,8 @@ def main(argv: list[str] | None = None) -> int:
             kafka.close()
         if shipper:
             shipper.stop()
+        if ids_shipper:
+            ids_shipper.stop()
         broker.stop()
         stop_mdns(mdns_handle)
         logger.info("stopped")

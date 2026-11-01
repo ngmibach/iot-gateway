@@ -9,15 +9,16 @@ The system has two applications: the **monitoring app** on the operator PC, and 
 ```mermaid
 flowchart LR
   subgraph PC["Operator PC — Monitoring app"]
-    UI["Desktop UI\nWizard · Gateways · Monitoring · Settings"]
+    UI["Desktop UI\nWizard · Gateways · Monitoring · Security · Settings"]
     CS["Control service"]
     PROM["Prometheus"]
     LOKI["Loki"]
     GRAF["Grafana"]
   end
 
-  subgraph GW["Gateway device — Agent"]
+  subgraph GW["Gateway device"]
     AGENT["iot-gateway-agent"]
+    IDS["iot-gateway-ids\nindependent systemd service"]
     MQTT["Mosquitto MQTTS :8883"]
     KAFKA["Kafka KRaft"]
   end
@@ -30,6 +31,9 @@ flowchart LR
   MQTT --> AGENT
   AGENT --> KAFKA
   AGENT -->|"ship logs"| LOKI
+  AGENT -->|"structured IDS events"| IDS
+  IDS -->|"JSONL alert log"| AGENT
+  AGENT -->|"job=ids-alerts"| LOKI
   PROM -->|"scrape :9139/metrics"| AGENT
   CS --> PROM
   CS --> LOKI
@@ -76,14 +80,17 @@ flowchart TB
 
 ## 3. Gateway application
 
-One systemd agent under `/opt/iot-gateway-agent`, with system Mosquitto and Apache Kafka KRaft beside it. Optional fake sensors share a private bridge on the gateway.
+The gateway agent and IDS have separate systemd units under `/opt/iot-gateway-agent`, with system Mosquitto and Apache Kafka KRaft beside them. IDS deployment and controls do not restart the gateway agent. Optional fake sensors share a private bridge on the gateway.
 
 ```mermaid
 flowchart TB
   subgraph Gateway["Gateway device"]
     MOSQ["Mosquitto\nMQTTS :8883 mTLS"]
     DEC["Decrypt worker"]
-    LOG["sensor_data.log"]
+    LOG["sensor_data.log\nlegacy-compatible"]
+    EVENTS["ids_events.jsonl\nstructured accepted events"]
+    IDS["iot-gateway-ids\nisolated venv + model"]
+    ALERTS["ids_alerts.log\nstructured records"]
     KAFKA["iotgw-kafka\nINTERNAL :9092 / EXTERNAL :9092"]
     SHIP["Loki shipper"]
     MET["/metrics · /v1/health\n:9139"]
@@ -94,8 +101,12 @@ flowchart TB
   FAKE --> MOSQ
   MOSQ --> DEC
   DEC --> LOG
+  DEC --> EVENTS
   DEC --> KAFKA
   LOG --> SHIP
+  EVENTS --> IDS
+  IDS --> ALERTS
+  ALERTS --> SHIP
   SHIP -->|"MONITORING_IP:3100"| LOKI["Operator Loki"]
   MET -->|"Prometheus scrape"| PROM["Operator Prometheus"]
 ```
@@ -113,6 +124,9 @@ sequenceDiagram
   participant D as Decrypt worker
   participant K as Kafka topic
   participant L as sensor_data.log
+  participant E as ids_events.jsonl
+  participant IDS as Independent IDS service
+  participant A as ids_alerts.log
   participant Ship as Shipper
 
   S->>M: MQTTS connect (password + client cert)
@@ -121,12 +135,19 @@ sequenceDiagram
   M->>D: Deliver to decrypt subscription
   D->>D: Pair / unwrap / AES-GCM / schema
   D->>L: Append plaintext line
+  D->>E: Append structured JSONL event
   D->>K: Produce sensor.device_id
   L->>Ship: Tail lines
   Ship->>Ship: Push to operator Loki
+  E->>IDS: Tail accepted events
+  IDS->>A: Append structured alert (when detected)
+  A->>Ship: Tail IDS alerts
+  Ship->>Ship: Push job=ids-alerts to operator Loki
 ```
 
 One Kafka topic per registered sensor (`sensor.<device_id>`), size-capped by retention so capacity stays bounded. See [`details.md`](details.md#sensor-capacity-kafka).
+
+IDS reads only the separate structured event file; the existing timestamp-prefixed `sensor_data.log` remains unchanged. It omits publisher source IP because the decrypt worker does not observe it. Alerts are records only and are never connected to Auto prevent or device-block actions. See [`ids.md`](ids.md) for deployment and alert details.
 
 ## 5. Encryption and decryption overview
 

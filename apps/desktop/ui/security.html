@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Security</title>
+  <link rel="stylesheet" href="wizard.css" />
+  <link rel="stylesheet" href="security.css" />
+</head>
+<body data-page="security">
+  <header>
+    <div>
+      <h1>Security</h1>
+      <div class="sub">Gateway intrusion detection and alert review</div>
+    </div>
+    <div id="ids-status-badge" aria-live="polite"></div>
+  </header>
+  <main class="security-main">
+    <section class="panel">
+      <div class="security-toolbar">
+        <label for="gateway-id">Gateway</label>
+        <select id="gateway-id" aria-label="Gateway"></select>
+        <button class="secondary" id="btn-refresh">Refresh status and alerts</button>
+      </div>
+      <div id="security-message" class="note-box hidden" role="status" aria-live="polite"></div>
+      <dl class="ids-runtime-state">
+        <div><dt>Configured</dt><dd id="ids-configured">—</dd></div>
+        <div><dt>Service</dt><dd id="ids-service">—</dd></div>
+        <div><dt>Model/runtime</dt><dd id="ids-model">—</dd></div>
+      </dl>
+      <p class="muted">IDS runs on the selected gateway as an independent systemd service. Closing this app does not stop detection. Alerts are records only; devices are never automatically blocked.</p>
+    </section>
+
+    <section class="panel">
+      <h2>IDS controls</h2>
+      <p class="muted">Apply changes to the gateway. If a sudo password is saved under Gateways → Settings, the app uses it; otherwise enter it below.</p>
+      <div class="config-switches">
+        <label class="config-switch"><input id="ids-enabled" type="checkbox" /> <span>Enable intrusion detection</span></label>
+        <label class="config-switch"><input id="rules-enabled" type="checkbox" /> <span>Enable behavioral rules</span></label>
+        <label class="config-switch"><input id="ml-enabled" type="checkbox" /> <span>Enable machine-learning detection</span></label>
+      </div>
+      <div class="config-grid">
+        <label for="ml-threshold">ML probability threshold <small>0–1</small></label>
+        <input id="ml-threshold" type="number" min="0" max="1" step="0.01" />
+        <label for="rate-threshold">Maximum message rate <small>messages/second</small></label>
+        <input id="rate-threshold" type="number" min="0.01" max="1000" step="0.1" />
+        <label for="clock-threshold">Maximum clock skew <small>seconds</small></label>
+        <input id="clock-threshold" type="number" min="0" max="3600" step="0.1" />
+        <label for="connect-ratio">Maximum connect/publish ratio</label>
+        <input id="connect-ratio" type="number" min="0.01" max="1000" step="0.01" />
+        <label for="cooldown">Alert cooldown <small>seconds per device/rule</small></label>
+        <input id="cooldown" type="number" min="0" max="86400" step="1" />
+        <label for="sudo-password">Gateway sudo password <small>optional when saved</small></label>
+        <input id="sudo-password" type="password" autocomplete="new-password" />
+      </div>
+      <div class="row">
+        <button class="primary" id="btn-apply-ids" disabled>Apply IDS settings</button>
+        <span id="config-status" role="status" aria-live="polite"></span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>Recent IDS alerts</h2>
+          <p class="muted">Alerts are queried from the app's Loki service and refresh automatically every 15 seconds.</p>
+        </div>
+      </div>
+      <div class="security-filters">
+        <label for="alert-range">Time range</label>
+        <select id="alert-range">
+          <option value="15m">Last 15 minutes</option>
+          <option value="1h" selected>Last hour</option>
+          <option value="6h">Last 6 hours</option>
+          <option value="24h">Last 24 hours</option>
+          <option value="7d">Last 7 days</option>
+        </select>
+        <label for="severity-filter">Severity</label>
+        <select id="severity-filter">
+          <option value="">All severities</option>
+          <option value="critical">Critical</option>
+          <option value="warning">Warning</option>
+          <option value="info">Info</option>
+        </select>
+        <label for="alert-search">Search</label>
+        <input id="alert-search" type="search" placeholder="Device, detection, or message" />
+      </div>
+      <p id="alerts-message" class="muted" role="status" aria-live="polite"></p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Severity</th><th>Device</th><th>Detection</th><th>Message</th><th>Score</th></tr>
+          </thead>
+          <tbody id="security-alert-rows"></tbody>
+        </table>
+      </div>
+      <p id="alert-empty" class="muted hidden">No IDS alerts in this time range.</p>
+    </section>
+  </main>
+  <script src="app-shell.js"></script>
+  <script src="security.js"></script>
+</body>
+</html>

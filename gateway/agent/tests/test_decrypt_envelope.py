@@ -57,6 +57,12 @@ class DecryptEnvelopeTests(unittest.TestCase):
             self.assertEqual(worker.envelope_ok, 1)
             text = log_path.read_text(encoding="utf-8")
             self.assertIn('"hello":1', text.replace(" ", ""))
+            event = json.loads(
+                (root / "logs" / "ids_events.jsonl").read_text(encoding="utf-8")
+            )
+            self.assertEqual(event["topic"], data_topic("dev1"))
+            self.assertEqual(event["deviceId"], "dev1")
+            self.assertNotIn("source_ip", event)
 
     def test_key_only_times_out(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

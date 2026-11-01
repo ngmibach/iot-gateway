@@ -180,6 +180,86 @@ class ProvisionFlowTests(unittest.TestCase):
         base.update(kwargs)
         return ProvisionConfig(**base)
 
+    def test_ids_upload_fails_when_bundled_assets_are_missing(self) -> None:
+        from provisioner.agent_install import AgentInstallError, _upload_agent_tree
+
+        with tempfile.TemporaryDirectory() as tmp:
+            agent_src = Path(tmp) / "gateway" / "agent"
+            (agent_src / "iot_gateway_agent").mkdir(parents=True)
+            (agent_src.parent / "ids" / "ids_gateway").mkdir(parents=True)
+            with self.assertRaisesRegex(AgentInstallError, "IDS deployment assets missing"):
+                _upload_agent_tree(
+                    FakeSSH(),
+                    agent_src,
+                    "/opt/iot-gateway-agent",
+                    sudo_password="test-sudo-secret",
+                )
+
+    def test_ids_runtime_rejects_unsupported_gateway_architecture(self) -> None:
+        from provisioner.agent_install import AgentInstallError, _ensure_ids_runtime
+
+        ssh = FakeSSH()
+        ssh.when(
+            "uname -s && uname -m",
+            CommandResult(0, "Linux\narmv7l\nPython 3.12.3\n", ""),
+        )
+        with self.assertRaisesRegex(AgentInstallError, "32-bit ARM is not supported"):
+            _ensure_ids_runtime(
+                ssh,
+                "/opt/iot-gateway-agent",
+                sudo_password="test-sudo-secret",
+            )
+
+    def test_ids_runtime_reports_dependency_install_failure(self) -> None:
+        from provisioner.agent_install import AgentInstallError, _ensure_ids_runtime
+
+        ssh = FakeSSH()
+        ssh.when(
+            "uname -s && uname -m",
+            CommandResult(0, "Linux\nx86_64\nPython 3.12.3\n", ""),
+        )
+        ssh.when("ldconfig -p", CommandResult(0, "libgomp.so.1", ""))
+        ssh.when(
+            "pip install -q -r",
+            CommandResult(1, "", "No matching distribution for an IDS wheel"),
+        )
+        with self.assertRaisesRegex(
+            AgentInstallError, "IDS dependency installation failed on Linux/x86_64"
+        ):
+            _ensure_ids_runtime(
+                ssh,
+                "/opt/iot-gateway-agent",
+                sudo_password="test-sudo-secret",
+            )
+
+    def test_ids_service_uses_separate_unit_and_custom_install_root(self) -> None:
+        from provisioner.agent_install import _install_ids_service
+
+        ssh = FakeSSH()
+        ids_src = self.repo / "gateway" / "ids"
+        with mock.patch(
+            "provisioner.agent_install.sudo_run",
+            return_value=CommandResult(0, "", ""),
+        ) as run_sudo:
+            _install_ids_service(
+                ssh,
+                ids_src=ids_src,
+                remote_root="/opt/custom-gateway-agent",
+                enabled=False,
+                sudo_password="test-sudo-secret",
+            )
+        uploaded = next(
+            content
+            for path, content in ssh.files.items()
+            if path.endswith(".service")
+        )
+        unit = uploaded.decode("utf-8")
+        self.assertIn("/opt/custom-gateway-agent/ids", unit)
+        self.assertNotIn("/opt/iot-gateway-agent/ids", unit)
+        command = run_sudo.call_args.args[1]
+        self.assertIn("systemctl disable --now iot-gateway-ids.service", command)
+        self.assertNotIn("iot-gateway-agent", command)
+
     def test_default_install_root_is_agent(self) -> None:
         self.assertEqual(DEFAULT_INSTALL_ROOT, "/opt/iot-gateway-agent")
 
@@ -230,11 +310,24 @@ class ProvisionFlowTests(unittest.TestCase):
         ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
         ssh.when("sudo -S", CommandResult(0, "", ""))
         with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp) / "agent"
             pkg = root / "iot_gateway_agent"
-            pkg.mkdir()
+            pkg.mkdir(parents=True)
             (pkg / "__init__.py").write_text("#\n", encoding="utf-8")
             (root / "requirements.txt").write_text("x==1\n", encoding="utf-8")
+            ids = root.parent / "ids"
+            for rel in (
+                "ids_gateway/__init__.py",
+                "models/ids_model.joblib",
+                "models/feature_scaler.joblib",
+                "models/model_metadata.json",
+                "configs/ids_config.yaml",
+                "requirements-runtime.txt",
+                "iot-gateway-ids.service",
+            ):
+                asset = ids / rel
+                asset.parent.mkdir(parents=True, exist_ok=True)
+                asset.write_text("asset\n", encoding="utf-8")
             agent_install._upload_agent_tree(
                 ssh,
                 root,
@@ -248,6 +341,7 @@ class ProvisionFlowTests(unittest.TestCase):
         self.assertIn("rm -rf /opt/iot-gateway-agent/iot_gateway_agent", prepare)
         self.assertNotIn("$(id -un)", prepare)
         self.assertEqual(ssh.trees[0][1], "/opt/iot-gateway-agent/iot_gateway_agent")
+        self.assertIn("/opt/iot-gateway-agent/.ids-stage-", ssh.trees[1][1])
 
     def test_mosquitto_present_accepts_usr_sbin(self) -> None:
         from provisioner.agent_install import _mosquitto_present
@@ -438,6 +532,11 @@ class ProvisionFlowTests(unittest.TestCase):
         ssh.when("command -v mosquitto", CommandResult(0, "OK\n", ""))
         ssh.when("import ensurepip", CommandResult(0, "OK\n", ""))
         ssh.when("command -v python3", CommandResult(0, "/usr/bin/python3\n", ""))
+        ssh.when(
+            "uname -s && uname -m",
+            CommandResult(0, "Linux\nx86_64\nPython 3.12.3\n", ""),
+        )
+        ssh.when("ldconfig -p", CommandResult(0, "libgomp.so.1\n", ""))
         ssh.when("python3 -m venv", CommandResult(0, "", ""))
         ssh.when("pip install", CommandResult(0, "", ""))
         ssh.when("systemctl", CommandResult(0, "", ""))
@@ -452,6 +551,7 @@ class ProvisionFlowTests(unittest.TestCase):
         ssh.when("SERVER_CREATED", CommandResult(0, "SERVER_EXISTS\n", ""))
         ssh.when("openssl", CommandResult(0, "CA_EXISTS\nSERVER_EXISTS\nDECRYPT_OK\n", ""))
         ssh.when("sudo -S", CommandResult(0, "CA_EXISTS\nSERVER_EXISTS\nDECRYPT_OK\n", ""))
+        ssh.when("ids_gateway.install_config", CommandResult(0, "enabled=true\n", ""))
         result = provision(ssh, self._config())
         self.assertEqual(result.backend, "agent")
         self.assertEqual(result.install_root, DEFAULT_INSTALL_ROOT)
@@ -478,6 +578,10 @@ class ProvisionFlowTests(unittest.TestCase):
                 if calls["n"] == 1:
                     return CommandResult(1, "", "missing")
                 return CommandResult(0, "OK\n", "")
+            if "uname -s && uname -m" in command:
+                return CommandResult(0, "Linux\nx86_64\nPython 3.12.3\n", "")
+            if "ldconfig -p" in command:
+                return CommandResult(0, "libgomp.so.1\n", "")
             if "import ensurepip" in command:
                 return CommandResult(1, "", "")
             if "curl -fsS http://127.0.0.1:9139" in command:

@@ -1381,7 +1381,9 @@ def _should_inject_ca(method: str, path: str) -> bool:
 
 
 def _should_inject_sudo(method: str, path: str) -> bool:
-    """Playbooks that need gateway sudo (Mosquitto ACL/passwords or fake netns)."""
+    """Control operations that need gateway sudo credentials."""
+    if method == "POST" and path.endswith("/ids/config"):
+        return True
     if method == "POST" and path.endswith("/devices/fake"):
         return True
     if method == "POST" and path.endswith("/devices"):

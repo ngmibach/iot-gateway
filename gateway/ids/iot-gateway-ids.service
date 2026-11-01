@@ -1,0 +1,19 @@
+[Unit]
+Description=IoT Gateway intrusion detection service
+After=network-online.target mosquitto.service iot-gateway-agent.service
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/iot-gateway-agent/ids
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/iot-gateway-agent/ids-venv/bin/python -m ids_gateway.main /var/lib/iot-gateway-agent/ids_config.yaml
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=15
+KillMode=control-group
+
+[Install]
+WantedBy=multi-user.target
