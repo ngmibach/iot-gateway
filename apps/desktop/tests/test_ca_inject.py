@@ -102,6 +102,17 @@ class CaInjectHelpersTests(unittest.TestCase):
                 "POST", "/api/v1/gateways/gw1/devices/s1/control/purge-kafka"
             )
         )
+        self.assertTrue(
+            _should_inject_sudo(
+                "PUT", "/api/v1/gateways/gw1/devices/s1/control/auto-prevent"
+            )
+        )
+        self.assertTrue(
+            _should_inject_sudo(
+                "POST",
+                "/api/v1/gateways/gw1/devices/s1/control/auto-prevent/lift",
+            )
+        )
 
     def test_inject_merges_keyring(self) -> None:
         keyring_store.set_secret("gw1", "secret-ca", kind="ca")

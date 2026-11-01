@@ -70,7 +70,10 @@ body.first-run {
   gap: 0.2rem;
 }
 .app-nav-item {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
   padding: 0.5rem 0.65rem;
   border-radius: 8px;
   color: var(--muted);
@@ -87,6 +90,30 @@ body.first-run {
   color: var(--text);
   background: #1e2a3d;
   border-color: var(--accent);
+}
+.app-nav-item.alarm {
+  color: #ffc9cb;
+  border-color: #8a3a42;
+  background: #3a1c20;
+}
+.app-nav-item.alarm.active {
+  color: #ffd6d8;
+  border-color: var(--bad, #e85d6a);
+  background: #4a2228;
+}
+.app-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  padding: 0 0.35rem;
+  border-radius: 999px;
+  background: var(--bad, #e85d6a);
+  color: #1a0a0c;
+  font-size: 0.7rem;
+  font-weight: 700;
+  line-height: 1;
 }
 .app-frame {
   flex: 1;

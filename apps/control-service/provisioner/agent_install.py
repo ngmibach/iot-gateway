@@ -647,6 +647,56 @@ def _upload_agent_tree(
     fake_unit = agent_src / "iotgw-fake@.service"
     if fake_unit.is_file():
         ssh.upload_file(fake_unit, f"{remote_root}/iotgw-fake@.service")
+    _install_auto_prevent_helper(
+        ssh, agent_src, remote_root, sudo_password=sudo_password
+    )
+
+
+def _install_auto_prevent_helper(
+    ssh: SSHSession,
+    agent_src: Path,
+    remote_root: str,
+    *,
+    sudo_password: str,
+) -> None:
+    """Install firewall helper + sudoers for agent Auto prevent quarantine."""
+    helper_src = agent_src / "bin" / "iotgw-auto-prevent"
+    if not helper_src.is_file():
+        return
+    remote_bin = f"{remote_root}/bin"
+    remote_helper = f"{remote_bin}/iotgw-auto-prevent"
+    tmp_helper = "/tmp/iotgw-auto-prevent"
+    ssh.run(f"mkdir -p {shlex.quote(remote_bin)}", timeout=15.0)
+    ssh.upload_file(helper_src, tmp_helper, mode=0o755)
+    sudoers_body = (
+        "# IoT Gateway Monitor — Auto prevent firewall helper\n"
+        f"ALL ALL=(root) NOPASSWD: {remote_helper}\n"
+    )
+    with tempfile.NamedTemporaryFile(
+        "w", suffix=".sudoers", delete=False, encoding="utf-8", newline="\n"
+    ) as tmp:
+        tmp.write(sudoers_body)
+        local_sudoers = Path(tmp.name)
+    remote_sudoers_tmp = "/tmp/iotgw-auto-prevent.sudoers"
+    try:
+        ssh.upload_file(local_sudoers, remote_sudoers_tmp, mode=0o440)
+        result = sudo_run(
+            ssh,
+            f"mkdir -p {shlex.quote(remote_bin)} && "
+            f"mv {shlex.quote(tmp_helper)} {shlex.quote(remote_helper)} && "
+            f"chmod 755 {shlex.quote(remote_helper)} && "
+            f"visudo -cf {shlex.quote(remote_sudoers_tmp)} && "
+            f"mv {shlex.quote(remote_sudoers_tmp)} "
+            f"/etc/sudoers.d/iotgw-auto-prevent && "
+            f"chmod 440 /etc/sudoers.d/iotgw-auto-prevent",
+            sudo_password=sudo_password,
+            timeout=30.0,
+        )
+        if not result.ok:
+            # Non-fatal: agent can still run; Auto prevent DROP will fail until fixed.
+            return
+    finally:
+        local_sudoers.unlink(missing_ok=True)
 
 
 def _ensure_venv(ssh: SSHSession, remote_root: str) -> None:
@@ -905,7 +955,13 @@ def uninstall_monolithic_agent(
         "ip link del iotgw-fake 2>/dev/null || true; "
         "rm -f /etc/systemd/system/iot-gateway-agent.service "
         "/etc/systemd/system/iotgw-kafka.service "
-        "/etc/systemd/system/iotgw-fake@.service; "
+        "/etc/systemd/system/iotgw-fake@.service "
+        "/etc/sudoers.d/iotgw-auto-prevent; "
+        # Flush Auto prevent quarantine chain if present.
+        "iptables -D INPUT -j IOTGW_AUTO_PREVENT 2>/dev/null || true; "
+        "iptables -D FORWARD -j IOTGW_AUTO_PREVENT 2>/dev/null || true; "
+        "iptables -F IOTGW_AUTO_PREVENT 2>/dev/null || true; "
+        "iptables -X IOTGW_AUTO_PREVENT 2>/dev/null || true; "
         "systemctl daemon-reload 2>/dev/null || true",
         sudo_password=sudo_password,
         timeout=90.0,

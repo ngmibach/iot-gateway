@@ -180,6 +180,27 @@
   background: #121a24;
   box-shadow: 0 1px 0 var(--border);
 }
+.activities-alarm {
+  margin: 0.5rem 0 1rem;
+}
+.activities-alarm-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin-bottom: 0.35rem;
+}
+.activities-alarm-body {
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+.activities-alarm-body > div + div {
+  margin-top: 0.35rem;
+}
+tr.denied-row-new td {
+  background: rgba(232, 93, 106, 0.12);
+  box-shadow: inset 3px 0 0 var(--bad, #e85d6a);
+}
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
 th, td { text-align: left; padding: 0.4rem 0.55rem; border-bottom: 1px solid var(--border); }
 th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: uppercase; }

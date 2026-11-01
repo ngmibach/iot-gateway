@@ -115,6 +115,26 @@ def _fetch_agent_denied(
     return out
 
 
+def _fetch_agent_auto_prevent(
+    gw: Optional[dict[str, Any]],
+) -> dict[str, Any]:
+    """Pull Auto prevent policy/quarantine state from the gateway agent."""
+    base = _agent_base_url(gw)
+    if not base:
+        return {}
+    try:
+        r = _http_client().get(f"{base}/v1/auto-prevent", timeout=5.0)
+    except httpx.HTTPError:
+        return {}
+    if r.status_code != 200:
+        return {}
+    try:
+        payload = r.json()
+    except ValueError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
 def _proxy_get(url: str, params: dict[str, Any]) -> Any:
     try:
         r = _http_client().get(url, params=params)
@@ -818,6 +838,72 @@ def summary_gateway(
             ev for ev in denied_events if str(ev.get("device_id") or "") == did
         ]
 
+    ap_payload = _fetch_agent_auto_prevent(gw)
+    quarantined_map = ap_payload.get("quarantined") if isinstance(ap_payload, dict) else None
+    if not isinstance(quarantined_map, dict):
+        quarantined_map = {}
+    auto_prevent_quarantined: list[dict[str, Any]] = []
+    for did, rec in quarantined_map.items():
+        if not isinstance(rec, dict):
+            continue
+        auto_prevent_quarantined.append(
+            {
+                "device_id": str(did),
+                "ip": str(rec.get("ip") or ""),
+                "tripped_at": rec.get("tripped_at"),
+                "limit": rec.get("limit"),
+                "window_s": rec.get("window_s"),
+                "count": rec.get("count"),
+            }
+        )
+        # Mirror quarantine onto connected sensor rows when present.
+        for s in connected:
+            if str(s.get("device_id") or "") == str(did):
+                s["auto_prevent_quarantined"] = True
+                s["auto_prevent_ip"] = str(rec.get("ip") or "")
+    # Sync trip fields into local registry so Control tab shows Quarantined.
+    if quarantined_map and registry is not None and gid:
+        try:
+            from .device_meta import (
+                auto_prevent_block,
+                merge_device_meta,
+                parse_meta,
+            )
+
+            for did, rec in quarantined_map.items():
+                if not isinstance(rec, dict):
+                    continue
+                row = registry.get_device(str(gid), str(did))
+                if row is None:
+                    continue
+                meta = parse_meta(row.get("meta_json"))
+                block = auto_prevent_block(meta) or {"enabled": True, "limit": 10, "window_s": 300}
+                if (
+                    block.get("quarantine_ip") == rec.get("ip")
+                    and block.get("tripped_at") == rec.get("tripped_at")
+                ):
+                    continue
+                new_meta = merge_device_meta(
+                    meta,
+                    auto_prevent={
+                        "enabled": bool(block.get("enabled", True)),
+                        "limit": int(block.get("limit") or rec.get("limit") or 10),
+                        "window_s": int(
+                            block.get("window_s") or rec.get("window_s") or 300
+                        ),
+                        "tripped_at": rec.get("tripped_at"),
+                        "quarantine_ip": rec.get("ip"),
+                    },
+                )
+                registry.upsert_device(str(gid), str(did), meta_json=new_meta)
+        except Exception:  # noqa: BLE001 — summaries must not fail on sync
+            pass
+    if isinstance(ap_payload, dict) and ap_payload.get("ok") is False:
+        warnings.append("auto-prevent agent endpoint unavailable")
+    elif gw and not ap_payload:
+        # Older agents lack /v1/auto-prevent — only warn when policy exists in registry.
+        pass
+
     return {
         "range": time_range,
         "time": _time_window_meta(time_range, start, end),
@@ -841,6 +927,7 @@ def summary_gateway(
         },
         "connected_sensors": connected,
         "denied_messages": denied_events,
+        "auto_prevent_quarantined": auto_prevent_quarantined,
         "delay_by_device": delay_series_legacy,
         "kafka_catalog_topics": sorted(catalog_topics.keys()),
         "warnings": warnings,

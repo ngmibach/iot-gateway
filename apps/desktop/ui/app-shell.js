@@ -156,6 +156,8 @@
         }
         list.appendChild(a);
       });
+      // Restore Activities alarm badge from session after nav rebuild.
+      applyStoredNavAlarm(list);
 
       sec.appendChild(list);
       mount.appendChild(sec);
@@ -237,7 +239,65 @@
 
   window.iotgwMountShell = mountShell;
   window.iotgwUnmountShell = unmountShell;
+  function applyStoredNavAlarm(scope) {
+    try {
+      const active = sessionStorage.getItem("iotgw.activities.alarmActive") === "1";
+      const count = Number(sessionStorage.getItem("iotgw.activities.alarmCount") || 0);
+      setNavAlarm(
+        "activities",
+        { active, count: active ? count || 1 : 0, title: active ? "Invalid messages or auto-prevent quarantine" : "" },
+        scope
+      );
+    } catch (_e) {
+      /* ignore */
+    }
+  }
+
+  function setNavAlarm(navId, state, scope) {
+    const root = scope || document;
+    const el =
+      root.querySelector &&
+      root.querySelector(`.app-nav-item[data-nav-id="${navId}"]`);
+    if (!el) return;
+    const active = !!(state && state.active);
+    const count = active ? Number((state && state.count) || 0) || 1 : 0;
+    el.classList.toggle("alarm", active);
+    if (active) {
+      el.setAttribute("title", (state && state.title) || "Alarm");
+    } else {
+      el.removeAttribute("title");
+    }
+    let badge = el.querySelector(".app-nav-badge");
+    if (!active) {
+      if (badge) badge.remove();
+      return;
+    }
+    if (!badge) {
+      badge = document.createElement("span");
+      badge.className = "app-nav-badge";
+      el.appendChild(badge);
+    }
+    badge.textContent = count > 99 ? "99+" : String(count);
+  }
+
   window.iotgwRefreshNav = refreshActiveNav;
+  window.iotgwSetNavAlarm = function (navId, state) {
+    try {
+      if (navId === "activities") {
+        sessionStorage.setItem(
+          "iotgw.activities.alarmActive",
+          state && state.active ? "1" : "0"
+        );
+        sessionStorage.setItem(
+          "iotgw.activities.alarmCount",
+          String(state && state.active ? Number(state.count) || 1 : 0)
+        );
+      }
+    } catch (_e) {
+      /* ignore */
+    }
+    setNavAlarm(navId, state);
+  };
   window.iotgwNavSections = SECTIONS;
 
   if (document.readyState === "loading") {

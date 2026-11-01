@@ -195,7 +195,8 @@ flowchart TB
 ```
 
 - **Metric** â€” host health (CPU, RAM, FS, net, temp) and application up/activity for Agent, MQTT, Decrypt, Shipper, Kafka.
-- **Activities** â€” gateway-wide and per-sensor message counters, Kafka topic metadata, transmission delay, Fake/Real type.
+- **Activities** — gateway-wide and per-sensor message counters, Kafka topic metadata, transmission delay, Fake/Real type, invalid-message alarm banner + left-nav badge, Auto prevent quarantine status from the agent.
+- **Control → Auto prevent** — per-sensor invalid-message limit; gateway agent firewall-DROPs the sensor IP (fake units keep running) via `auto_prevent.json` + `iotgw-auto-prevent` helper.
 
 ### 6.3 Spawn and register fake sensors
 

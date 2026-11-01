@@ -1,0 +1,125 @@
+#!/bin/sh
+# Firewall quarantine helper for IoT Gateway Auto prevent.
+# Usage:
+#   iotgw-auto-prevent drop <ip> <device_id>
+#   iotgw-auto-prevent lift <ip> <device_id>
+#   iotgw-auto-prevent lift-device <device_id>
+#   iotgw-auto-prevent list
+#
+# Uses iptables chain IOTGW_AUTO_PREVENT on INPUT and FORWARD so fake-bridge
+# traffic is dropped before Mosquitto.
+
+set -eu
+
+CHAIN="IOTGW_AUTO_PREVENT"
+COMMENT_PREFIX="iotgw-ap"
+
+ensure_chain() {
+  if ! iptables -nL "$CHAIN" >/dev/null 2>&1; then
+    iptables -N "$CHAIN"
+  fi
+  # Jump from INPUT / FORWARD once.
+  iptables -C INPUT -j "$CHAIN" 2>/dev/null || iptables -I INPUT 1 -j "$CHAIN"
+  iptables -C FORWARD -j "$CHAIN" 2>/dev/null || iptables -I FORWARD 1 -j "$CHAIN"
+}
+
+rule_comment() {
+  device_id="$1"
+  # iptables comment max ~256; keep short.
+  printf '%s:%s' "$COMMENT_PREFIX" "$device_id" | cut -c1-240
+}
+
+has_drop() {
+  ip="$1"
+  device_id="$2"
+  cmt="$(rule_comment "$device_id")"
+  iptables -C "$CHAIN" -s "$ip" -m comment --comment "$cmt" -j DROP 2>/dev/null
+}
+
+cmd_drop() {
+  ip="$1"
+  device_id="$2"
+  ensure_chain
+  cmt="$(rule_comment "$device_id")"
+  if has_drop "$ip" "$device_id"; then
+    echo "already dropped $ip ($device_id)"
+    return 0
+  fi
+  iptables -A "$CHAIN" -s "$ip" -m comment --comment "$cmt" -j DROP
+  echo "dropped $ip ($device_id)"
+}
+
+cmd_lift() {
+  ip="$1"
+  device_id="$2"
+  ensure_chain
+  cmt="$(rule_comment "$device_id")"
+  # Delete matching rules (may appear more than once after retries).
+  while iptables -C "$CHAIN" -s "$ip" -m comment --comment "$cmt" -j DROP 2>/dev/null; do
+    iptables -D "$CHAIN" -s "$ip" -m comment --comment "$cmt" -j DROP
+  done
+  echo "lifted $ip ($device_id)"
+}
+
+cmd_lift_device() {
+  device_id="$1"
+  ensure_chain
+  cmt="$(rule_comment "$device_id")"
+  # Parse `iptables -S CHAIN` for -s addresses with our comment.
+  iptables -S "$CHAIN" 2>/dev/null | while read -r line; do
+    case "$line" in
+      *"--comment $cmt"*|*"--comment \"$cmt\""*)
+        # shellcheck disable=SC2086
+        eval "iptables -D $CHAIN ${line#-A $CHAIN }" 2>/dev/null || true
+        ;;
+    esac
+  done
+  # Safer second pass: delete by scanning numeric rules.
+  idx=1
+  while true; do
+    rule="$(iptables -L "$CHAIN" --line-numbers -n 2>/dev/null | awk -v n="$idx" '$1==n {print; exit}')"
+    [ -n "$rule" ] || break
+    if echo "$rule" | grep -q "$COMMENT_PREFIX:$device_id"; then
+      iptables -D "$CHAIN" "$idx"
+      # do not increment idx; next rule shifts up
+    else
+      idx=$((idx + 1))
+    fi
+  done
+  echo "lifted device $device_id"
+}
+
+cmd_list() {
+  ensure_chain
+  iptables -L "$CHAIN" -n -v --line-numbers 2>/dev/null || true
+}
+
+usage() {
+  echo "usage: $0 drop <ip> <device_id> | lift <ip> <device_id> | lift-device <device_id> | list" >&2
+  exit 2
+}
+
+[ "$#" -ge 1 ] || usage
+action="$1"
+shift
+
+case "$action" in
+  drop)
+    [ "$#" -eq 2 ] || usage
+    cmd_drop "$1" "$2"
+    ;;
+  lift)
+    [ "$#" -eq 2 ] || usage
+    cmd_lift "$1" "$2"
+    ;;
+  lift-device)
+    [ "$#" -eq 1 ] || usage
+    cmd_lift_device "$1"
+    ;;
+  list)
+    cmd_list
+    ;;
+  *)
+    usage
+    ;;
+esac

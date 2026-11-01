@@ -22,6 +22,7 @@ def make_handler(
     reload_fn: Callable[[], dict[str, Any]] | None = None,
     day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
     denied_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
+    auto_prevent_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     class AgentHandler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
@@ -68,6 +69,16 @@ def make_handler(
                 except Exception as e:  # noqa: BLE001
                     self._send_json(500, {"error": str(e)})
                 return
+            if path == "/v1/auto-prevent" and auto_prevent_fn is not None:
+                from urllib.parse import parse_qs
+
+                qs = parse_qs(parsed.query or "")
+                params = {k: (v[0] if v else "") for k, v in qs.items()}
+                try:
+                    self._send_json(200, auto_prevent_fn(params))
+                except Exception as e:  # noqa: BLE001
+                    self._send_json(500, {"error": str(e)})
+                return
             if path == "/v1/crypto/day/current" and day_crypto_fn is not None:
                 try:
                     self._send_json(200, day_crypto_fn())
@@ -94,6 +105,7 @@ def make_handler(
                 "/v1/info",
                 "/v1/crypto/day/current",
                 "/v1/denied",
+                "/v1/auto-prevent",
             ) or (path == "/metrics" and metrics_fn is not None):
                 self.send_response(200)
                 self.send_header("Cache-Control", "no-store")
@@ -132,6 +144,7 @@ def create_server(
     reload_fn: Callable[[], dict[str, Any]] | None = None,
     day_crypto_fn: Callable[[], dict[str, Any]] | None = None,
     denied_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
+    auto_prevent_fn: Callable[[dict[str, str]], dict[str, Any]] | None = None,
 ) -> ThreadingHTTPServer:
     handler = make_handler(
         health_fn,
@@ -140,5 +153,6 @@ def create_server(
         reload_fn=reload_fn,
         day_crypto_fn=day_crypto_fn,
         denied_fn=denied_fn,
+        auto_prevent_fn=auto_prevent_fn,
     )
     return ThreadingHTTPServer((host, port), handler)

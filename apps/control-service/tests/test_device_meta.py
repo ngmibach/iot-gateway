@@ -5,10 +5,14 @@ from __future__ import annotations
 import unittest
 
 from api.device_meta import (
+    auto_prevent_block,
     fake_block,
+    is_auto_prevent_enabled_meta,
+    is_auto_prevent_quarantined_meta,
     is_fake_meta,
     is_publish_blocked_meta,
     merge_device_meta,
+    normalize_auto_prevent,
     parse_meta,
 )
 
@@ -86,6 +90,34 @@ class DeviceMetaTests(unittest.TestCase):
         self.assertFalse(is_publish_blocked_meta(cleared))
         self.assertNotIn("publish_blocked", cleared)
         self.assertNotIn("topics_rw_before_block", cleared)
+
+    def test_auto_prevent_meta(self) -> None:
+        self.assertFalse(is_auto_prevent_enabled_meta(None))
+        self.assertFalse(is_auto_prevent_quarantined_meta({}))
+        meta = merge_device_meta(
+            {},
+            auto_prevent={"enabled": True, "limit": 5, "window_s": 120},
+        )
+        self.assertTrue(is_auto_prevent_enabled_meta(meta))
+        self.assertEqual(auto_prevent_block(meta)["limit"], 5)
+        self.assertEqual(auto_prevent_block(meta)["window_s"], 120)
+        tripped = merge_device_meta(
+            meta,
+            auto_prevent={
+                "tripped_at": 1700000000,
+                "quarantine_ip": "10.255.0.5",
+            },
+        )
+        self.assertTrue(is_auto_prevent_quarantined_meta(tripped))
+        lifted = merge_device_meta(
+            tripped,
+            auto_prevent={"clear_trip": True, "enabled": True},
+        )
+        self.assertTrue(is_auto_prevent_enabled_meta(lifted))
+        self.assertFalse(is_auto_prevent_quarantined_meta(lifted))
+        norm = normalize_auto_prevent({"enabled": True, "limit": 0, "window_s": 10})
+        self.assertGreaterEqual(norm["limit"], 1)
+        self.assertGreaterEqual(norm["window_s"], 60)
 
 
 if __name__ == "__main__":

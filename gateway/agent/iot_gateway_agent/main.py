@@ -14,6 +14,7 @@ from . import AGENT_PORT, MQTT_TLS_PORT, __version__
 from .broker import MosquittoSupervisor, write_mosquitto_conf
 from .day_crypto import ensure_day_material, load_day_cert_pem
 from .decrypt_worker import DecryptWorker
+from .auto_prevent import AutoPrevent
 from .denied_watcher import DeniedWatcher
 from .deny_log import DenyLog
 from .envelope_v1 import today_day_id
@@ -194,6 +195,17 @@ def main(argv: list[str] | None = None) -> int:
         gateway_id=gateway_id,
     )
     deny_log.set_ip_map_path(data / "fake" / "ip-map.json")
+    auto_prevent = AutoPrevent(data_dir=data, deny_log=deny_log)
+
+    def _on_deny_for_auto_prevent(event) -> None:
+        auto_prevent.note_deny(
+            device_id=event.device_id,
+            source_ip=event.source_ip,
+            reason=event.reason,
+            arrival_ms=event.arrival_ms,
+        )
+
+    deny_log.on_record = _on_deny_for_auto_prevent
     if not args.no_kafka:
         kafka = SensorKafkaProducer(bootstrap=args.kafka_bootstrap)
     metrics = AgentMetrics(
@@ -318,6 +330,7 @@ def main(argv: list[str] | None = None) -> int:
             "GET /v1/health",
             "GET /v1/info",
             "GET /v1/denied",
+            "GET /v1/auto-prevent",
             "GET /v1/crypto/day/current",
             "GET /metrics",
             "POST /v1/reload",
@@ -362,6 +375,13 @@ def main(argv: list[str] | None = None) -> int:
             "events": events,
         }
 
+    def auto_prevent_fn(params: dict) -> dict:
+        del params  # reserved for future filters
+        payload = auto_prevent.status()
+        payload["ok"] = True
+        payload["gateway_id"] = gateway_id or None
+        return payload
+
     def reload_fn():
         # Child mode: restart supervised mosquitto. External mode: re-probe port.
         if not args.no_broker:
@@ -375,6 +395,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         except Exception as exc:  # noqa: BLE001
             logger.warning("reload day material: %s", exc)
+        auto_prevent.reload_policy(force=True)
         metrics.refresh_mqtt_up()
         return {"ok": True, "mqtt_up": metrics.mqtt_up, "day_id": today_day_id()}
 
@@ -387,6 +408,7 @@ def main(argv: list[str] | None = None) -> int:
         reload_fn=reload_fn,
         day_crypto_fn=day_crypto_fn,
         denied_fn=denied_fn,
+        auto_prevent_fn=auto_prevent_fn,
     )
 
     def _request_shutdown(signum: int, _frame: object) -> None:

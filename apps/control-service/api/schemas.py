@@ -206,12 +206,41 @@ class DeviceOut(BaseModel):
     fake: Optional[FakeDeviceOut] = None
     # Control tab: MQTT publish blocked via ACL (registration kept).
     publish_blocked: bool = False
+    # Control tab: Auto prevent (gateway firewall quarantine on invalid flood).
+    auto_prevent: Optional["AutoPreventOut"] = None
+
+
+class AutoPreventOut(BaseModel):
+    """Per-device Auto prevent policy + quarantine status."""
+
+    enabled: bool = False
+    limit: int = 10
+    window_s: int = 300
+    tripped_at: Optional[int] = None
+    quarantine_ip: Optional[str] = None
 
 
 class DeviceControlRequest(BaseModel):
     """Optional sudo for Control-tab block / unblock / purge-kafka."""
 
     sudo_password: Optional[str] = None
+
+
+class AutoPreventRequest(BaseModel):
+    """Save Auto prevent policy for a device (pushed to the gateway agent)."""
+
+    enabled: bool = False
+    limit: int = Field(default=10, ge=1, le=100000)
+    window_s: Optional[int] = Field(default=None, ge=60, le=86400)
+    window_minutes: Optional[int] = Field(default=None, ge=1, le=1440)
+    sudo_password: Optional[str] = None
+
+    def resolved_window_s(self) -> int:
+        if self.window_s is not None:
+            return int(self.window_s)
+        if self.window_minutes is not None:
+            return int(self.window_minutes) * 60
+        return 300
 
 
 class DeviceControlResponse(BaseModel):
