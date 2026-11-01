@@ -13,4 +13,3 @@ apps/desktop/src-tauri/target/
 apps/desktop/build/
 apps/desktop/dist/
 .venv/
-assets/docs/
