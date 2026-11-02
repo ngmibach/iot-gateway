@@ -53,7 +53,7 @@ Shared docs/UI changes ship on `windows` then `linux` (`docs(windows):` / `docs(
 | [`docs/architecture.md`](docs/architecture.md) | Mermaid overview: system, monitoring app, gateway, data path, encryption, operations |
 | [`docs/details.md`](docs/details.md) | Ports, paths, APIs, Kafka capacity, envelope v1 crypto, fake sensors |
 | [`docs/UI.md`](docs/UI.md) | How to use Wizard and every Monitoring / Gateways / Settings feature |
-| [`docs/ids.md`](docs/ids.md) | Gateway IDS architecture, supported deployment targets, controls, alerts, and limitations |
+| [`docs/ids.md`](docs/ids.md) | Gateway IDS: architecture, deployment, operator usage, model provenance, tests, and limitations |
 | [`docs/samples/`](docs/samples/) | Sample payloads (for example Simulate manufacturing JSON) |
 
 ---
