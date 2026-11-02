@@ -78,78 +78,14 @@ Security UI -> authenticated control API -> SSH/sudo -> IDS config + systemd uni
    not installed, unreachable gateway, and Loki failures are distinct states;
    errors are never shown as an empty healthy list.
 
-## Model and training provenance
+## Model and tests
 
 The model is an inference-only LightGBM binary classifier (`0` normal,
-`1` attack) with threshold `0.05` and scaling disabled. Features cover message
-volume, topic diversity/flood ratio, payload-size, inter-arrival and delay
-statistics, and attack-blob ratio. `process_path_ratio` is constant in the
-dataset and not shipped. Live traffic never trains or updates the model.
-
-Supplied research materials (not deployed; kept in a separate
-`iot-gateway-submit` tree): 16 labeled sessions, `prepare_ids_dataset.py`
-(3-second windows grouped by session/source IP/device; attack=1, benign and
-recovery=0), 2,577 windows (263 attack, 2,314 non-attack), and
-`train_ids_model.py` (LightGBM, 300 estimators, lr 0.05, 31 leaves, seed 42,
-`session_id` group split, threshold swept 0.05-0.95 on validation for 2% target
-FPR). Bundled split: 834 train / 1,227 validation / 516 test rows.
-
-Caveats to resolve before claiming reproducible retraining:
-
-- Manifest `label_attack_threshold: 0.34` vs. the script's rule (window is
-  attack if at least half of messages are in the attack phase).
-- The trainer uses inverse-class-frequency weights; metadata describes a
-  `train_weight_hint` and `source_ip`/`device_id` group weighting the trainer
-  does not produce.
-- The supplied tree's edited metadata has test counts inconsistent with its
-  confusion matrix; the E2E checks the bundled model against the **bundled**
-  metadata.
-- Training/runtime feature differences: training `payload_len` uses the full raw
-  JSON line, runtime uses the payload object; inter-arrival calculation also
-  differs; and the runtime polls about every second and clears its buffer, so it
-  can score smaller windows than the 3-second training windows. Live accuracy may
-  differ from the held-out numbers.
-
-## Tests
-
-Offline model E2E (needs the IDS runtime dependencies and `pytest`; no broker,
-gateway, or systemd):
-
-```bash
-PYTHONPATH=gateway/ids pytest -q gateway/ids/tests/e2e/test_model_pipeline.py
-```
-
-1. **Training metadata contract:** task, attack label, threshold, feature order,
-   group-split fields, disjoint sessions, row counts, weights declaration,
-   disabled scaler.
-2. **Held-out evaluation:** scores
-   [`model_heldout_test.csv`](../gateway/ids/tests/fixtures/model_heldout_test.csv)
-   (516 windows from `heavy_attack_1`, `heavy_attack_2`, `light_attack_2`,
-   `sensor1_benign_03`; 462 non-attack, 54 attack; no IPs/devices; session IDs
-   never used as features) with the bundled model at the metadata threshold and
-   compares confusion matrix, precision, recall, FPR, and FNR to the metadata.
-3. **Runtime input path:** writes normal and synthetic attack-like JSONL
-   (flood topics, short inter-arrival, `debug.attack_blob`) through
-   `SensorLogCapture`, features, and inference. This is a pipeline smoke test
-   only; real attack windows are heavier (about 38 messages per 3 s, ~2.6 KB
-   payloads). It does not require every event to be flagged and is not an
-   accuracy benchmark.
-
-Other suites:
-
-| Suite | Purpose |
-|---|---|
-| `gateway/ids/tests/test_model_assets.py` | Model load, feature order, probability output. |
-| `gateway/ids/tests/test_structured_input.py` | Partial writes, rotation/truncation, no fabricated source IP, config migration. |
-| `apps/control-service/tests/test_ids_api.py` | Auth, validation, IDS-only service ops, Loki filtering. |
-| `apps/control-service/provisioner/tests/test_provisioner.py` | Missing assets, unsupported arch, dependency errors, separate service install. |
-| `gateway/agent/tests/test_decrypt_worker.py` | Structured events with legacy log preserved. |
-| `gateway/agent/tests/test_shipper.py` | Alert shipping once across partial writes/rotation. |
-| `apps/desktop/tests/security-ui.test.cjs` | Control/refresh/error states, safe rendering. |
-
-The offline E2E is not shown in the app (the Security page shows live alerts
-only) and has not been executed in the development environment (LightGBM was
-not installed there).
+`1` attack) with 12 ordered features, threshold `0.05`, and scaling disabled.
+Live traffic never trains or updates it. Training data, the held-out E2E test,
+attack simulation, other IDS test suites, and provenance caveats are in
+[`ids-e2e-testing.md`](ids-e2e-testing.md). The offline E2E is not shown in the
+app and has not been run locally (LightGBM missing).
 
 ## Signals and limitations
 
