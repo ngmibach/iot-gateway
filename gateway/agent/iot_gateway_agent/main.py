@@ -185,6 +185,7 @@ def main(argv: list[str] | None = None) -> int:
     broker = MosquittoSupervisor(conf)
     worker: DecryptWorker | None = None
     shipper: LokiShipper | None = None
+    ids_shipper: LokiShipper | None = None
     kafka: SensorKafkaProducer | None = None
     denied: DeniedWatcher | None = None
     gateway_id = (args.gateway_id or "").strip() or os.environ.get(
@@ -297,7 +298,6 @@ def main(argv: list[str] | None = None) -> int:
                 Path("/var/log/mosquitto/mosquitto.log"),
                 Path("/var/log/mosquitto.log"),
             ],
-            ids_log_paths=[data / "logs" / "ids_alerts.log"],
             deny_log=deny_log,
         )
         denied.start()
@@ -308,6 +308,14 @@ def main(argv: list[str] | None = None) -> int:
         shipper = LokiShipper(sensor_log, loki_url=loki)
         shipper.start()
         metrics.shipper = shipper
+        gateway_label = os.environ.get("IOTGW_GATEWAY_HOST", "").strip() or None
+        ids_shipper = LokiShipper(
+            data / "logs" / "ids_alerts.log",
+            loki_url=loki,
+            job="ids-alerts",
+            gateway_label=gateway_label,
+        )
+        ids_shipper.start()
 
     mdns_handle = None
     mdns_enabled = False
@@ -440,6 +448,8 @@ def main(argv: list[str] | None = None) -> int:
             kafka.close()
         if shipper:
             shipper.stop()
+        if ids_shipper:
+            ids_shipper.stop()
         broker.stop()
         stop_mdns(mdns_handle)
         logger.info("stopped")

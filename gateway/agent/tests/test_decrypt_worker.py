@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -11,6 +12,7 @@ from unittest import mock
 from iot_gateway_agent.decrypt_worker import (
     DecryptWorker,
     _delay_ms_from_payload,
+    _ids_event_times,
     device_id_from_mqtt_topic,
 )
 
@@ -49,17 +51,35 @@ class DelayTests(unittest.TestCase):
             )
         )
 
+    def test_ids_delay_requires_a_valid_device_timestamp(self) -> None:
+        received_ms = 1_793_198_925_490
+        timestamp, delay = _ids_event_times(
+            json.dumps({"ts_ms": received_ms - 1500}),
+            received_ms=received_ms,
+        )
+        self.assertIsNotNone(timestamp)
+        self.assertEqual(delay, 1.5)
+        self.assertEqual(
+            _ids_event_times(
+                json.dumps({"delay": 12.5}),
+                received_ms=received_ms,
+            ),
+            (None, None),
+        )
+
 
 class DecryptWorkerKafkaTests(unittest.TestCase):
     def test_produce_after_plain_payload(self) -> None:
         kafka = mock.Mock()
         with tempfile.TemporaryDirectory() as tmp:
             log_path = Path(tmp) / "sensor_data.log"
-            worker = DecryptWorker(log_path=log_path, kafka=kafka)
-            payload = json.dumps({"temp": 1, "delay": 3}).encode("utf-8")
+            worker = DecryptWorker(log_path=log_path, kafka=kafka, data_dir=Path(tmp))
+            received_ms = int(time.time() * 1000)
+            clear = json.dumps({"temp": 1, "ts_ms": received_ms - 1000})
+            payload = clear.encode("utf-8")
             with mock.patch(
                 "iot_gateway_agent.decrypt_worker.decrypt_wrapper_payload",
-                return_value=json.dumps({"temp": 1, "delay": 3}),
+                return_value=clear,
             ):
                 worker._handle_message("sensors/sensor9/x", payload)
             kafka.produce.assert_called_once()
@@ -73,6 +93,15 @@ class DecryptWorkerKafkaTests(unittest.TestCase):
             self.assertGreaterEqual(float(snap["sensor9"].last_delay_ms), 0.0)
             self.assertEqual(snap["sensor9"].delay_ms_count, 1)
             self.assertGreaterEqual(snap["sensor9"].delay_ms_sum, 0.0)
+            events = (Path(tmp) / "logs" / "ids_events.jsonl").read_text(
+                encoding="utf-8"
+            ).splitlines()
+            self.assertEqual(len(events), 1)
+            event = json.loads(events[0])
+            self.assertEqual(event["device_id"], "sensor9")
+            self.assertEqual(event["topic"], "sensors/sensor9/x")
+            self.assertNotIn("source_ip", event)
+            self.assertAlmostEqual(event["delay"], 1.0, delta=0.01)
 
 
 class DecryptWorkerTlsTests(unittest.TestCase):

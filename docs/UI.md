@@ -10,6 +10,8 @@ Left-rail layout after install:
 | **Gateways** | Registration · Settings · Clean up |
 | **Settings** | Remove · Certificates · Admin |
 
+Security is available as a page in the Monitoring navigation group.
+
 ---
 
 ## First-run Wizard
@@ -129,6 +131,15 @@ Publish state is shown as **Allowed** / **Blocked**. Block is reversible; Clear 
 Left-nav **Grafana** opens `https://127.0.0.1:9140/` in the **system browser** (not an in-app tab). Trust the cert first under Settings → Certificates if the browser warns.
 
 ---
+
+## Security — Gateway IDS
+
+Select a registered gateway to inspect IDS installation, model/runtime readiness, configured enablement, and the systemd service state. Provision or update a gateway if IDS is not installed.
+
+- Use **Enable** or **Disable** to control the independent IDS service. Detection continues on the gateway while the desktop app is closed; IDS controls do not restart the gateway agent.
+- Adjust the model threshold and behavioral-rule limits, then save. Gateway sudo is injected from the saved keyring credential when available; otherwise enter it when prompted.
+- Review recent alerts by time range and severity. The list refreshes automatically and can also be refreshed manually. Status, Loki errors, and an empty alert range are shown separately.
+- IDS alerts are records only. They do not block traffic, quarantine devices, edit MQTT ACLs, or invoke Auto prevent. See [`ids.md`](ids.md) for the architecture and limits.
 
 ## Gateways
 

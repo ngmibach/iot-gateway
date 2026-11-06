@@ -1,5 +1,7 @@
 ﻿# Architecture
 
+The gateway may also run a separate IDS service. Its operator controls are in the desktop Security page; inference and model assets remain gateway-side. See [`ids.md`](ids.md) for its lifecycle and constraints.
+
 Overview of IoT Gateway Monitor and the gateway agent. Diagrams only â€” paths, APIs, flags, and formulas live in [`details.md`](details.md). Operator click-paths live in [`UI.md`](UI.md).
 
 ## 1. System top level
@@ -211,6 +213,10 @@ flowchart LR
 ```
 
 Fakes count toward the same Kafka capacity as real sensors. Gateway uninstall tears down all fake units, netns, and the bridge.
+
+## Gateway IDS data path
+
+The decrypt worker appends accepted, decrypted sensor messages to a structured IDS JSONL log without changing the existing sensor log. The independent IDS systemd service reads that stream, applies behavioral rules and the bundled model, and writes JSONL alerts. The existing shipper forwards alerts to Loki under `job="ids-alerts"`, where the authenticated control-service API serves the Security UI. IDS produces alerts only and does not block or quarantine devices.
 
 ## Related docs
 

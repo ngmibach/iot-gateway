@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import socket
 import threading
 import time
 import urllib.error
@@ -23,11 +24,13 @@ class LokiShipper:
         *,
         loki_url: str,
         job: str = "iot-gateway-agent",
+        gateway_label: str | None = None,
         interval_s: float = 2.0,
     ):
         self.log_path = Path(log_path)
         self.loki_url = loki_url.rstrip("/") + "/loki/api/v1/push"
         self.job = job
+        self.gateway_label = (gateway_label or "").strip() or socket.gethostname()
         self.interval_s = interval_s
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
@@ -52,22 +55,37 @@ class LokiShipper:
 
     def _run(self) -> None:
         offset = 0
+        inode: int | None = None
+        pending = b""
         if self.log_path.is_file():
-            offset = self.log_path.stat().st_size
+            stat = self.log_path.stat()
+            offset = stat.st_size
+            inode = int(stat.st_ino)
         while not self._stop.is_set():
             try:
                 if self.log_path.is_file():
-                    data = self.log_path.read_bytes()
-                    if len(data) < offset:
+                    stat = self.log_path.stat()
+                    if int(stat.st_ino) != inode or stat.st_size < offset:
                         offset = 0
-                    chunk = data[offset:]
+                        pending = b""
+                        inode = int(stat.st_ino)
+                    with self.log_path.open("rb") as handle:
+                        handle.seek(offset)
+                        chunk = handle.read()
+                        new_offset = handle.tell()
                     if chunk:
-                        text = chunk.decode("utf-8", errors="replace")
-                        lines = [ln for ln in text.splitlines() if ln.strip()]
+                        parts = (pending + chunk).split(b"\n")
+                        complete, next_pending = parts[:-1], parts[-1]
+                        lines = [
+                            line.decode("utf-8", errors="replace")
+                            for line in complete
+                            if line.strip()
+                        ]
                         if lines:
                             self._push(lines)
                             self.lines_sent += len(lines)
-                        offset = len(data)
+                        pending = next_pending
+                        offset = new_offset
             except Exception as e:  # noqa: BLE001
                 logger.warning("loki shipper: %s", e)
             self._stop.wait(self.interval_s)
@@ -78,7 +96,11 @@ class LokiShipper:
         body = {
             "streams": [
                 {
-                    "stream": {"job": self.job, "agent": "iot-gateway-agent"},
+                    "stream": {
+                        "job": self.job,
+                        "agent": "iot-gateway-agent",
+                        "gateway": self.gateway_label,
+                    },
                     "values": values,
                 }
             ]

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>IoT Gateway — Security</title>
+  <link rel="stylesheet" href="wizard.css" />
+  <link rel="stylesheet" href="security.css" />
+</head>
+<body data-page="security">
+  <header>
+    <div>
+      <h1>Security</h1>
+      <div class="sub">Gateway intrusion detection · Alerts only, no automatic blocking</div>
+    </div>
+    <span id="ids-header-state" class="ids-badge">Loading</span>
+  </header>
+  <main class="security-main">
+    <section class="ids-panel">
+      <div class="ids-toolbar">
+        <label for="gateway-select">Gateway</label>
+        <select id="gateway-select"></select>
+        <button id="refresh-button" class="secondary" type="button">Refresh</button>
+      </div>
+      <p id="gateway-message" class="ids-message" role="status" aria-live="polite">
+        Loading registered gateways…
+      </p>
+      <div class="ids-state-grid">
+        <div><span>Installation</span><strong id="installation-state">—</strong></div>
+        <div><span>Configured</span><strong id="configured-state">—</strong></div>
+        <div><span>Service</span><strong id="service-state">—</strong></div>
+        <div><span>Model ready</span><strong id="model-state">—</strong></div>
+        <div><span>Runtime ready</span><strong id="runtime-state">—</strong></div>
+      </div>
+      <div class="ids-actions">
+        <button id="enable-button" type="button">Enable IDS</button>
+        <button id="disable-button" class="secondary" type="button">Disable IDS</button>
+      </div>
+    </section>
+
+    <section class="ids-panel">
+      <h2>Detection settings</h2>
+      <form id="settings-form" class="ids-settings">
+        <label class="ids-check"><input id="rules-enabled" type="checkbox" /> Behavioral rules</label>
+        <label class="ids-check"><input id="ml-enabled" type="checkbox" /> ML model</label>
+        <label for="threshold">Model threshold (0–1)</label>
+        <input id="threshold" type="number" min="0" max="1" step="0.01" />
+        <label for="message-rate">Max message rate (per second)</label>
+        <input id="message-rate" type="number" min="0.001" max="1000" step="0.1" />
+        <label for="clock-skew">Max clock skew (seconds)</label>
+        <input id="clock-skew" type="number" min="0" max="3600" step="0.1" />
+        <label for="connect-ratio">Max connect/publish ratio</label>
+        <input id="connect-ratio" type="number" min="0.001" max="1000" step="0.01" />
+        <label for="alert-cooldown">Alert cooldown (seconds)</label>
+        <input id="alert-cooldown" type="number" min="0" max="86400" step="1" />
+        <label for="sudo-password">Gateway sudo password (if not saved)</label>
+        <input id="sudo-password" type="password" autocomplete="current-password" />
+        <div class="ids-form-actions">
+          <button id="save-button" type="submit">Save settings</button>
+          <span id="settings-message" role="status" aria-live="polite"></span>
+        </div>
+      </form>
+    </section>
+
+    <section class="ids-panel">
+      <div class="ids-alert-toolbar">
+        <div>
+          <h2>IDS alerts</h2>
+          <p class="ids-muted">Gateway detection records. IDS does not block or quarantine traffic.</p>
+        </div>
+        <div class="ids-filters">
+          <label for="alert-range">Range</label>
+          <select id="alert-range">
+            <option value="15m">15 minutes</option>
+            <option value="1h" selected>1 hour</option>
+            <option value="6h">6 hours</option>
+            <option value="24h">24 hours</option>
+            <option value="7d">7 days</option>
+          </select>
+          <label for="alert-severity">Severity</label>
+          <select id="alert-severity">
+            <option value="">All</option>
+            <option value="critical">Critical</option>
+            <option value="warning">Warning</option>
+          </select>
+          <label for="alert-search">Filter</label>
+          <input id="alert-search" type="search" placeholder="Device or message" />
+        </div>
+      </div>
+      <p id="alerts-message" class="ids-message" role="status" aria-live="polite">Loading alerts…</p>
+      <div class="ids-table-wrap">
+        <table>
+          <thead>
+            <tr><th>Time</th><th>Severity</th><th>Device</th><th>Reason</th><th>Message</th><th>Score</th></tr>
+          </thead>
+          <tbody id="alerts-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </main>
+  <script src="app-shell.js"></script>
+  <script src="security.js"></script>
+</body>
+</html>

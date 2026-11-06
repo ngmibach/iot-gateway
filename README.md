@@ -6,7 +6,7 @@ No Docker on the operator PC. No WSL required on Windows. No Docker on the gatew
 
 | Piece | Role |
 |-------|------|
-| **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, Gateways, Monitoring, Control Plane, Settings |
+| **Desktop app** (Windows `.exe` / Linux AppImage) | Wizard, Gateways, Monitoring, Control Plane, Security, Settings |
 | **Local Loki + Prometheus + Grafana** | App-managed native processes (downloaded once in-UI) |
 | **Gateway agent** | Systemd service: MQTTS ingress, decrypt, Kafka per sensor, metrics, Loki shipper |
 | **Communication** | SSH for control/provision; MQTTS + HTTP for data |
@@ -50,9 +50,10 @@ Shared docs/UI changes ship on `windows` then `linux` (`docs(windows):` / `docs(
 
 | Doc | Contents |
 |-----|----------|
-| [`docs/architecture.md`](docs/architecture.md) | Mermaid overview: system, monitoring app, gateway, data path, encryption, operations |
-| [`docs/details.md`](docs/details.md) | Ports, paths, APIs, Kafka capacity, envelope v1 crypto, fake sensors |
-| [`docs/UI.md`](docs/UI.md) | How to use Wizard and every Monitoring / Gateways / Settings feature |
+| [`docs/architecture.md`](docs/architecture.md) | Mermaid overview: system, monitoring app, gateway, IDS, data path, encryption, operations |
+| [`docs/details.md`](docs/details.md) | Ports, paths, APIs, IDS, Kafka capacity, envelope v1 crypto, fake sensors |
+| [`docs/ids.md`](docs/ids.md) | Gateway IDS architecture, operation, limits, and troubleshooting |
+| [`docs/UI.md`](docs/UI.md) | How to use Wizard and every Monitoring / Gateways / Security / Settings feature |
 | [`docs/AI-PLATFORM-KNOWLEDGE.md`](docs/AI-PLATFORM-KNOWLEDGE.md) | AI/thesis knowledge base: IoT-SecureGate context, architecture, function map, UI, implemented vs planned |
 | [`docs/samples/`](docs/samples/) | Sample payloads (for example Simulate manufacturing JSON) |
 
@@ -65,6 +66,7 @@ Shared docs/UI changes ship on `windows` then `linux` (`docs(windows):` / `docs(
 | `apps/desktop/` | Packaged UI, wizard shell, Windows/Linux packaging |
 | `apps/control-service/` | FastAPI control plane, provisioner, telemetry, actions |
 | `gateway/agent/` | Monolithic gateway agent (systemd unit + Python package) |
+| `gateway/ids/` | Gateway-only IDS runtime, model assets, config, and systemd unit |
 | `docs/` | Architecture, details, UI guide, samples |
 | `deploy/templates/prometheus.yml` | Scrape template for the agent `/metrics` job |
 )

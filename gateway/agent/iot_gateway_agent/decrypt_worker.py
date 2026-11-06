@@ -10,6 +10,7 @@ import threading
 import time
 from collections import defaultdict
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Optional, Union
 
@@ -138,6 +139,46 @@ def _delay_ms_from_payload(clear_json: str, *, received_ms: int) -> Optional[flo
     return None
 
 
+def _ids_event_times(
+    clear_json: str, *, received_ms: int
+) -> tuple[str | None, float | None]:
+    """Return a valid device timestamp and sensor-to-gateway delay in seconds."""
+    try:
+        payload = json.loads(clear_json)
+    except (TypeError, json.JSONDecodeError):
+        return None, None
+    if not isinstance(payload, dict):
+        return None, None
+
+    received_s = received_ms / 1000.0
+    for key in ("ts_ms", "timestamp_ms", "sent_ms", "ts", "timestamp", "sent_at"):
+        raw = payload.get(key)
+        if raw is None:
+            continue
+        try:
+            device_ts = float(raw)
+        except (TypeError, ValueError):
+            if not isinstance(raw, str):
+                continue
+            text = raw.strip()
+            if text.endswith("Z"):
+                text = text[:-1] + "+00:00"
+            try:
+                device_ts = datetime.fromisoformat(text).timestamp()
+            except ValueError:
+                continue
+        else:
+            if key.endswith("_ms"):
+                device_ts /= 1000.0
+            elif device_ts > 1e12:
+                device_ts /= 1000.0
+        if device_ts <= 0 or abs(received_s - device_ts) > 24 * 60 * 60:
+            continue
+        timestamp = datetime.fromtimestamp(device_ts, timezone.utc).isoformat()
+        return timestamp, received_s - device_ts
+    return None, None
+
+
 def _tls_version() -> int:
     if hasattr(ssl, "PROTOCOL_TLS_CLIENT"):
         return int(ssl.PROTOCOL_TLS_CLIENT)
@@ -181,6 +222,7 @@ class DecryptWorker:
         self.tls_cert = Path(tls_cert) if tls_cert else None
         self.tls_key = Path(tls_key) if tls_key else None
         self.data_dir = Path(data_dir) if data_dir else self.log_path.parent.parent
+        self.ids_events_path = self.data_dir / "logs" / "ids_events.jsonl"
         self.deny_log = deny_log
         self.gateway_id = (gateway_id or "").strip()
         self.envelope_enabled = (
@@ -328,6 +370,7 @@ class DecryptWorker:
         device_id: str,
         clear: str,
         *,
+        topic: str,
         received_ms: int,
         path: str,
         process_t0: float | None = None,
@@ -358,6 +401,36 @@ class DecryptWorker:
                 self._by_device[device_id].messages_fail += 1
             return
 
+        try:
+            payload = json.loads(clear)
+        except (TypeError, json.JSONDecodeError):
+            payload = clear
+        device_reported_at, sensor_delay_s = _ids_event_times(
+            clear, received_ms=received_ms
+        )
+        received_at = datetime.fromtimestamp(
+            received_ms / 1000.0, timezone.utc
+        ).isoformat()
+        event: dict[str, Any] = {
+            "event_type": "sensor_data",
+            "device_id": device_id,
+            "topic": topic,
+            "payload": payload,
+            "gateway_received_at": received_at,
+            "payload_size_bytes": len(clear.encode("utf-8")),
+            "broker_port": self.port,
+        }
+        if device_reported_at is not None:
+            event["device_reported_at"] = device_reported_at
+        if sensor_delay_s is not None:
+            event["delay"] = sensor_delay_s
+        try:
+            self.ids_events_path.parent.mkdir(parents=True, exist_ok=True)
+            with self.ids_events_path.open("a", encoding="utf-8", newline="\n") as handle:
+                handle.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except OSError as e:
+            logger.error("IDS event log write failed: %s", e)
+
         t_pre_kafka = time.perf_counter()
         kafka_ok = True
         if self.kafka is not None:
@@ -387,6 +460,7 @@ class DecryptWorker:
     def _complete_envelope(
         self,
         device_id: str,
+        topic: str,
         key_part: dict[str, Any],
         data_part: dict[str, Any],
         *,
@@ -468,13 +542,20 @@ class DecryptWorker:
         self._accept_clear(
             device_id,
             text,
+            topic=topic,
             received_ms=received_ms,
             path="envelope",
             process_t0=process_t0,
         )
 
     def _handle_envelope_half(
-        self, device_id: str, kind: str, payload: bytes, *, received_ms: int
+        self,
+        device_id: str,
+        kind: str,
+        payload: bytes,
+        *,
+        topic: str,
+        received_ms: int,
     ) -> None:
         if not self.envelope_enabled:
             self._fail(device_id, "envelope_disabled")
@@ -512,10 +593,12 @@ class DecryptWorker:
         else:
             key_part, data_part = other.part, part
         self._complete_envelope(
-            device_id, key_part, data_part, received_ms=received_ms
+            device_id, topic, key_part, data_part, received_ms=received_ms
         )
 
-    def _handle_legacy(self, device_id: str, payload: bytes, *, received_ms: int) -> None:
+    def _handle_legacy(
+        self, device_id: str, payload: bytes, *, topic: str, received_ms: int
+    ) -> None:
         if self.envelope_require:
             self._fail(device_id, "legacy")
             return
@@ -527,6 +610,7 @@ class DecryptWorker:
         self._accept_clear(
             device_id,
             clear,
+            topic=topic,
             received_ms=received_ms,
             path="legacy",
             process_t0=process_t0,
@@ -539,10 +623,12 @@ class DecryptWorker:
         if parsed is not None:
             _did, kind = parsed
             self._handle_envelope_half(
-                _did, kind, payload, received_ms=received_ms
+                _did, kind, payload, topic=topic, received_ms=received_ms
             )
             return
-        self._handle_legacy(device_id, payload, received_ms=received_ms)
+        self._handle_legacy(
+            device_id, payload, topic=topic, received_ms=received_ms
+        )
 
     def _janitor_loop(self) -> None:
         while not self._stop.wait(0.5):

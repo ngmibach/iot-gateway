@@ -446,6 +446,10 @@ class ProvisionFlowTests(unittest.TestCase):
             CommandResult(0, '{"status":"ok"}', ""),
         )
         ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
+        ssh.when("uname -s; uname -m", CommandResult(0, "Linux\nx86_64\n", ""))
+        ssh.when("print(\"%d.%d\"", CommandResult(0, "3.10\n", ""))
+        ssh.when("IDS_MODEL_READY", CommandResult(0, "IDS_MODEL_READY\n", ""))
+        ssh.when("print(int(bool", CommandResult(0, "0\n", ""))
         # TLS bootstrap sudo scripts echo markers; generic sudo stays empty.
         ssh.when("DECRYPT_OK", CommandResult(0, "DECRYPT_OK\n", ""))
         ssh.when("CA_CREATED", CommandResult(0, "CA_EXISTS\n", ""))
@@ -484,6 +488,14 @@ class ProvisionFlowTests(unittest.TestCase):
                 return CommandResult(0, '{"status": "ok"}', "")
             if "printf '%s:%s" in command:
                 return CommandResult(0, "admin:admin\n", "")
+            if "uname -s; uname -m" in command:
+                return CommandResult(0, "Linux\nx86_64\n", "")
+            if "print(\"%d.%d\"" in command:
+                return CommandResult(0, "3.10\n", "")
+            if "IDS_MODEL_READY" in command:
+                return CommandResult(0, "IDS_MODEL_READY\n", "")
+            if "print(int(bool" in command:
+                return CommandResult(0, "0\n", "")
             if "sudo -S" in command:
                 # Mimic TLS bootstrap markers from ensure_* scripts.
                 return CommandResult(
