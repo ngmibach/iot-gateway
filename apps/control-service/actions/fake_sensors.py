@@ -49,6 +49,7 @@ DEFAULT_BEHAVIORS: dict[str, bool] = {
     "schema_extra_field": False,
     "wrong_schema_id": False,
     "legacy_fernet_wrapper": False,
+    "ids_test_alternate_order": False,
 }
 
 # Installed under /etc/systemd/system/iotgw-fake@.service

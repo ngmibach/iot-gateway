@@ -43,6 +43,7 @@ DEFAULT_BEHAVIORS = {
     "schema_extra_field": False,
     "wrong_schema_id": False,
     "legacy_fernet_wrapper": False,
+    "ids_test_alternate_order": False,
 }
 
 
@@ -140,6 +141,7 @@ def _build_envelope_pubs(
     *,
     secrets: DeviceSecrets,
     data_dir: str,
+    reverse_order: bool = False,
 ) -> list[tuple[str, str]]:
     """Return list of (topic, body) publications for envelope mode."""
     device_id = secrets.device_id
@@ -192,6 +194,8 @@ def _build_envelope_pubs(
         pubs.append((key_topic(device_id), json.dumps(key_part, separators=(",", ":"))))
     if not behaviors.get("key_only"):
         pubs.append((data_topic(device_id), json.dumps(data_part, separators=(",", ":"))))
+    if reverse_order and len(pubs) == 2:
+        pubs.reverse()
     return pubs
 
 
@@ -394,6 +398,7 @@ def run_simulator(
         client.loop_stop()
         return 1
 
+    reverse_envelope_order = False
     try:
         while True:
             try:
@@ -425,7 +430,13 @@ def run_simulator(
                         behaviors,
                         secrets=secrets,
                         data_dir=data_dir,
+                        reverse_order=bool(
+                            behaviors.get("ids_test_alternate_order")
+                            and reverse_envelope_order
+                        ),
                     )
+                    if behaviors.get("ids_test_alternate_order") and len(pubs) == 2:
+                        reverse_envelope_order = not reverse_envelope_order
                 else:
                     body = _build_fernet_message(payload, behaviors)
                     pubs = [(topic, body)]

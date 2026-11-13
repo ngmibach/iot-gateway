@@ -280,7 +280,10 @@ def post_ids_config(
                 ssh.run(f"rm -f {shlex.quote(remote_tmp)}", timeout=15.0)
 
             if gateway_config.get("enabled"):
-                action = f"systemctl enable --now {IDS_SERVICE_NAME}"
+                action = (
+                    f"systemctl enable {IDS_SERVICE_NAME} && "
+                    f"systemctl restart {IDS_SERVICE_NAME}"
+                )
             else:
                 action = f"systemctl disable --now {IDS_SERVICE_NAME}"
             changed = sudo_run(

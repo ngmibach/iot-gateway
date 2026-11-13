@@ -64,7 +64,7 @@ class _FakeIDSSSH:
         if "install -o root" in command:
             assert self.pending_config is not None
             self.config = self.pending_config
-        if "systemctl enable --now" in command:
+        if "systemctl restart" in command:
             self.enabled = True
         elif "systemctl disable --now" in command:
             self.enabled = False
@@ -159,6 +159,7 @@ class IDSApiTests(unittest.TestCase):
         )
         self.assertNotIn("sudo_password", json.dumps(self.ssh.config))
         self.assertIn("secret-password", self.ssh.stdins)
+        self.assertTrue(any("systemctl restart" in cmd for cmd in self.ssh.commands))
 
     def test_config_update_rejects_out_of_range_threshold(self) -> None:
         response = self.client.post(
