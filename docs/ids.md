@@ -21,8 +21,7 @@ The model's metadata threshold is used when no operator override is configured. 
 
 ## Live model test on a Raspberry Pi
 
-Re-provision or update the gateway with this app version before testing so the
-gateway has the updated fake-sensor simulator. Use a dedicated test gateway and
+Use a dedicated test gateway and
 fake sensor: this generates real encrypted MQTT traffic and real IDS alerts.
 Synchronize the Windows PC and gateway clocks so the app can distinguish new
 alerts from delayed or historical alerts.
@@ -31,10 +30,11 @@ alerts from delayed or historical alerts.
    The test requires rules disabled because a rule can otherwise intercept a
    window before the model runs. Record the original settings and restore them
    after the test; disabling rules reduces protection for all gateway devices.
-2. In Control Plane, create a dedicated fake sensor. In Simulate set the interval
-   to 100 ms, disable all behaviors except **IDS test: alternate encrypted
-   message part order**, apply the settings, and start the sensor. Apply may
-   itself start the sensor. Use the normal envelope profile and a valid schema.
+2. In Control Plane, create a dedicated fake sensor. In Simulate use a realistic
+   sensor payload accepted by its schema, set the interval to 100 ms, and disable
+   all simulated behaviors, including **Alternate encrypted message part order**.
+   Apply the settings and start the sensor. Apply may itself start
+   the sensor. Use the normal envelope profile.
 3. Return to Security, refresh the fake sensor list, select the test sensor,
    and click **Run IDS test**. Keep the page open. The app waits up to 150 seconds
    for a new `ml_anomaly` alert from that sensor, retrieved through Loki. It
@@ -42,12 +42,16 @@ alerts from delayed or historical alerts.
 4. Stop the fake sensor in Control Plane and restore the original IDS settings,
    even if the test is inconclusive, an error occurs, or the app is closed.
 
-The test changes only the simulator's encrypted message-part ordering, causing
-two observed topics in the same model window. It tests the real message and
-alert path, but this synthetic protocol-order artifact is not a realistic attack
-or evidence of model accuracy. A missing alert is inconclusive: check gateway
-provisioning, sensor connectivity and schema, IDS settings and logs, and Loki
-delivery. The app does not automatically stop the sensor or restore settings.
+The approximately 10 messages per second resemble the rate of flood windows in
+the training data, but the live encrypted traffic has different topic and
+payload features. In particular, normal envelope messages usually yield one
+observed topic, whereas the recorded flood often used multiple `/flood/` topics.
+The model may miss this realistic traffic even when every component is working.
+An observed alert exercises the message and alert path; it does not establish
+model accuracy. A missing alert is inconclusive: it may be a model miss or a
+failure in message acceptance, IDS processing, or alert delivery. Check gateway
+provisioning, sensor connectivity and schema, IDS logs, and Loki delivery.
+The app does not automatically stop the sensor or restore settings.
 
 ## Safety and limitations
 

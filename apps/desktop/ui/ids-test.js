@@ -99,10 +99,12 @@
       const fake = await request(base + "/devices/" + encodeURIComponent(device) + "/fake");
       if (fake.status !== "running") throw new Error("Start the dedicated fake sensor in Control Plane first.");
       if (Number(fake.send_interval_ms) !== 100) throw new Error("Set the fake sensor interval to 100 ms.");
-      const behaviors = fake.behaviors || {};
-      if (behaviors.ids_test_alternate_order !== true ||
-          Object.keys(behaviors).some((key) => key !== "ids_test_alternate_order" && behaviors[key])) {
-        throw new Error("Enable only the IDS test order option; disable all other simulated behaviors.");
+      const behaviors = fake.behaviors;
+      if (!behaviors || typeof behaviors !== "object" || Array.isArray(behaviors)) {
+        throw new Error("Fake sensor behavior settings are unavailable; refresh its configuration.");
+      }
+      if (Object.keys(behaviors).some((key) => behaviors[key])) {
+        throw new Error("Disable all simulated behaviors, including alternate encrypted message part order.");
       }
       const previous = new Set((await alerts(gateway)).filter((item) => isModelAlert(item, device)).map(alertKey));
       const started = Date.now();
@@ -114,11 +116,11 @@
           Date.parse(item.timestamp || item["@timestamp"]) >= started
         );
         if (found) {
-          message("PASS: a new ML alert for " + device + " reached the app. Stop the fake sensor and restore IDS settings.");
+          message("OBSERVED: a new ML alert for " + device + " reached the app. This is not a measurement of model accuracy. Stop the fake sensor and restore IDS settings.");
           return;
         }
       }
-      message("INCONCLUSIVE: no new ML alert arrived within 150 seconds. Check sensor, IDS, Loki and clock synchronization; stop the fake sensor and restore IDS settings.", true);
+      message("INCONCLUSIVE: no new ML alert arrived within 150 seconds. The model may miss this traffic, or delivery may have failed. Check sensor, IDS, Loki and clocks; stop the fake sensor and restore IDS settings.", true);
     } catch (error) {
       message("Test could not be completed: " + error.message + " Stop the fake sensor if it is running and restore IDS settings.", true);
     } finally {

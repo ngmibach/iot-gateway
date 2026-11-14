@@ -64,8 +64,8 @@
 
     <section class="ids-panel">
       <h2>Live IDS model test</h2>
-      <p class="ids-muted">This synthetic test uses a dedicated fake sensor on the gateway. It exercises encrypted MQTT, the IDS model and alert delivery; it is not an attack simulation or an accuracy test. Keep this page open while testing.</p>
-      <p class="ids-muted">First enable IDS and ML, disable behavioral rules and save. In Control Plane → Simulate, configure a dedicated fake sensor with a 100 ms interval and only “IDS test: alternate encrypted message part order” enabled. Apply and start it, then return here. Stop the sensor and restore your IDS settings after the test.</p>
+      <p class="ids-muted">This high-rate test uses a dedicated fake sensor and real encrypted MQTT messages. The 100 ms interval approximates the message rate in the training dataset's flood windows, but the topic and payload features differ. An alert is not guaranteed and does not establish model accuracy. Keep this page open while testing; the sensor does not stop automatically.</p>
+      <p class="ids-muted">First enable IDS and ML, disable behavioral rules and save. In Control Plane → Simulate, configure a dedicated fake sensor with a valid sensor payload, a 100 ms interval and all simulated behaviors disabled. Apply and start it, then return here. Stop the sensor and restore your IDS settings after the test.</p>
       <div class="ids-toolbar">
         <label for="ids-test-device">Fake sensor</label>
         <select id="ids-test-device"></select>

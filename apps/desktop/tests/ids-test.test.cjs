@@ -6,7 +6,7 @@ const test = require("node:test");
 
 const script = readFileSync(join(__dirname, "../ui/ids-test.js"), "utf8");
 
-function harness({ alertsAfterBaseline = [], rulesEnabled = false } = {}) {
+function harness({ alertsAfterBaseline = [], rulesEnabled = false, behaviors = { wrong_topic: false, ids_test_alternate_order: false } } = {}) {
   const elements = new Map();
   const element = (id) => {
     if (!elements.has(id)) {
@@ -40,7 +40,7 @@ function harness({ alertsAfterBaseline = [], rulesEnabled = false } = {}) {
     };
     else if (url.endsWith("/fake")) data = {
       status: "running", send_interval_ms: 100,
-      behaviors: { ids_test_alternate_order: true, wrong_topic: false },
+      behaviors,
     };
     else if (url.includes("/ids/alerts?")) {
       queryCount += 1;
@@ -73,7 +73,7 @@ test("passes only on a new ML alert for the selected sensor", async () => {
   }] });
   await element("ids-test-refresh").listeners.click();
   await element("ids-test-start").listeners.click();
-  assert.match(element("ids-test-message").textContent, /^PASS:/);
+  assert.match(element("ids-test-message").textContent, /^OBSERVED:/);
   assert.equal(element("gateway-select").disabled, false);
 });
 
@@ -98,5 +98,21 @@ test("requires behavioral rules to be disabled", async () => {
   await element("ids-test-refresh").listeners.click();
   await element("ids-test-start").listeners.click();
   assert.match(element("ids-test-message").textContent, /disable behavioral rules/);
+  assert.equal(getQueryCount(), 0);
+});
+
+test("rejects alternate order instead of artificially triggering the model", async () => {
+  const { element, getQueryCount } = harness({ behaviors: { ids_test_alternate_order: true } });
+  await element("ids-test-refresh").listeners.click();
+  await element("ids-test-start").listeners.click();
+  assert.match(element("ids-test-message").textContent, /Disable all simulated behaviors/);
+  assert.equal(getQueryCount(), 0);
+});
+
+test("rejects missing fake-sensor behavior settings", async () => {
+  const { element, getQueryCount } = harness({ behaviors: null });
+  await element("ids-test-refresh").listeners.click();
+  await element("ids-test-start").listeners.click();
+  assert.match(element("ids-test-message").textContent, /behavior settings are unavailable/);
   assert.equal(getQueryCount(), 0);
 });
