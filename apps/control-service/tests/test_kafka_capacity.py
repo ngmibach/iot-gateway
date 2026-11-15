@@ -13,8 +13,10 @@ from actions.kafka_capacity import (
     parse_df_total_bytes,
     parse_du_topic_sizes,
     plan_capacity,
+    probe_topic_used_bytes_map,
     topic_name_from_log_dir,
 )
+from actions.shellutil import shell_quote
 from actions.kafka_topics import TopicCatalog
 from actions.playbooks import gateway_kafka_capacity, register_device, unregister_device
 from tests.cert_helpers import local_self_sign_for_tests
@@ -74,6 +76,38 @@ class TestCapacityMath(unittest.TestCase):
     def test_parse_du_topic_sizes_empty(self) -> None:
         self.assertEqual(parse_du_topic_sizes(""), {})
         self.assertEqual(parse_du_topic_sizes("garbage\n"), {})
+
+    def test_probe_du_glob_keeps_star_unquoted(self) -> None:
+        """Quoted ``…/topic-*`` prevents shell globbing and falsely reports 0B."""
+        seen: list[str] = []
+
+        class _RecSSH:
+            def run(self, cmd: str, timeout: float = 30.0) -> object:  # noqa: ARG002
+                seen.append(cmd)
+
+                class R:
+                    exit_code = 0
+                    stdout = (
+                        "21227819\t/var/lib/iot-gateway-agent/kafka/data/sensor.fake1-0\n"
+                    )
+                    stderr = ""
+
+                return R()
+
+        sizes = probe_topic_used_bytes_map(
+            _RecSSH(),  # type: ignore[arg-type]
+            "/var/lib/iot-gateway-agent",
+            topics=["sensor.fake1"],
+        )
+        self.assertEqual(sizes.get("sensor.fake1"), 21227819)
+        self.assertEqual(len(seen), 1)
+        cmd = seen[0]
+        quoted_literal = shell_quote(
+            "/var/lib/iot-gateway-agent/kafka/data/sensor.fake1-*"
+        )
+        self.assertNotIn(quoted_literal, cmd)
+        self.assertIn("/sensor.fake1-*", cmd)
+        self.assertIn(shell_quote("/var/lib/iot-gateway-agent/kafka/data"), cmd)
 
 
 class TestTopicCatalog(unittest.TestCase):
