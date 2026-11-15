@@ -33,6 +33,7 @@
     schema_extra_field: "sim-schema-extra",
     wrong_schema_id: "sim-wrong-schema",
     legacy_fernet_wrapper: "sim-legacy-fernet",
+    ids_test_alternate_order: "sim-ids-test-order",
   };
 
   function escapeHtml(s) {

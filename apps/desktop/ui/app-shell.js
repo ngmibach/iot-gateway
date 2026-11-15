@@ -26,6 +26,12 @@
           page: "actions",
         },
         {
+          id: "security",
+          label: "Security",
+          href: "security.html",
+          page: "security",
+        },
+        {
           id: "grafana",
           label: "Grafana",
           href: "#grafana-external",
@@ -85,6 +91,7 @@
     if (name.indexOf("wizard") === 0) return "wizard";
     if (name.indexOf("monitoring") === 0) return "monitoring";
     if (name.indexOf("actions") === 0) return "actions";
+    if (name.indexOf("security") === 0) return "security";
     if (name.indexOf("gateways") === 0) return "gateways";
     if (name.indexOf("certificates") === 0) return "certificates";
     if (name.indexOf("settings") === 0) return "settings";

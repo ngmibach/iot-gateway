@@ -91,6 +91,7 @@ class FakeBehaviors(BaseModel):
     schema_extra_field: bool = False
     wrong_schema_id: bool = False
     legacy_fernet_wrapper: bool = False
+    ids_test_alternate_order: bool = False
 
 
 class FakeDeviceOut(BaseModel):

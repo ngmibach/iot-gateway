@@ -82,6 +82,12 @@ class CaInjectHelpersTests(unittest.TestCase):
             _should_inject_sudo("POST", "/api/v1/gateways/gw1/devices")
         )
         self.assertTrue(
+            _should_inject_sudo("POST", "/api/v1/gateways/gw1/ids/config")
+        )
+        self.assertFalse(
+            _should_inject_sudo("GET", "/api/v1/gateways/gw1/ids/config")
+        )
+        self.assertTrue(
             _should_inject_sudo("PATCH", "/api/v1/gateways/gw1/devices/s1")
         )
         self.assertTrue(

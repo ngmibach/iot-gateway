@@ -1,0 +1,4 @@
+gateway/** text eol=lf
+*.service text eol=lf
+*.sh text eol=lf
+*.joblib binary
