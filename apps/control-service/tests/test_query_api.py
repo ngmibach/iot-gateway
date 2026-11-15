@@ -600,6 +600,29 @@ class QueryApiTests(unittest.TestCase):
         self.assertFalse(by_id["sensor_a"]["is_fake"])
         self.assertFalse(by_id["sensor_b"]["is_fake"])
 
+    def test_summary_gateway_missing_delay_is_null(self) -> None:
+        """Empty Prom delay series must be null (not 0.0) for Activities "—"."""
+
+        def empty_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {"status": "success", "data": {"result": []}}
+
+        with patch("api.query._proxy_get", side_effect=empty_proxy):
+            r = self.client.get(
+                "/api/v1/query/summaries/gateway",
+                params={"range": "15m", "gateway_id": "gw1"},
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        m = r.json()["metrics"]
+        self.assertIsNone(m["delay_latest"])
+        self.assertIsNone(m["delay_total"])
+        self.assertEqual(m["delay_samples"], 0)
+        self.assertEqual(r.json()["charts"]["delay"], [])
+        for sensor in r.json()["connected_sensors"]:
+            sm = sensor["metrics"]
+            self.assertIsNone(sm["delay_latest"])
+            self.assertIsNone(sm["delay_total"])
+            self.assertEqual(sm["delay_samples"], 0)
+
     def test_summary_raspi(self) -> None:
         def fake_proxy(url: str, params: dict[str, Any]) -> Any:
             q = str(params.get("query", ""))
