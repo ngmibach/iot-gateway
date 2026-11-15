@@ -1,9 +1,11 @@
-numpy==1.26.4
+# Runtime pins for the gateway IDS venv (system python3 on the Pi).
+# Target: CPython 3.10–3.13 on Linux x86_64 and aarch64 (incl. Debian 13 / Trixie).
+numpy==2.1.3
 scikit-learn==1.5.2
-scipy==1.13.1
+scipy==1.14.1
 joblib==1.4.2
 pyyaml==6.0.2
 paho-mqtt==2.1.0
 psutil==6.1.0
-lightgbm==4.5.0
-pandas==2.2.2
+lightgbm==4.6.0
+pandas==2.2.3

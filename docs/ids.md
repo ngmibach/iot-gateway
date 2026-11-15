@@ -9,7 +9,7 @@ The IDS is controlled from the desktop app but runs only on the Linux gateway. T
 3. The existing gateway shipper forwards alerts to the operator's Loki instance using `job="ids-alerts"` and a gateway host label.
 4. The Security page reads status/configuration through authenticated control-service routes over the existing SSH connection and retrieves alerts from Loki.
 
-Gateway code and model are installed under `/opt/iot-gateway-agent/ids`; inference dependencies live in the isolated `/opt/iot-gateway-agent/ids-venv`. Configuration is `/var/lib/iot-gateway-agent/ids_config.yaml`. Provisioning supports Linux `x86_64` and `aarch64` gateways with Python 3.9 through 3.12. Missing assets, unsupported platforms, dependency failures, or an invalid model stop provisioning with an error.
+Gateway code and model are installed under `/opt/iot-gateway-agent/ids`; inference dependencies live in the isolated `/opt/iot-gateway-agent/ids-venv` built from the gateway's system `python3`. Configuration is `/var/lib/iot-gateway-agent/ids_config.yaml`. Provisioning supports Linux `x86_64` and `aarch64` gateways with Python 3.10 through 3.13. Missing assets, unsupported platforms, dependency failures, or an invalid model stop provisioning with an error.
 
 ## Controls and alerts
 

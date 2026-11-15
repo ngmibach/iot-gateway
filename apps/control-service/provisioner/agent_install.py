@@ -768,10 +768,12 @@ def _ensure_ids_runtime(
         raise AgentInstallError(
             f"could not determine gateway Python version: {python_check.stdout.strip()!r}"
         ) from exc
-    if python_version < (3, 9) or python_version >= (3, 13):
+    # Use the gateway's system python3 (venv). Pins in requirements-runtime.txt
+    # target CPython 3.10–3.13 (Debian bookworm/trixie and current Raspberry Pi OS).
+    if python_version < (3, 10) or python_version >= (3, 14):
         raise AgentInstallError(
             f"gateway Python {python_check.stdout.strip()} is unsupported; "
-            "use Python 3.9 through 3.12"
+            "use Python 3.10 through 3.13"
         )
 
     libgomp = ssh.run(
@@ -795,16 +797,28 @@ def _ensure_ids_runtime(
 
     ids_root = f"{remote_root}/ids"
     venv = f"{remote_root}/ids-venv"
-    create_venv = ssh.run(
-        f"test -x {shlex.quote(venv)}/bin/python || "
-        f"python3 -m venv {shlex.quote(venv)}",
-        timeout=180.0,
+    # Recreate when missing or when the venv interpreter version differs from
+    # system python3 (avoids a stale 3.12 venv on a 3.13 gateway after upgrade).
+    venv_ver = ssh.run(
+        f"test -x {shlex.quote(venv)}/bin/python && "
+        f"{shlex.quote(venv)}/bin/python -c "
+        "'import sys; print(\"%d.%d\" % sys.version_info[:2])'",
+        timeout=15.0,
     )
-    if not create_venv.ok:
-        raise AgentInstallError(
-            "could not create isolated gateway IDS environment: "
-            f"{(create_venv.stderr or create_venv.stdout).strip()[:300]}"
+    venv_matches = (
+        venv_ver.ok
+        and venv_ver.stdout.strip() == python_check.stdout.strip()
+    )
+    if not venv_matches:
+        recreate = ssh.run(
+            f"rm -rf {shlex.quote(venv)} && python3 -m venv {shlex.quote(venv)}",
+            timeout=180.0,
         )
+        if not recreate.ok:
+            raise AgentInstallError(
+                "could not create isolated gateway IDS environment: "
+                f"{(recreate.stderr or recreate.stdout).strip()[:300]}"
+            )
     dependencies = ssh.run(
         f"{shlex.quote(venv)}/bin/python -m pip install -q -U pip && "
         f"{shlex.quote(venv)}/bin/python -m pip install -q -r "

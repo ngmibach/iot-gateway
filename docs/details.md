@@ -400,7 +400,7 @@ Fixed canonical order: **Agent â†’ MQTT â†’ Decrypt â†’ Shipper �
 ## Gateway IDS
 
 - The Windows/Linux desktop app provides controls and alert viewing; inference runs only on a supported Linux gateway, never on the operator PC.
-- Provisioning installs a separate `iot-gateway-ids.service`, isolated `/opt/iot-gateway-agent/ids-venv`, and bundled model under `/opt/iot-gateway-agent/ids`. Supported gateway targets are Linux `x86_64` and `aarch64` with Python 3.9–3.12.
+- Provisioning installs a separate `iot-gateway-ids.service`, isolated `/opt/iot-gateway-agent/ids-venv` (gateway system `python3`), and bundled model under `/opt/iot-gateway-agent/ids`. Supported gateway targets are Linux `x86_64` and `aarch64` with Python 3.10–3.13.
 - The service reads `/var/lib/iot-gateway-agent/logs/ids_events.jsonl`, writes `/var/lib/iot-gateway-agent/logs/ids_alerts.log`, and reads `/var/lib/iot-gateway-agent/ids_config.yaml`. It is installed disabled by default; enabling it does not restart the main agent.
 - Accepted/decrypted sensor messages are recorded separately from the unchanged `sensor_data.log`. Since the decrypt worker cannot observe the original MQTT source IP, IP-based IDS checks are disabled and source IP is left empty.
 - Behavioral rules and the bundled LightGBM model produce alert records only. IDS alerts never automatically block, quarantine, modify ACLs, or trigger Auto prevent.
