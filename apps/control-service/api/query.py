@@ -158,20 +158,26 @@ def _proxy_get(url: str, params: dict[str, Any]) -> Any:
 
 
 def _extract_scalar(data: Any) -> float:
+    got = _extract_scalar_optional(data)
+    return 0.0 if got is None else got
+
+
+def _extract_scalar_optional(data: Any) -> float | None:
+    """Return the first Prom instant value, or None when the series is missing."""
     if not data:
-        return 0.0
+        return None
     try:
         result = data.get("data", {}).get("result", [])
         if not result:
-            return 0.0
+            return None
         r = result[0]
         if "value" in r:
             return float(r["value"][1])
         if "values" in r and r["values"]:
             return float(r["values"][-1][1])
     except (TypeError, ValueError, IndexError, KeyError):
-        pass
-    return 0.0
+        return None
+    return None
 
 
 def _ns_window(range_s: str) -> tuple[int, int]:
@@ -352,6 +358,15 @@ def summary_gateway(
         except HTTPException as e:
             warnings.append(f"prometheus: {e.detail}")
             return 0.0
+
+    def prom_scalar_optional(expr: str) -> float | None:
+        """Like prom_scalar, but None when Prometheus has no matching series."""
+        try:
+            data = _proxy_get(f"{prom}/api/v1/query", {"query": expr})
+            return _extract_scalar_optional(data)
+        except HTTPException as e:
+            warnings.append(f"prometheus: {e.detail}")
+            return None
 
     spark_limit = _spark_limit(start, end, step)
 
@@ -646,13 +661,17 @@ def summary_gateway(
     gateway_delay_spark: list[float] = []
     gateway_delay_points: list[dict[str, float | int]] = []
     gateway_delay_latest: float | None = None
+    # Missing delay series must stay null (not 0.0) so Activities shows "—".
     gateway_delay_total = _sane_delay_total_ms(
-        prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_SUM_PROM, node="gateway"))
+        prom_scalar_optional(Q.prep_prom(Q.GATEWAY_DELAY_SUM_PROM, node="gateway"))
     )
-    gateway_delay_samples = int(
-        prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_SAMPLES_PROM, node="gateway"))
+    samples_raw = prom_scalar_optional(
+        Q.prep_prom(Q.GATEWAY_DELAY_SAMPLES_PROM, node="gateway")
     )
-    avg_delay = prom_scalar(Q.prep_prom(Q.GATEWAY_DELAY_AVG_PROM, node="gateway"))
+    gateway_delay_samples = int(samples_raw) if samples_raw is not None else 0
+    avg_delay = prom_scalar_optional(
+        Q.prep_prom(Q.GATEWAY_DELAY_AVG_PROM, node="gateway")
+    )
     avg_sane = _sane_delay_ms(avg_delay)
     if avg_sane is not None:
         gateway_delay_latest = avg_sane
