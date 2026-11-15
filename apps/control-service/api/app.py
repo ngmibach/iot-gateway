@@ -15,6 +15,7 @@ from .cert_cache import CertBundleCache
 from .deps import AppState, OpenSSH, default_open_ssh
 from .devices import public_router, router as devices_router
 from .fake_cert_renewer import FakeCertRenewer
+from .ids import router as ids_router
 from .query import router as query_router
 from .schemas import HealthResponse
 from .settings import Settings
@@ -81,6 +82,7 @@ def create_app(
     app.include_router(devices_router, prefix="/api/v1")
     app.include_router(actions_router, prefix="/api/v1")
     app.include_router(public_router, prefix="/api/v1")
+    app.include_router(ids_router, prefix="/api/v1")
     app.include_router(query_router, prefix="/api/v1")
 
     @app.get("/health", response_model=HealthResponse)

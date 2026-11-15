@@ -348,13 +348,13 @@ class ProvisionFlowTests(unittest.TestCase):
             advertise_host="192.168.1.50",
         )
         self.assertIn(
-            "listeners=INTERNAL://127.0.0.1:9092,EXTERNAL://192.168.1.50:9092,"
+            "listeners=INTERNAL://127.0.0.1:9092,EXTERNAL://192.168.1.50:9094,"
             "CONTROLLER://127.0.0.1:9093",
             props,
         )
         self.assertIn(
             "advertised.listeners=INTERNAL://127.0.0.1:9092,"
-            "EXTERNAL://192.168.1.50:9092",
+            "EXTERNAL://192.168.1.50:9094",
             props,
         )
         self.assertIn("inter.broker.listener.name=INTERNAL", props)
@@ -446,6 +446,10 @@ class ProvisionFlowTests(unittest.TestCase):
             CommandResult(0, '{"status":"ok"}', ""),
         )
         ssh.when("printf '%s:%s", CommandResult(0, "admin:admin\n", ""))
+        ssh.when("uname -s; uname -m", CommandResult(0, "Linux\nx86_64\n", ""))
+        ssh.when("print(\"%d.%d\"", CommandResult(0, "3.10\n", ""))
+        ssh.when("IDS_MODEL_READY", CommandResult(0, "IDS_MODEL_READY\n", ""))
+        ssh.when("print(int(bool", CommandResult(0, "0\n", ""))
         # TLS bootstrap sudo scripts echo markers; generic sudo stays empty.
         ssh.when("DECRYPT_OK", CommandResult(0, "DECRYPT_OK\n", ""))
         ssh.when("CA_CREATED", CommandResult(0, "CA_EXISTS\n", ""))
@@ -484,6 +488,14 @@ class ProvisionFlowTests(unittest.TestCase):
                 return CommandResult(0, '{"status": "ok"}', "")
             if "printf '%s:%s" in command:
                 return CommandResult(0, "admin:admin\n", "")
+            if "uname -s; uname -m" in command:
+                return CommandResult(0, "Linux\nx86_64\n", "")
+            if "print(\"%d.%d\"" in command:
+                return CommandResult(0, "3.10\n", "")
+            if "IDS_MODEL_READY" in command:
+                return CommandResult(0, "IDS_MODEL_READY\n", "")
+            if "print(int(bool" in command:
+                return CommandResult(0, "0\n", "")
             if "sudo -S" in command:
                 # Mimic TLS bootstrap markers from ensure_* scripts.
                 return CommandResult(
@@ -535,6 +547,40 @@ class ProvisionFlowTests(unittest.TestCase):
         msg = str(ctx.exception).lower()
         self.assertIn("could not be unlocked", msg)
         self.assertIn("clean up", msg)
+
+    def test_ids_runtime_accepts_python_313(self) -> None:
+        """Debian 13 / current Pi OS ship python3 3.13; IDS must use it."""
+        from provisioner.agent_install import AgentInstallError, _ensure_ids_runtime
+
+        ssh = FakeSSH()
+        ssh.when("uname -s; uname -m", CommandResult(0, "Linux\naarch64\n", ""))
+        # System python3 reports 3.13; no existing ids-venv → recreate path.
+        ssh.when(
+            "python3 -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'",
+            CommandResult(0, "3.13\n", ""),
+        )
+        ssh.when("ids-venv", CommandResult(1, "", "missing"))
+        ssh.when("python3 -m venv", CommandResult(0, "", ""))
+        ssh.when("libgomp1", CommandResult(0, "", ""))
+        ssh.when("pip install", CommandResult(0, "", ""))
+        ssh.when("IDS_MODEL_READY", CommandResult(0, "IDS_MODEL_READY\n", ""))
+        _ensure_ids_runtime(
+            ssh, remote_root="/opt/iot-gateway-agent", sudo_password="secret"
+        )
+        self.assertTrue(any("python3 -m venv" in c for c in ssh.commands))
+        self.assertTrue(any("requirements-runtime.txt" in c for c in ssh.commands))
+
+        ssh_bad = FakeSSH()
+        ssh_bad.when("uname -s; uname -m", CommandResult(0, "Linux\nx86_64\n", ""))
+        ssh_bad.when(
+            "python3 -c 'import sys; print(\"%d.%d\" % sys.version_info[:2])'",
+            CommandResult(0, "3.14\n", ""),
+        )
+        with self.assertRaises(AgentInstallError) as ctx:
+            _ensure_ids_runtime(
+                ssh_bad, remote_root="/opt/iot-gateway-agent", sudo_password="secret"
+            )
+        self.assertIn("3.10 through 3.13", str(ctx.exception))
 
     def test_agent_backend_requires_ca_passphrase(self) -> None:
         ssh = _ok_ssh()
