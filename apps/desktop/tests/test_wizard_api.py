@@ -1285,6 +1285,115 @@ class WizardApiTests(unittest.TestCase):
         self.assertEqual(cert.get("not_after"), "2028-01-01T00:00:00+00:00")
         self.assertEqual(cert.get("fingerprint_sha256"), "e" * 64)
 
+    def test_provision_persists_cleanup_prereqs_before_remote_install(self) -> None:
+        """CA/sudo + registry must land before provision so mid-fail Clean up works."""
+        from pathlib import Path
+        from types import SimpleNamespace
+
+        from registry.registry import Registry
+        from shell import keyring_store, ssh_setup
+        from shell.paths import ensure_data_dir, load_settings, save_settings
+
+        save_settings({"monitoring_ip": "192.168.1.20"})
+        key_dir = ensure_data_dir() / "ssh"
+        key_dir.mkdir(parents=True, exist_ok=True)
+        priv = ssh_setup.key_paths_for("gateway").private
+        priv.write_text("dummy-key\n", encoding="utf-8")
+
+        class _Boom(RuntimeError):
+            pass
+
+        def _failing_provision(ssh, config):  # noqa: ARG001
+            # Secrets/settings/registry must already be durable here.
+            self.assertEqual(
+                keyring_store.get_secret("gateway", kind="sudo"), "sudo-secret"
+            )
+            self.assertTrue(keyring_store.get_secret("gateway", kind="ca"))
+            settings = load_settings()
+            self.assertEqual(settings.get("ssh_host"), "192.168.1.50")
+            self.assertEqual(settings.get("ssh_user"), "admin")
+            reg = Registry(str(ensure_data_dir() / "registry.sqlite"))
+            try:
+                rows = reg.list_gateways()
+            finally:
+                reg.close()
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["id"], "gateway")
+            self.assertEqual(rows[0].get("status"), "installing")
+            raise _Boom("simulated mid-install failure")
+
+        with mock.patch.object(keyring_store, "_keyring_usable", return_value=False):
+            with mock.patch(
+                "provisioner.provision.provision", side_effect=_failing_provision
+            ):
+                with mock.patch(
+                    "provisioner.ssh.ParamikoSSHSession",
+                    return_value=SimpleNamespace(close=lambda: None),
+                ):
+                    req = urllib.request.Request(
+                        self.base + "/api/wizard/provision",
+                        data=json.dumps(
+                            {
+                                "host": "192.168.1.50",
+                                "username": "admin",
+                                "port": 22,
+                                "gateway_id": "gateway",
+                                "gateway_ip": "192.168.1.50",
+                                "monitoring_ip": "192.168.1.20",
+                                "sudo_password": "sudo-secret",
+                                "generate_ca_passphrase": True,
+                            }
+                        ).encode("utf-8"),
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with self.assertRaises(urllib.error.HTTPError) as ctx:
+                        urllib.request.urlopen(req, timeout=10)
+                    self.assertEqual(ctx.exception.code, 500)
+                    err_body = json.loads(ctx.exception.read().decode("utf-8"))
+                    self.assertIn("simulated mid-install failure", err_body.get("error", ""))
+
+            # After failure, Clean up prerequisites remain.
+            self.assertEqual(
+                keyring_store.get_secret("gateway", kind="sudo"), "sudo-secret"
+            )
+            self.assertTrue(keyring_store.get_secret("gateway", kind="ca"))
+            targets = self._get("/api/wizard/uninstall/targets")
+            ids = {g["id"] for g in targets.get("gateways") or []}
+            self.assertIn("gateway", ids)
+            by_id = {g["id"]: g for g in targets["gateways"]}
+            self.assertEqual(by_id["gateway"]["host"], "192.168.1.50")
+            self.assertTrue(by_id["gateway"]["sudo_present"])
+            self.assertFalse(targets["needs_sudo_prompt"])
+            self.assertTrue(Path(priv).is_file())
+
+    def test_uninstall_targets_lists_nested_settings_gateways(self) -> None:
+        """install-key nested gateways.gateway must appear even without registry."""
+        from shell.paths import save_settings
+
+        save_settings(
+            {
+                "default_gateway_id": "gateway",
+                "gateways": {
+                    "gateway": {
+                        "host": "172.20.10.2",
+                        "username": "admin",
+                        "port": 22,
+                    }
+                },
+            }
+        )
+        data = self._get("/api/wizard/uninstall/targets")
+        ids = {g["id"] for g in data.get("gateways") or []}
+        self.assertIn("gateway", ids)
+        by_id = {g["id"]: g for g in data["gateways"]}
+        self.assertEqual(by_id["gateway"]["host"], "172.20.10.2")
+        self.assertEqual(by_id["gateway"]["ssh_user"], "admin")
+        self.assertEqual(data["ssh_host"], "172.20.10.2")
+        self.assertEqual(data["ssh_user"], "admin")
+        self.assertTrue(data["provisioned"])
+        self.assertTrue(data["needs_sudo_prompt"])
+
 
 if __name__ == "__main__":
     unittest.main()

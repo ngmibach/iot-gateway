@@ -1133,7 +1133,7 @@ def _handle_api(
             gateway_ip = str(
                 body.get("gateway_ip") or settings.get("gateway_ip") or host
             ).strip()
-            # Sudo is never written to settings.json / logs; keyring only after success.
+            # Sudo/CA never go into settings.json / logs — keyring only.
             sudo_password = str(body.get("sudo_password") or "")
             generate_ca = bool(body.get("generate_ca_passphrase"))
             ca_pass = ""
@@ -1190,6 +1190,37 @@ def _handle_api(
                     },
                 )
                 return
+            # Persist cleanup prerequisites BEFORE remote install so a mid-fail
+            # provision still leaves Clean up able to remove the partial agent
+            # (keyring sudo/CA + addressable settings/registry row).
+            try:
+                _persist_provision_cleanup_prereqs(
+                    settings=settings,
+                    gateway_id=gateway_id,
+                    host=host,
+                    username=username,
+                    port=port,
+                    gateway_ip=gateway_ip or host,
+                    monitoring_ip=monitoring_ip,
+                    sudo_password=sudo_password,
+                    ca_passphrase=ca_pass,
+                    status="installing",
+                )
+            except Exception as persist_err:  # noqa: BLE001
+                sudo_password = ""
+                ca_pass = ""
+                _json_response(
+                    handler,
+                    500,
+                    {
+                        "error": (
+                            "Failed to save cleanup credentials before install: "
+                            f"{persist_err}"
+                        ),
+                        "ok": False,
+                    },
+                )
+                return
             try:
                 from provisioner.provision import (  # type: ignore[import-not-found]
                     ProvisionConfig,
@@ -1215,16 +1246,10 @@ def _handle_api(
                     )
                 finally:
                     ssh.close()
-                # Persist CA + sudo after successful provision (sensor certs / fake netns).
-                try:
-                    keyring_store.set_secret(gateway_id, ca_pass, kind="ca")
-                    if sudo_password.strip():
-                        keyring_store.set_secret(
-                            gateway_id, sudo_password.strip(), kind="sudo"
-                        )
-                finally:
-                    ca_pass = ""
-                    sudo_password = ""  # drop local reference ASAP
+                # Drop local secret refs ASAP (already in keyring from pre-persist).
+                ca_pass = ""
+                sudo_password = ""
+                settings = load_settings()
                 settings["gateway_ip"] = gateway_ip or host
                 settings["ssh_host"] = host
                 settings["ssh_user"] = username
@@ -1286,6 +1311,8 @@ def _handle_api(
                     },
                 )
             except Exception as e:  # noqa: BLE001
+                # Keep pre-persisted keyring + registry so Clean up can remove a
+                # partial remote install. Only clear local secret variables.
                 ca_pass = ""
                 sudo_password = ""
                 _json_response(handler, 500, {"error": str(e), "ok": False})
@@ -1415,6 +1442,61 @@ def _should_inject_sudo(method: str, path: str) -> bool:
     if method == "PUT" and path.endswith("/control/auto-prevent"):
         return True
     return False
+
+
+def _persist_provision_cleanup_prereqs(
+    *,
+    settings: dict[str, Any],
+    gateway_id: str,
+    host: str,
+    username: str,
+    port: int,
+    gateway_ip: str,
+    monitoring_ip: str,
+    sudo_password: str,
+    ca_passphrase: str,
+    status: str = "installing",
+) -> None:
+    """Save keyring + addressable gateway state before remote provision.
+
+    Clean up needs sudo (and a registry/settings host row) even when install
+    fails mid-way after CA/agent files were already written on the gateway.
+    """
+    keyring_store.set_secret(gateway_id, ca_passphrase, kind="ca")
+    if sudo_password.strip():
+        keyring_store.set_secret(gateway_id, sudo_password.strip(), kind="sudo")
+
+    settings["gateway_ip"] = gateway_ip or host
+    settings["ssh_host"] = host
+    settings["ssh_user"] = username
+    settings["ssh_port"] = port
+    settings["default_gateway_id"] = gateway_id
+    gws = settings.get("gateways")
+    if not isinstance(gws, dict):
+        gws = {}
+    row = dict(gws.get(gateway_id) or {})
+    row.update(
+        {
+            "host": host,
+            "username": username,
+            "port": port,
+        }
+    )
+    gws[gateway_id] = row
+    settings["gateways"] = gws
+    save_settings(settings)
+
+    fp = registry_gateways.fingerprint_from_settings(settings, host, port)
+    registry_gateways.upsert_local_gateway(
+        gateway_id=gateway_id,
+        host=gateway_ip or host,
+        ssh_user=username,
+        fingerprint=fp,
+        monitoring_ip=monitoring_ip,
+        agent_url=f"http://{gateway_ip or host}:9139",
+        password_auth_enabled=False,
+        status=status,
+    )
 
 
 def _inject_json_secret(

@@ -68,8 +68,8 @@ def uninstall_targets() -> dict[str, Any]:
         for r in rows
         if str(r.get("id") or "").strip()
     ]
-    # Surface the provisioned SSH host even if registry was never written.
     ids = {g["id"] for g in gateways}
+    # Surface the provisioned SSH host even if registry was never written.
     if provisioned and default_gid not in ids:
         gateways.insert(
             0,
@@ -82,17 +82,57 @@ def uninstall_targets() -> dict[str, Any]:
                 "sudo_present": _sudo_present(default_gid),
             },
         )
+        ids.add(default_gid)
+    # Also surface nested settings.gateways rows (written by install-key / early
+    # provision persist) so Clean up still lists a mid-fail install.
+    nested = settings.get("gateways")
+    if isinstance(nested, dict):
+        for gid, row in nested.items():
+            gid_s = str(gid or "").strip()
+            if not gid_s or gid_s in ids or not isinstance(row, dict):
+                continue
+            host = str(row.get("host") or "").strip()
+            if not host:
+                continue
+            gateways.append(
+                {
+                    "id": gid_s,
+                    "host": host,
+                    "ssh_user": str(
+                        row.get("username")
+                        or row.get("ssh_user")
+                        or settings.get("ssh_user")
+                        or ""
+                    ).strip(),
+                    "sudo_present": _sudo_present(gid_s),
+                }
+            )
+            ids.add(gid_s)
     # Prompt only when at least one SSH-removable gateway lacks a saved sudo.
     needs_sudo_prompt = any(
         bool(g.get("host")) and not g.get("sudo_present") for g in gateways
     )
+    # Prefer top-level SSH fields; fall back to nested default gateway row.
+    ssh_host = str(settings.get("ssh_host") or settings.get("gateway_ip") or "").strip()
+    ssh_user = str(settings.get("ssh_user") or "").strip()
+    ssh_port = int(settings.get("ssh_port") or 22)
+    if not ssh_host and isinstance(nested, dict):
+        row = nested.get(default_gid) if isinstance(nested.get(default_gid), dict) else None
+        if row:
+            ssh_host = str(row.get("host") or "").strip()
+            if not ssh_user:
+                ssh_user = str(row.get("username") or row.get("ssh_user") or "").strip()
+            try:
+                ssh_port = int(row.get("port") or ssh_port)
+            except (TypeError, ValueError):
+                pass
     return {
         "gateways": gateways,
-        "provisioned": provisioned,
+        "provisioned": provisioned or bool(ssh_host),
         "default_gateway_id": default_gid,
-        "ssh_host": str(settings.get("ssh_host") or settings.get("gateway_ip") or ""),
-        "ssh_user": str(settings.get("ssh_user") or "").strip(),
-        "ssh_port": int(settings.get("ssh_port") or 22),
+        "ssh_host": ssh_host,
+        "ssh_user": ssh_user,
+        "ssh_port": ssh_port,
         "needs_sudo_prompt": needs_sudo_prompt,
         "monitoring_hint": (
             "Removing the monitoring panel also removes every gateway "

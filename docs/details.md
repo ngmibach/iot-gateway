@@ -320,10 +320,11 @@ Desktop → SSH:
 1. Discover open SSH on monitoring LAN (`POST /api/wizard/discover/gateways`)
 2. Fetch/pin host key; install operator SSH public key
 3. Optional Windows firewall apply for Loki `:3100` when elevated
-4. `provisioner` / `agent_install`: apt deps, extract agent, configure system Mosquitto, bootstrap CA + server + decrypt certs, install Kafka, write env, enable/restart units
-5. Save keyring `ca` + `sudo`; upsert registry row
+4. Resolve CA passphrase (generate or manual); **save keyring `ca` + `sudo`, top-level SSH settings, and a registry row (`status=installing`) before remote work** so Clean up still works if install fails mid-way
+5. `provisioner` / `agent_install`: apt deps, extract agent, configure system Mosquitto, bootstrap CA + server + decrypt certs, install Kafka, write env, enable/restart units
+6. On success: mark registry `status=provisioned`, refresh Prometheus scrape target
 
-CA passphrase: Generate (default) or manual entry (reject passphrase `admin`). Stored once after success as `ca:{gateway_id}`.
+CA passphrase: Generate (default) or manual entry (reject passphrase `admin`). Stored as `ca:{gateway_id}` before remote install (reused on reinstall when already in keyring).
 
 ### Uninstall
 
