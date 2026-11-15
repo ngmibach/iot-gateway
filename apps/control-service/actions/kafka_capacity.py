@@ -9,10 +9,14 @@ Example (abstract units): topic_cap=1, disk=10 → max_sensors = floor(10*0.7/1)
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 
 from .shellutil import shell_quote
+
+# Topic names used in unquoted glob tails after a quoted base path.
+_TOPIC_GLOB_SAFE_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 if TYPE_CHECKING:
     from .ssh import SSHClient
@@ -161,6 +165,14 @@ def parse_du_topic_sizes(stdout: str) -> dict[str, int]:
     return out
 
 
+def _topic_glob_fragment(topic: str) -> str | None:
+    """Return topic text safe to place unquoted after a quoted ``du`` base path."""
+    name = str(topic or "").strip()
+    if not name or not _TOPIC_GLOB_SAFE_RE.fullmatch(name):
+        return None
+    return name
+
+
 def probe_topic_used_bytes_map(
     ssh: "SSHClient",
     data_dir: str,
@@ -171,18 +183,35 @@ def probe_topic_used_bytes_map(
     Missing topic dirs yield no entry (caller may treat as 0). Command failures
     with empty stdout return ``{}``; callers should not treat that as SSH auth
     failure (use the surrounding connect error for that).
+
+    Globs must keep ``*`` outside shell quotes — quoting ``…/sensor.x-*`` makes
+    ``du`` look for a literal path and report 0 usage while topics have data.
     """
     base = f"{str(data_dir).rstrip('/')}/kafka/data"
+    quoted_base = shell_quote(base)
+    cleaned: list[str] = []
     if topics:
         cleaned = [str(t).strip() for t in topics if str(t).strip()]
         if not cleaned:
             return {}
-        globs = " ".join(shell_quote(f"{base}/{t}-*") for t in cleaned)
-        cmd = f"du -sb -- {globs} 2>/dev/null || true"
+        fragments: list[str] = []
+        for t in cleaned:
+            frag = _topic_glob_fragment(t)
+            if frag is None:
+                continue
+            # Quote only the directory; leave "/topic-*" unquoted for expansion.
+            fragments.append(f"{quoted_base}/{frag}-*")
+        if fragments:
+            cmd = f"du -sb -- {' '.join(fragments)} 2>/dev/null || true"
+        else:
+            cmd = f"du -sb -- {quoted_base}/* 2>/dev/null || true"
     else:
-        cmd = f"du -sb -- {shell_quote(base)}/* 2>/dev/null || true"
+        cmd = f"du -sb -- {quoted_base}/* 2>/dev/null || true"
     result = ssh.run(cmd, timeout=30.0)
-    return parse_du_topic_sizes(getattr(result, "stdout", "") or "")
+    sizes = parse_du_topic_sizes(getattr(result, "stdout", "") or "")
+    if not cleaned:
+        return sizes
+    return {t: int(sizes[t]) for t in cleaned if t in sizes}
 
 
 def probe_topic_used_bytes(
