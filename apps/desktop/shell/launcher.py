@@ -61,11 +61,14 @@ class ProcessManager:
         env.setdefault("IOTGW_REPO_ROOT", str(repo_root()))
         settings = load_settings()
         # Prefer per-gateway key from settings when a single default is set.
+        # Control also re-resolves from settings.json at connect time (deps.resolve_ssh_key_path)
+        # so Install after startup still works without restarting this process.
         default_gw = settings.get("default_gateway_id")
         if default_gw and default_gw in settings.get("gateways", {}):
             gw = settings["gateways"][default_gw]
-            if gw.get("ssh_key_path"):
-                env.setdefault("IOTGW_SSH_KEY", gw["ssh_key_path"])
+            key_path = str(gw.get("ssh_key_path") or "").strip()
+            if key_path:
+                env.setdefault("IOTGW_SSH_KEY", key_path)
         if extra_env:
             env.update(extra_env)
         log_path = ensure_data_dir() / "control-service.log"
