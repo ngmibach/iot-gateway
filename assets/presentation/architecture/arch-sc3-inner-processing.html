@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SC-3 Inner Processing Path</title>
+<style>
+  :root {
+    --blue: #1565C0;
+    --blue-border: #0D47A1;
+    --blue-soft: #90CAF9;
+    --neutral: #546E7A;
+    --neutral-border: #37474F;
+    --green: #2E7D32;
+    --ink: #E8EEF7;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0B2748; }
+  body.export-mode .toolbar { display: none; }
+  .toolbar { display: flex; gap: 10px; padding: 10px 14px; background: #263238; color: #fff; }
+  .toolbar h1 { font-size: 14px; margin: 0; margin-right: auto; }
+  .stage { display: flex; justify-content: center; }
+  #diagram {
+    width: 1480px;
+    background: var(--page-grad);
+    padding: 44px 56px 40px;
+    color: var(--ink);
+  }
+  .frame {
+    border: 2.5px dashed rgba(144, 164, 174, 0.55);
+    border-radius: 20px;
+    padding: 32px 40px;
+    background: rgba(236, 239, 241, 0.06);
+  }
+  .pipe {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0;
+  }
+  .node {
+    width: 720px;
+    border-radius: 14px;
+    border: 2.5px solid;
+    padding: 14px 22px;
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 16px;
+    align-items: center;
+  }
+  .node.mqtt {
+    background: rgba(236, 239, 241, 0.96);
+    border-color: var(--neutral);
+    color: var(--neutral-border);
+  }
+  .node.sec {
+    background: rgba(227, 242, 253, 0.96);
+    border-color: var(--blue);
+    color: var(--blue-border);
+  }
+  .node.out {
+    background: rgba(232, 245, 233, 0.96);
+    border-color: var(--green);
+    color: #1B5E20;
+  }
+  .node .num {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 16px;
+    font-weight: 800;
+    color: #fff;
+  }
+  .node.mqtt .num { background: var(--neutral); }
+  .node.sec .num { background: var(--blue); }
+  .node.out .num { background: var(--green); }
+  .node .title { font-size: 18px; font-weight: 800; line-height: 1.2; }
+  .node .sub { font-size: 13px; font-weight: 600; margin-top: 4px; opacity: 0.85; }
+  .arrow {
+    color: var(--blue-soft);
+    font-size: 22px;
+    font-weight: 900;
+    line-height: 1.1;
+    padding: 2px 0;
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar"><h1>SC-3 Inner Processing Path</h1></div>
+  <div class="stage">
+    <div id="diagram">
+      <div class="frame">
+        <div class="pipe">
+          <div class="node mqtt">
+            <div class="num">01</div>
+            <div>
+              <div class="title">Deliver to decrypt worker</div>
+              <div class="sub">Agent MQTTS subscriber on :8883</div>
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="node sec">
+            <div class="num">02</div>
+            <div>
+              <div class="title">Decrypt / open envelope</div>
+              <div class="sub">Pair env/key + env/data · unwrap CEK · AES-GCM</div>
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="node sec">
+            <div class="num">03</div>
+            <div>
+              <div class="title">Structure validation</div>
+              <div class="sub">Registered JSON schema</div>
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="node sec">
+            <div class="num">04</div>
+            <div>
+              <div class="title">Topic / sink binding</div>
+              <div class="sub">Map to sensor.&lt;device_id&gt;</div>
+            </div>
+          </div>
+          <div class="arrow">↓</div>
+          <div class="node out">
+            <div class="num">05</div>
+            <div>
+              <div class="title">Kafka sink</div>
+              <div class="sub">Produce · sensor_data.log · Loki shipper</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

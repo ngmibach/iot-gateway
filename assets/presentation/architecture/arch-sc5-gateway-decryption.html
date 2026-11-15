@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SC-5 Gateway Decryption</title>
+<style>
+  :root {
+    --blue: #1565C0;
+    --blue-border: #0D47A1;
+    --blue-soft: #90CAF9;
+    --green: #2E7D32;
+    --ink: #E8EEF7;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0B2748; }
+  body.export-mode .toolbar { display: none; }
+  .toolbar { display: flex; gap: 10px; padding: 10px 14px; background: #263238; color: #fff; }
+  .toolbar h1 { font-size: 14px; margin: 0; margin-right: auto; }
+  .stage { display: flex; justify-content: center; }
+  #diagram {
+    width: 1680px;
+    background: var(--page-grad);
+    padding: 44px 40px 40px;
+    color: var(--ink);
+  }
+  .layout {
+    display: grid;
+    grid-template-columns: 220px 1fr 240px;
+    gap: 24px;
+    align-items: center;
+  }
+  .side {
+    border-radius: 16px;
+    border: 2.5px solid;
+    padding: 22px 14px;
+    text-align: center;
+    min-height: 280px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .side.in {
+    background: rgba(227, 242, 253, 0.18);
+    border-color: rgba(144, 202, 249, 0.7);
+    color: var(--blue-soft);
+  }
+  .side.out {
+    background: rgba(232, 245, 233, 0.96);
+    border-color: var(--green);
+    color: #1B5E20;
+  }
+  .side .role {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.8;
+    margin-bottom: 8px;
+  }
+  .side .name { font-size: 22px; font-weight: 800; }
+  .side .meta { font-size: 13px; font-weight: 600; margin-top: 10px; opacity: 0.85; line-height: 1.35; }
+  .pipe { display: flex; flex-direction: column; gap: 8px; }
+  .step {
+    display: grid;
+    grid-template-columns: 56px 1fr;
+    gap: 12px;
+    align-items: center;
+    background: rgba(227, 242, 253, 0.96);
+    border: 2px solid var(--blue);
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: var(--blue-border);
+  }
+  .step.accept {
+    background: rgba(232, 245, 233, 0.96);
+    border-color: var(--green);
+    color: #1B5E20;
+  }
+  .step .num {
+    width: 44px;
+    height: 44px;
+    border-radius: 999px;
+    background: var(--blue);
+    color: #fff;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .step.accept .num { background: var(--green); }
+  .step .title { font-size: 15px; font-weight: 800; }
+  .step .sub { font-size: 12px; font-weight: 600; margin-top: 2px; opacity: 0.85; }
+</style>
+</head>
+<body>
+  <div class="toolbar"><h1>SC-5 Gateway Decryption</h1></div>
+  <div class="stage">
+    <div id="diagram">
+      <div class="layout">
+        <div class="side in">
+          <div class="role">Ingress</div>
+          <div class="name">env/key + env/data</div>
+          <div class="meta">Decrypt worker<br/>pairs by msg_id</div>
+        </div>
+        <div class="pipe">
+          <div class="step">
+            <div class="num">01</div>
+            <div>
+              <div class="title">Pair halves</div>
+              <div class="sub">Match (device_id, msg_id) within pair timeout</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">02</div>
+            <div>
+              <div class="title">Verify stamp · day window</div>
+              <div class="sub">HMAC binding · day_id ∈ {yesterday, today, tomorrow}</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">03</div>
+            <div>
+              <div class="title">Unwrap CEK</div>
+              <div class="sub">v1-psk wrap secret or v1-ecdhe / DMEC</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">04</div>
+            <div>
+              <div class="title">AES-GCM open</div>
+              <div class="sub">Recover plaintext JSON</div>
+            </div>
+          </div>
+          <div class="step">
+            <div class="num">05</div>
+            <div>
+              <div class="title">Schema validate</div>
+              <div class="sub">Registered JSON schema on gateway</div>
+            </div>
+          </div>
+          <div class="step accept">
+            <div class="num">06</div>
+            <div>
+              <div class="title">Accept</div>
+              <div class="sub">sensor_data.log · Kafka sensor.&lt;device_id&gt; · Loki</div>
+            </div>
+          </div>
+        </div>
+        <div class="side out">
+          <div class="role">Accepted storage</div>
+          <div class="name">Log + Kafka</div>
+          <div class="meta">Gateway always decrypts so it can validate and store</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

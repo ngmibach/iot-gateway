@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IoT-SecureGate — Top-level Architecture (Thesis colors)</title>
+<style>
+  :root {
+    --blue: #1565C0;       /* Security Core — vivid blue */
+    --blue-bg: #E3F2FD;
+    --blue-border: #0D47A1;
+    --orange: #EF6C00;     /* Intelligent Protection — orange */
+    --orange-bg: #FFF3E0;
+    --orange-border: #E65100;
+    --green: #2E7D32;      /* Management & Monitoring — vivid green */
+    --green-bg: #E8F5E9;
+    --green-border: #1B5E20;
+    --neutral: #546E7A;
+    --neutral-bg: #ECEFF1;
+    --neutral-border: #455A64;
+    --ink: #E8EEF7;
+    --line: #90A4AE;
+    --page: #0B2748; /* matches slide navy mid-tone (#00183D → #102E53 → #001C41) */
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: #CFD8DC;
+    color: #263238;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 16px;
+    background: #263238;
+    color: #fff;
+    position: sticky;
+    top: 0;
+    z-index: 10;
+  }
+  .toolbar h1 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0;
+    margin-right: auto;
+  }
+  .toolbar button {
+    border: 0;
+    border-radius: 8px;
+    padding: 8px 14px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    background: #42A5F5;
+    color: #fff;
+  }
+  .toolbar button.secondary {
+    background: #546E7A;
+  }
+  .toolbar button:hover { filter: brightness(1.08); }
+  .hint {
+    font-size: 12px;
+    opacity: 0.85;
+    width: 100%;
+  }
+
+  .stage {
+    padding: 24px;
+    display: flex;
+    justify-content: center;
+  }
+
+  /* Export target — fixed presentation canvas (16:9-ish landscape) */
+  #diagram {
+    width: 1400px;
+    background: var(--page-grad);
+    border-radius: 0;
+    box-shadow: none;
+    padding: 28px 32px 24px;
+    position: relative;
+  }
+
+  .title { display: none; }
+  .subtitle { display: none; }
+
+  .legend {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    flex-wrap: wrap;
+    margin-bottom: 22px;
+    margin-top: 4px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 2px solid;
+  }
+  .legend-item .swatch {
+    width: 14px;
+    height: 14px;
+    border-radius: 3px;
+  }
+  .leg-blue { color: var(--blue-border); border-color: var(--blue); background: var(--blue-bg); }
+  .leg-blue .swatch { background: var(--blue); }
+  .leg-orange { color: var(--orange-border); border-color: var(--orange); background: var(--orange-bg); }
+  .leg-orange .swatch { background: var(--orange); }
+  .leg-green { color: var(--green-border); border-color: var(--green); background: var(--green-bg); }
+  .leg-green .swatch { background: var(--green); }
+  .leg-neutral { color: var(--neutral-border); border-color: var(--neutral); background: var(--neutral-bg); }
+  .leg-neutral .swatch { background: var(--neutral); }
+
+  .columns {
+    display: grid;
+    grid-template-columns: 200px 1fr 1.15fr;
+    gap: 22px;
+    align-items: stretch;
+  }
+
+  .zone {
+    border: 2.5px dashed;
+    border-radius: 14px;
+    padding: 14px 14px 16px;
+    position: relative;
+    min-height: 420px;
+  }
+  .zone-title {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 700;
+    margin: 0 0 14px;
+  }
+
+  .zone-edge {
+    border-color: #FB8C00;
+    background: linear-gradient(180deg, #FFF8E1 0%, #FFFDE7 100%);
+  }
+  .zone-edge .zone-title { color: #E65100; }
+
+  .zone-gw {
+    border-color: #78909C;
+    background: #F7F9FA;
+  }
+  .zone-gw .zone-title { color: #37474F; }
+
+  .zone-pc {
+    border-color: var(--green);
+    background: linear-gradient(180deg, #E8F5E9 0%, #F1F8E9 100%);
+  }
+  .zone-pc .zone-title { color: var(--green-border); }
+
+  .stack {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    align-items: stretch;
+  }
+
+  .box {
+    border-radius: 10px;
+    border: 2px solid;
+    padding: 10px 12px;
+    text-align: center;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+  .box .name {
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .box .meta {
+    font-size: 11px;
+    margin-top: 3px;
+    opacity: 0.85;
+    font-weight: 500;
+  }
+
+  .c-blue { border-color: var(--blue); background: var(--blue-bg); color: var(--blue-border); }
+  .c-orange { border-color: var(--orange); background: var(--orange-bg); color: var(--orange-border); }
+  .c-green { border-color: var(--green); background: var(--green-bg); color: var(--green-border); }
+  .c-neutral { border-color: var(--neutral); background: var(--neutral-bg); color: var(--neutral-border); }
+
+  .section-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin: 4px 0 2px;
+    opacity: 0.9;
+  }
+  .sec-blue { color: var(--blue); }
+  .sec-orange { color: var(--orange); }
+  .sec-green { color: var(--green); }
+  .sec-neutral { color: var(--neutral); }
+
+  .gw-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .gw-col {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .flow-row {
+    display: grid;
+    grid-template-columns: 200px 1fr 1.15fr;
+    gap: 22px;
+    margin-top: 14px;
+    align-items: center;
+  }
+  .flow-label {
+    font-size: 12px;
+    font-weight: 600;
+    color: #455A64;
+    text-align: center;
+    padding: 8px 10px;
+    border-radius: 8px;
+    background: #ECEFF1;
+    border: 1px solid #B0BEC5;
+  }
+
+  .arrows {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--line);
+    font-weight: 600;
+  }
+  .arrows span {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .arrows .pipe {
+    flex: 1;
+    height: 2px;
+    background: var(--line);
+    position: relative;
+  }
+  .arrows .pipe::after {
+    content: "";
+    position: absolute;
+    right: -1px;
+    top: -4px;
+    border: 5px solid transparent;
+    border-left: 7px solid var(--line);
+  }
+
+  .footnote {
+    margin-top: 16px;
+    font-size: 11px;
+    color: #607D8B;
+    text-align: center;
+    line-height: 1.45;
+  }
+
+  @media print {
+    .toolbar { display: none; }
+    body { background: #fff; }
+    .stage { padding: 0; }
+    #diagram { box-shadow: none; border-radius: 0; }
+  }
+
+  body.export-mode .toolbar { display: none; }
+  body.export-mode { background: #0B2748; }
+  body.export-mode .stage { padding: 0; }
+  body.export-mode #diagram { box-shadow: none; border-radius: 0; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>IoT-SecureGate — Top-level architecture</h1>
+    <button type="button" id="btn-png" title="Download PNG for Canva">Export PNG</button>
+    <button type="button" class="secondary" id="btn-svg" title="Download SVG (vector)">Export SVG</button>
+    <div class="hint">Open this file in Chrome/Edge → Export PNG → upload into Canva. Colors mark thesis ownership.</div>
+  </div>
+
+  <div class="stage">
+    <div id="diagram">
+      <div class="legend">
+        <div class="legend-item leg-blue"><span class="swatch"></span> Security Core</div>
+        <div class="legend-item leg-orange"><span class="swatch"></span> Intelligent Protection</div>
+        <div class="legend-item leg-green"><span class="swatch"></span> Management &amp; Monitoring</div>
+        <div class="legend-item leg-neutral"><span class="swatch"></span> Shared / edge</div>
+      </div>
+
+      <div class="columns">
+        <!-- EDGE -->
+        <div class="zone zone-edge">
+          <div class="zone-title">Edge sensors</div>
+          <div class="stack" style="justify-content:center; min-height:360px;">
+            <div class="box c-neutral">
+              <div class="name">Sensors /<br/>fake sensors</div>
+              <div class="meta">Publish telemetry</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- GATEWAY -->
+        <div class="zone zone-gw">
+          <div class="zone-title">Gateway device</div>
+          <div class="gw-grid">
+            <div class="gw-col">
+              <div class="section-label sec-blue">Security Core</div>
+              <div class="box c-blue">
+                <div class="name">Mosquitto MQTTS</div>
+                <div class="meta">Secure broker · mTLS + ACL</div>
+              </div>
+              <div class="box c-blue">
+                <div class="name">Decrypt + Schema</div>
+                <div class="meta">Decrypt and validate payloads</div>
+              </div>
+              <div class="box c-blue">
+                <div class="name">Day crypto / CA</div>
+                <div class="meta">Daily keys and certificate signing</div>
+              </div>
+              <div class="box c-blue">
+                <div class="name">Kafka KRaft</div>
+                <div class="meta">Per-sensor message storage</div>
+              </div>
+            </div>
+            <div class="gw-col">
+              <div class="section-label sec-neutral">API agent</div>
+              <div class="box c-neutral">
+                <div class="name">API IoT Gateway Agent</div>
+                <div class="meta">API server managing gateway activities</div>
+              </div>
+              <div class="section-label sec-orange">Intelligent Protection</div>
+              <div class="box c-orange">
+                <div class="name">DeniedWatcher</div>
+                <div class="meta">Record invalid access attempts</div>
+              </div>
+              <div class="box c-orange">
+                <div class="name">Auto prevent</div>
+                <div class="meta">Quarantine abusive sources</div>
+              </div>
+              <div class="box c-orange">
+                <div class="name">IDS</div>
+                <div class="meta">Detect malicious traffic patterns</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- OPERATOR PC -->
+        <div class="zone zone-pc">
+          <div class="zone-title">Monitoring App</div>
+          <div class="section-label sec-green">Management &amp; Monitoring</div>
+          <div class="stack">
+            <div class="box c-green">
+              <div class="name">Desktop UI</div>
+              <div class="meta">Wizard, Gateways, Monitoring, Settings</div>
+            </div>
+            <div class="box c-green">
+              <div class="name">Control service</div>
+              <div class="meta">Provision, registry, day-2 control</div>
+            </div>
+            <div class="box c-green">
+              <div class="name">Prometheus</div>
+              <div class="meta">Scrape and store gateway metrics</div>
+            </div>
+            <div class="box c-green">
+              <div class="name">Loki</div>
+              <div class="meta">Receive and store shipped logs</div>
+            </div>
+            <div class="box c-green">
+              <div class="name">Grafana</div>
+              <div class="meta">Dashboards and visualization</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (params.get("export") === "1" || params.get("print") === "1") {
+    document.body.classList.add("export-mode");
+  }
+
+  const diagram = document.getElementById("diagram");
+
+  function downloadBlob(blob, filename) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  }
+
+  // --- PNG via Canvas (no external CDN) ---
+  async function exportPng() {
+    const scale = 2; // retina-ish for Canva
+    const rect = diagram.getBoundingClientRect();
+    const w = Math.ceil(diagram.offsetWidth);
+    const h = Math.ceil(diagram.offsetHeight);
+    const canvas = document.createElement("canvas");
+    canvas.width = w * scale;
+    canvas.height = h * scale;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(scale, scale);
+    ctx.fillStyle = "#FAFBFC";
+    ctx.fillRect(0, 0, w, h);
+
+    // Serialize DOM to SVG foreignObject for crisp text
+    const clone = diagram.cloneNode(true);
+    clone.style.margin = "0";
+    clone.style.boxShadow = "none";
+    const styleText = Array.from(document.querySelectorAll("style"))
+      .map((s) => s.textContent)
+      .join("\n");
+    const xhtml = new XMLSerializer().serializeToString(clone);
+    const svg =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+      `<foreignObject width="100%" height="100%">` +
+      `<div xmlns="http://www.w3.org/1999/xhtml">` +
+      `<style>${styleText}</style>${xhtml}</div></foreignObject></svg>`;
+
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml;charset=utf-8" }));
+    await new Promise((resolve, reject) => {
+      img.onload = resolve;
+      img.onerror = reject;
+      img.src = url;
+    });
+    ctx.drawImage(img, 0, 0);
+    URL.revokeObjectURL(url);
+
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        alert("PNG export failed in this browser. Try Chrome/Edge, or use Export SVG.");
+        return;
+      }
+      downloadBlob(blob, "iot-securegate-arch-toplevel-thesis-colors.png");
+    }, "image/png");
+  }
+
+  // --- SVG export of the same foreignObject approach ---
+  function exportSvg() {
+    const w = Math.ceil(diagram.offsetWidth);
+    const h = Math.ceil(diagram.offsetHeight);
+    const clone = diagram.cloneNode(true);
+    clone.style.margin = "0";
+    clone.style.boxShadow = "none";
+    const styleText = Array.from(document.querySelectorAll("style"))
+      .map((s) => s.textContent)
+      .join("\n");
+    const xhtml = new XMLSerializer().serializeToString(clone);
+    const svg =
+      `<?xml version="1.0" encoding="UTF-8"?>\n` +
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}">` +
+      `<foreignObject width="100%" height="100%">` +
+      `<div xmlns="http://www.w3.org/1999/xhtml">` +
+      `<style>${styleText}</style>${xhtml}</div></foreignObject></svg>`;
+    downloadBlob(
+      new Blob([svg], { type: "image/svg+xml;charset=utf-8" }),
+      "iot-securegate-arch-toplevel-thesis-colors.svg"
+    );
+  }
+
+  document.getElementById("btn-png").addEventListener("click", () => {
+    exportPng().catch((err) => {
+      console.error(err);
+      alert("PNG export failed. Use Chrome/Edge, or Export SVG and import that into Canva.");
+    });
+  });
+  document.getElementById("btn-svg").addEventListener("click", exportSvg);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IoT-SecureGate — Monitoring Platform Structure</title>
+<style>
+  :root {
+    --green: #2E7D32;
+    --green-bg: #E8F5E9;
+    --green-border: #1B5E20;
+    --green-soft: #A5D6A7;
+    --neutral: #78909C;
+    --neutral-bg: #ECEFF1;
+    --neutral-border: #455A64;
+    --line: #90A4AE;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+    background: #0B2748;
+    color: #263238;
+  }
+
+  .toolbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    padding: 12px 16px;
+    background: #263238;
+    color: #fff;
+  }
+  .toolbar h1 { font-size: 15px; font-weight: 600; margin: 0; margin-right: auto; }
+  .toolbar button {
+    border: 0; border-radius: 8px; padding: 8px 14px;
+    font-size: 13px; font-weight: 600; cursor: pointer;
+    background: #42A5F5; color: #fff;
+  }
+
+  .stage { padding: 0; display: flex; justify-content: center; }
+
+  #diagram {
+    width: 1400px;
+    background: var(--page-grad);
+    padding: 36px 40px 32px;
+    position: relative;
+  }
+
+  .layer {
+    display: flex;
+    justify-content: center;
+    gap: 18px;
+    margin: 0 auto;
+  }
+
+  .box {
+    border-radius: 12px;
+    border: 2.5px solid;
+    padding: 14px 18px;
+    text-align: center;
+    background: var(--green-bg);
+    border-color: var(--green);
+    color: var(--green-border);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+    min-width: 200px;
+  }
+  .box .name {
+    font-size: 16px;
+    font-weight: 700;
+    line-height: 1.25;
+  }
+  .box .meta {
+    font-size: 12px;
+    margin-top: 4px;
+    font-weight: 500;
+    opacity: 0.9;
+  }
+
+  .box.shell {
+    min-width: 520px;
+    background: #C8E6C9;
+    border-color: var(--green-border);
+  }
+  .box.obs {
+    min-width: 720px;
+  }
+  .box.state {
+    background: var(--neutral-bg);
+    border-color: var(--neutral);
+    color: var(--neutral-border);
+    min-width: 240px;
+  }
+
+  .connector {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    margin: 6px 0;
+    color: var(--line);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .connector .v {
+    width: 2px;
+    height: 18px;
+    background: var(--line);
+  }
+  .connector .label {
+    background: rgba(16, 46, 83, 0.85);
+    color: #CFD8DC;
+    padding: 2px 10px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    margin: 2px 0;
+  }
+
+  .fork {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    width: 780px;
+    margin: 0 auto;
+    position: relative;
+  }
+  .fork::before {
+    content: "";
+    position: absolute;
+    top: -12px;
+    left: 25%;
+    right: 25%;
+    height: 2px;
+    background: var(--line);
+  }
+  .fork-col {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+  .fork-col .stub {
+    width: 2px;
+    height: 12px;
+    background: var(--line);
+    margin-bottom: 4px;
+  }
+
+  .join-labels {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+    width: 780px;
+    margin: 4px auto 0;
+  }
+  .join-labels span {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #B0BEC5;
+  }
+
+  .state-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 18px;
+    width: 900px;
+    margin: 0 auto;
+  }
+
+  .band-label {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #81C784;
+    margin: 10px 0 8px;
+  }
+
+  body.export-mode .toolbar { display: none; }
+  body.export-mode { background: #0B2748; }
+</style>
+</head>
+<body>
+  <div class="toolbar">
+    <h1>Monitoring Platform Structure</h1>
+    <button type="button" onclick="location.search='?export=1'">Export mode</button>
+  </div>
+
+  <div class="stage">
+    <div id="diagram">
+      <div class="band-label">Process layer</div>
+      <div class="layer">
+        <div class="box shell">
+          <div class="name">Desktop shell</div>
+          <div class="meta">Launcher · process manager · GUI host</div>
+        </div>
+      </div>
+
+      <div class="connector"><div class="v"></div></div>
+
+      <div class="fork">
+        <div class="fork-col">
+          <div class="stub"></div>
+          <div class="box">
+            <div class="name">Wizard / UI</div>
+            <div class="meta">Port 9138 · interface · SSH discovery</div>
+          </div>
+        </div>
+        <div class="fork-col">
+          <div class="stub"></div>
+          <div class="box">
+            <div class="name">Control service</div>
+            <div class="meta">Port 9137 · registry · day-2 · queries</div>
+          </div>
+        </div>
+      </div>
+      <div class="join-labels">
+        <span>install · configure</span>
+        <span>query metrics &amp; logs</span>
+      </div>
+
+      <div class="connector"><div class="v"></div></div>
+
+      <div class="band-label">Observability stack</div>
+      <div class="layer">
+        <div class="box obs">
+          <div class="name">Loki · Prometheus · Grafana</div>
+          <div class="meta">Ports 3100 · 9090 · 9140 — local metrics, logs, dashboards</div>
+        </div>
+      </div>
+
+      <div class="connector"><div class="v"></div><div class="label">local state</div><div class="v"></div></div>
+
+      <div class="band-label">Persistent state</div>
+      <div class="state-row">
+        <div class="box state">
+          <div class="name">Local registry</div>
+          <div class="meta">Gateways · devices</div>
+        </div>
+        <div class="box state">
+          <div class="name">OS keyring</div>
+          <div class="meta">CA · sudo · admin PIN</div>
+        </div>
+        <div class="box state">
+          <div class="name">Application data</div>
+          <div class="meta">Settings · drafts</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const params = new URLSearchParams(location.search);
+  if (params.get("export") === "1" || params.get("print") === "1") {
+    document.body.classList.add("export-mode");
+  }
+})();
+</script>
+</body>
+</html>

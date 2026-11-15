@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>SC-1 Device Registration</title>
+<style>
+  :root {
+    --blue: #1565C0;
+    --blue-border: #0D47A1;
+    --blue-soft: #90CAF9;
+    --neutral: #546E7A;
+    --neutral-border: #37474F;
+    --green: #2E7D32;
+    --ink: #E8EEF7;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0B2748; }
+  body.export-mode .toolbar { display: none; }
+  .toolbar { display: flex; gap: 10px; padding: 10px 14px; background: #263238; color: #fff; }
+  .toolbar h1 { font-size: 14px; margin: 0; margin-right: auto; }
+  .stage { display: flex; justify-content: center; }
+  #diagram {
+    width: 1680px;
+    background: var(--page-grad);
+    padding: 48px 48px 44px;
+    color: var(--ink);
+  }
+  .top {
+    display: grid;
+    grid-template-columns: 1fr 120px 1fr;
+    gap: 18px;
+    align-items: center;
+    margin-bottom: 32px;
+  }
+  .actor {
+    border-radius: 16px;
+    border: 2.5px solid;
+    padding: 22px 20px;
+    text-align: center;
+    min-height: 110px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+  }
+  .actor.app {
+    background: rgba(232, 245, 233, 0.96);
+    border-color: var(--green);
+    color: #1B5E20;
+  }
+  .actor.gw {
+    background: rgba(236, 239, 241, 0.96);
+    border-color: var(--neutral);
+    color: var(--neutral-border);
+  }
+  .actor .role {
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    opacity: 0.8;
+    margin-bottom: 6px;
+  }
+  .actor .name { font-size: 24px; font-weight: 800; }
+  .actor .meta { font-size: 14px; font-weight: 600; margin-top: 6px; opacity: 0.85; }
+  .ssh {
+    text-align: center;
+    color: #81C784;
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .ssh .arrow { font-size: 28px; line-height: 1; margin-top: 4px; }
+  .rows { display: flex; flex-direction: column; gap: 18px; }
+  .row {
+    display: flex;
+    justify-content: center;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .step {
+    width: 210px;
+    background: rgba(227, 242, 253, 0.96);
+    border: 2.5px solid var(--blue);
+    border-radius: 14px;
+    padding: 20px 14px;
+    text-align: center;
+    color: var(--blue-border);
+  }
+  .step .num {
+    display: inline-flex;
+    width: 36px;
+    height: 36px;
+    border-radius: 999px;
+    background: var(--blue);
+    color: #fff;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+    font-weight: 800;
+    margin-bottom: 10px;
+  }
+  .step .title { font-size: 17px; font-weight: 800; line-height: 1.25; }
+  .step .sub { font-size: 13px; font-weight: 600; margin-top: 8px; opacity: 0.85; line-height: 1.35; }
+  .arrow {
+    display: flex;
+    align-items: center;
+    color: var(--blue-soft);
+    font-size: 28px;
+    font-weight: 900;
+    padding: 0 2px;
+  }
+</style>
+</head>
+<body>
+  <div class="toolbar"><h1>SC-1 Device Registration</h1></div>
+  <div class="stage">
+    <div id="diagram">
+      <div class="top">
+        <div class="actor app">
+          <div class="role">Operator</div>
+          <div class="name">Monitoring App</div>
+          <div class="meta">Control Plane · Register Device</div>
+        </div>
+        <div class="ssh">SSH playbook<div class="arrow">⟶</div></div>
+        <div class="actor gw">
+          <div class="role">Edge host</div>
+          <div class="name">Gateway</div>
+          <div class="meta">Mosquitto · Agent · Kafka</div>
+        </div>
+      </div>
+      <div class="rows">
+        <div class="row">
+          <div class="step"><div class="num">01</div><div class="title">Capacity</div><div class="sub">Disk · Kafka catalog</div></div>
+          <div class="arrow">›</div>
+          <div class="step"><div class="num">02</div><div class="title">MQTT user</div><div class="sub">Username · password hash</div></div>
+          <div class="arrow">›</div>
+          <div class="step"><div class="num">03</div><div class="title">Topic ACL</div><div class="sub">Publish rights</div></div>
+          <div class="arrow">›</div>
+          <div class="step"><div class="num">04</div><div class="title">mTLS cert</div><div class="sub">CA-signed client</div></div>
+        </div>
+        <div class="row">
+          <div class="step"><div class="num">05</div><div class="title">Crypto + schema</div><div class="sub">Envelope secrets</div></div>
+          <div class="arrow">›</div>
+          <div class="step"><div class="num">06</div><div class="title">Kafka topic</div><div class="sub">sensor.&lt;device_id&gt;</div></div>
+          <div class="arrow">›</div>
+          <div class="step"><div class="num">07</div><div class="title">Ready</div><div class="sub">Mosquitto reload</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

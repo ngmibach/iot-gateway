@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IoT-SecureGate — Delivery Strategy</title>
+<style>
+  :root {
+    --green: #2E7D32;
+    --green-bg: #E8F5E9;
+    --green-border: #1B5E20;
+    --green-mid: #C8E6C9;
+    --neutral: #546E7A;
+    --neutral-bg: #ECEFF1;
+    --neutral-border: #37474F;
+    --blue: #1565C0;
+    --blue-bg: #E3F2FD;
+    --blue-border: #0D47A1;
+    --line: #90A4AE;
+    --ink: #E8EEF7;
+    --muted: #B0BEC5;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0B2748; }
+  .toolbar { display: flex; gap: 10px; padding: 10px 14px; background: #263238; color: #fff; }
+  .toolbar h1 { font-size: 14px; margin: 0; margin-right: auto; }
+  body.export-mode .toolbar { display: none; }
+  .stage { display: flex; justify-content: center; }
+
+  #diagram {
+    width: 1480px;
+    background: var(--page-grad);
+    padding: 36px 40px 28px;
+    color: var(--ink);
+  }
+
+  .source {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 8px;
+  }
+  .source .box {
+    min-width: 420px;
+    background: var(--blue-bg);
+    border: 2.5px solid var(--blue);
+    color: var(--blue-border);
+    border-radius: 14px;
+    padding: 14px 20px;
+    text-align: center;
+    box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+  }
+  .source .name { font-size: 18px; font-weight: 800; }
+  .source .meta { font-size: 12px; font-weight: 600; margin-top: 4px; opacity: 0.9; }
+
+  .vconn {
+    display: flex; flex-direction: column; align-items: center;
+    margin: 6px 0;
+  }
+  .vconn .shaft { width: 3px; height: 22px; background: var(--line); }
+  .vconn .head {
+    width: 0; height: 0;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-top: 10px solid var(--line);
+  }
+  .vconn .label {
+    margin: 3px 0;
+    padding: 3px 12px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 700;
+    background: rgba(16,46,83,0.9);
+    border: 1px solid var(--line);
+    color: var(--muted);
+  }
+
+  .pipelines {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 28px;
+    margin: 4px 0 8px;
+  }
+  .pipe {
+    border: 2px solid rgba(129, 199, 132, 0.55);
+    border-radius: 16px;
+    padding: 16px 18px 14px;
+    background: rgba(16, 46, 83, 0.35);
+  }
+  .pipe .ptitle {
+    text-align: center;
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: #81C784;
+    margin-bottom: 12px;
+  }
+  .step {
+    background: var(--green-bg);
+    border: 2px solid var(--green);
+    color: var(--green-border);
+    border-radius: 10px;
+    padding: 10px 14px;
+    text-align: center;
+    margin: 0 auto;
+    max-width: 340px;
+  }
+  .step .name { font-size: 14px; font-weight: 800; line-height: 1.25; }
+  .step .meta { font-size: 11px; font-weight: 600; margin-top: 3px; opacity: 0.88; }
+  .step.artifact {
+    background: var(--green-mid);
+    border-color: var(--green-border);
+  }
+
+  .handoff {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr auto 1fr;
+    gap: 10px;
+    align-items: center;
+    margin-top: 18px;
+  }
+  .handoff .box {
+    border-radius: 12px;
+    padding: 14px 16px;
+    text-align: center;
+    border: 2.5px solid;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  }
+  .handoff .box .name { font-size: 15px; font-weight: 800; line-height: 1.25; }
+  .handoff .box .meta { font-size: 12px; font-weight: 600; margin-top: 4px; opacity: 0.9; }
+  .handoff .merge {
+    background: var(--neutral-bg);
+    border-color: var(--neutral);
+    color: var(--neutral-border);
+  }
+  .handoff .release {
+    background: #FFF8E1;
+    border-color: #F9A825;
+    color: #F57F17;
+  }
+  .handoff .operator {
+    background: var(--green-bg);
+    border-color: var(--green-border);
+    color: var(--green-border);
+  }
+  .handoff .hlabel {
+    text-align: center;
+    font-size: 11px;
+    font-weight: 800;
+    color: var(--muted);
+    line-height: 1.3;
+    max-width: 90px;
+  }
+
+  .footnote {
+    margin-top: 18px;
+    text-align: center;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .footnote strong { color: #81C784; }
+</style>
+</head>
+<body>
+  <div class="toolbar"><h1>Delivery strategy</h1></div>
+  <div class="stage">
+    <div id="diagram">
+      <div class="source">
+        <div class="box">
+          <div class="name">Shared source tree</div>
+          <div class="meta">One recipe · packaging branches · or manual CI run</div>
+        </div>
+      </div>
+
+      <div class="vconn">
+        <div class="label">push / trigger</div>
+        <div class="shaft"></div>
+        <div class="head"></div>
+      </div>
+
+      <div class="pipelines">
+        <div class="pipe">
+          <div class="ptitle">Windows pipeline</div>
+          <div class="step">
+            <div class="name">Hosted Windows runner</div>
+            <div class="meta">Native build of that platform</div>
+          </div>
+          <div class="vconn"><div class="shaft"></div><div class="head"></div></div>
+          <div class="step artifact">
+            <div class="name">Windows .exe + digest</div>
+            <div class="meta">IoT Gateway Monitor installer</div>
+          </div>
+        </div>
+        <div class="pipe">
+          <div class="ptitle">Linux pipeline</div>
+          <div class="step">
+            <div class="name">Hosted Linux runner</div>
+            <div class="meta">Native build of that platform</div>
+          </div>
+          <div class="vconn"><div class="shaft"></div><div class="head"></div></div>
+          <div class="step artifact">
+            <div class="name">Linux AppImage + digest</div>
+            <div class="meta">Same contents · different envelope</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="vconn">
+        <div class="label">publish</div>
+        <div class="shaft"></div>
+        <div class="head"></div>
+      </div>
+
+      <div class="handoff">
+        <div class="box merge">
+          <div class="name">Build artifacts</div>
+          <div class="meta">exe · AppImage · digests</div>
+        </div>
+        <div class="hlabel">flattened<br/>to one tag</div>
+        <div class="box release">
+          <div class="name">Standing release</div>
+          <div class="meta">Assets replaced in place<br/>one permanent address</div>
+        </div>
+        <div class="hlabel">one manual<br/>download</div>
+        <div class="box operator">
+          <div class="name">Operator PC</div>
+          <div class="meta">Install Monitoring App<br/>no developer rebuild</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+<script>
+(function () {
+  const p = new URLSearchParams(location.search);
+  if (p.get('export') === '1' || p.get('print') === '1') document.body.classList.add('export-mode');
+})();
+</script>
+</body>
+</html>

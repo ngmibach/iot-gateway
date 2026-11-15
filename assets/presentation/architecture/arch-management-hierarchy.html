@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>IoT-SecureGate — Action → Resource Matrix</title>
+<style>
+  :root {
+    --green: #2E7D32;
+    --green-bg: #E8F5E9;
+    --green-border: #1B5E20;
+    --neutral: #546E7A;
+    --neutral-bg: #ECEFF1;
+    --neutral-border: #37474F;
+    --orange: #EF6C00;
+    --orange-bg: #FFF3E0;
+    --orange-border: #E65100;
+    --blue: #1565C0;
+    --blue-bg: #E3F2FD;
+    --ink: #E8EEF7;
+    --muted: #B0BEC5;
+    --page-grad: linear-gradient(135deg, #00183D 0%, #102E53 50%, #001C41 100%);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: "Segoe UI", system-ui, sans-serif; background: #0B2748; }
+  .toolbar { display: flex; gap: 10px; padding: 10px 14px; background: #263238; color: #fff; }
+  .toolbar h1 { font-size: 14px; margin: 0; margin-right: auto; }
+  body.export-mode .toolbar { display: none; }
+  .stage { display: flex; justify-content: center; }
+
+  #diagram {
+    width: 1480px;
+    background: var(--page-grad);
+    padding: 28px 32px 24px;
+    color: var(--ink);
+  }
+
+  .header-row {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1fr;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  .col-head {
+    text-align: center;
+    font-size: 15px;
+    font-weight: 800;
+    padding: 10px 12px;
+    border-radius: 10px;
+    border: 2px solid;
+  }
+  .col-head.app { background: var(--green-bg); color: var(--green-border); border-color: var(--green); }
+  .col-head.gw { background: var(--neutral-bg); color: var(--neutral-border); border-color: var(--neutral); }
+  .col-head.sensor { background: var(--orange-bg); color: var(--orange-border); border-color: var(--orange); }
+  .col-head .sub { display: block; font-size: 11px; font-weight: 600; opacity: 0.85; margin-top: 2px; }
+
+  .band {
+    margin: 10px 0 6px;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #81C784;
+  }
+  .band.inbound { color: #64B5F6; }
+
+  .row {
+    display: grid;
+    grid-template-columns: 1.15fr 1fr 1fr;
+    gap: 14px;
+    align-items: stretch;
+    margin-bottom: 7px;
+  }
+
+  .action {
+    background: rgba(232, 245, 233, 0.95);
+    border: 1.5px solid var(--green);
+    border-radius: 8px;
+    padding: 8px 12px;
+    color: var(--green-border);
+  }
+  .action .name { font-size: 13px; font-weight: 800; line-height: 1.2; }
+  .action .via { font-size: 11px; margin-top: 2px; font-weight: 600; opacity: 0.85; }
+
+  .target {
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-size: 12px;
+    font-weight: 650;
+    line-height: 1.35;
+    display: flex;
+    align-items: center;
+  }
+  .target.gw {
+    background: rgba(236, 239, 241, 0.95);
+    border: 1.5px solid var(--neutral);
+    color: var(--neutral-border);
+  }
+  .target.sensor {
+    background: rgba(255, 243, 224, 0.95);
+    border: 1.5px solid var(--orange);
+    color: var(--orange-border);
+  }
+  .target.empty {
+    background: transparent;
+    border: 1.5px dashed rgba(144, 164, 174, 0.45);
+    color: var(--muted);
+    font-weight: 600;
+    font-style: italic;
+    justify-content: center;
+  }
+  .target .arrow {
+    color: #81C784;
+    font-weight: 900;
+    margin-right: 6px;
+  }
+
+  .row.inbound .action {
+    background: rgba(227, 242, 253, 0.95);
+    border-color: var(--blue);
+    color: #0D47A1;
+  }
+  .row.inbound .target.gw { border-color: #90CAF9; }
+  .row.inbound .target .arrow { color: #64B5F6; }
+
+  .legend {
+    display: flex;
+    gap: 18px;
+    justify-content: center;
+    margin-top: 14px;
+    flex-wrap: wrap;
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--muted);
+  }
+  .legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(144,164,174,0.5);
+  }
+  .swatch { width: 12px; height: 12px; border-radius: 3px; }
+</style>
+</head>
+<body>
+  <div class="toolbar"><h1>Action → resource matrix</h1></div>
+  <div class="stage">
+    <div id="diagram">
+      <div class="header-row">
+        <div class="col-head app">Monitoring App<span class="sub">Action triggered in the UI</span></div>
+        <div class="col-head gw">Gateway<span class="sub">What changes on the host</span></div>
+        <div class="col-head sensor">Sensor / device<span class="sub">What the device experiences</span></div>
+      </div>
+
+      <div class="band">Outbound control — App acts on Gateway / Sensor</div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Install / Remove gateway</div>
+          <div class="via">Gateways · SSH provision</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>Agent · Mosquitto · Kafka · CA · scrape target</div>
+        <div class="target empty">no direct sensor change</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Register device / Create fake</div>
+          <div class="via">Control Plane · Registration</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>MQTT user · ACL · client cert · Kafka topic</div>
+        <div class="target sensor"><span class="arrow">→</span>New identity · publish rights · (fake unit stopped)</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Block / Restore publish</div>
+          <div class="via">Control Plane · Control</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>Rewrite Mosquitto write ACL</div>
+        <div class="target sensor"><span class="arrow">→</span>Cannot / can publish · fake unit stopped on block</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Arm Auto prevent / Lift quarantine</div>
+          <div class="via">Control Plane · Control</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>auto_prevent.json · firewall DROP helper</div>
+        <div class="target sensor"><span class="arrow">→</span>Sensor IP dropped / released at host firewall</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Clear Kafka history</div>
+          <div class="via">Control Plane · Control</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>Delete &amp; recreate device topic/stream</div>
+        <div class="target sensor"><span class="arrow">→</span>Stored history emptied · registration kept</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">Fake Start / Stop / Simulate</div>
+          <div class="via">Control Plane · Simulate</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>iotgw-fake@ unit · bridge IP · payload push</div>
+        <div class="target sensor"><span class="arrow">→</span>Lab unit runs / stops · publishes MQTTS envelopes</div>
+      </div>
+
+      <div class="row">
+        <div class="action">
+          <div class="name">IDS Enable / Disable</div>
+          <div class="via">Security page</div>
+        </div>
+        <div class="target gw"><span class="arrow">→</span>IDS systemd service only</div>
+        <div class="target empty">alerts only — no ACL / quarantine change</div>
+      </div>
+
+      <div class="band inbound">Inbound observe — Gateway / Sensor report back to App</div>
+
+      <div class="row inbound">
+        <div class="action">
+          <div class="name">Gateway Metric view</div>
+          <div class="via">reads control-service summaries</div>
+        </div>
+        <div class="target gw"><span class="arrow">←</span>/metrics · host + Agent/MQTT/Decrypt/Shipper/Kafka</div>
+        <div class="target empty">aggregate host health</div>
+      </div>
+
+      <div class="row inbound">
+        <div class="action">
+          <div class="name">Gateway Activities view</div>
+          <div class="via">rates · delay · denials · invalids</div>
+        </div>
+        <div class="target gw"><span class="arrow">←</span>Counters · Loki shipper · refusal log</div>
+        <div class="target sensor"><span class="arrow">←</span>Per-device volume · Fake/Real · quarantine badge</div>
+      </div>
+
+      <div class="row inbound">
+        <div class="action">
+          <div class="name">Alarm banner / IDS alerts</div>
+          <div class="via">Activities · Security</div>
+        </div>
+        <div class="target gw"><span class="arrow">←</span>Invalid burst · quarantine state · ids-alerts</div>
+        <div class="target sensor"><span class="arrow">←</span>Which device / IP triggered the event</div>
+      </div>
+
+      <div class="legend">
+        <span><i class="swatch" style="background:#2E7D32"></i> App action</span>
+        <span><i class="swatch" style="background:#546E7A"></i> Gateway resource</span>
+        <span><i class="swatch" style="background:#EF6C00"></i> Sensor resource</span>
+        <span>→ control &nbsp;·&nbsp; ← observe</span>
+      </div>
+    </div>
+  </div>
+<script>
+(function () {
+  const p = new URLSearchParams(location.search);
+  if (p.get('export') === '1' || p.get('print') === '1') document.body.classList.add('export-mode');
+})();
+</script>
+</body>
+</html>
