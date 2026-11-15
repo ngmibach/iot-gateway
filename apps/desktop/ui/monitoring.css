@@ -261,4 +261,39 @@ th { color: var(--muted); font-weight: 600; font-size: 0.75rem; text-transform: 
   vertical-align: middle;
 }
 .chart-grid-1 { grid-template-columns: 1fr; }
+.kafka-storage-body {
+  min-height: 4.5rem;
+  display: flex;
+  align-items: center;
+  padding: 0.85rem 1rem 1rem;
+}
+.kafka-storage-bar { width: 100%; }
+.kafka-storage-track {
+  height: 0.7rem;
+  background: #0b1118;
+  border-radius: 999px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+.kafka-storage-fill {
+  height: 100%;
+  width: 0%;
+  background: linear-gradient(90deg, #3d8bfd, #4da3ff);
+  border-radius: 999px;
+  transition: width 0.25s ease;
+}
+.kafka-storage-bar.is-over .kafka-storage-fill {
+  background: linear-gradient(90deg, #c9a227, #e0b83a);
+}
+.kafka-storage-caption {
+  margin-top: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.kafka-storage-empty {
+  width: 100%;
+  text-align: center;
+  font-size: 0.9rem;
+}
 .hidden { display: none !important; }

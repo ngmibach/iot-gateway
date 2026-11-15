@@ -11,7 +11,9 @@ from actions.kafka_capacity import (
     kafka_topic_name,
     max_sensor_slots,
     parse_df_total_bytes,
+    parse_du_topic_sizes,
     plan_capacity,
+    topic_name_from_log_dir,
 )
 from actions.kafka_topics import TopicCatalog
 from actions.playbooks import gateway_kafka_capacity, register_device, unregister_device
@@ -50,6 +52,28 @@ class TestCapacityMath(unittest.TestCase):
     def test_parse_df_total(self) -> None:
         line = "/dev/root 10485760 1000 10484760 1% /\n"
         self.assertEqual(parse_df_total_bytes(line), 10485760 * 1024)
+
+    def test_topic_name_from_log_dir(self) -> None:
+        self.assertEqual(topic_name_from_log_dir("sensor.fake1-0"), "sensor.fake1")
+        self.assertEqual(
+            topic_name_from_log_dir("/var/lib/iot-gateway-agent/kafka/data/sensor.a-12"),
+            "sensor.a",
+        )
+        self.assertEqual(topic_name_from_log_dir("no-partition"), "no-partition")
+
+    def test_parse_du_topic_sizes_sums_partitions(self) -> None:
+        stdout = (
+            "100\t/var/lib/iot-gateway-agent/kafka/data/sensor.fake1-0\n"
+            "50\t/var/lib/iot-gateway-agent/kafka/data/sensor.fake1-1\n"
+            "20\t/var/lib/iot-gateway-agent/kafka/data/sensor.other-0\n"
+        )
+        sizes = parse_du_topic_sizes(stdout)
+        self.assertEqual(sizes["sensor.fake1"], 150)
+        self.assertEqual(sizes["sensor.other"], 20)
+
+    def test_parse_du_topic_sizes_empty(self) -> None:
+        self.assertEqual(parse_du_topic_sizes(""), {})
+        self.assertEqual(parse_du_topic_sizes("garbage\n"), {})
 
 
 class TestTopicCatalog(unittest.TestCase):

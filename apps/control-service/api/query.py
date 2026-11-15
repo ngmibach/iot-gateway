@@ -311,7 +311,9 @@ def summary_gateway(
     from actions.kafka_capacity import (
         DEFAULT_TOPIC_RETENTION_BYTES,
         kafka_topic_name,
+        probe_topic_used_bytes_map,
     )
+    from actions.paths import DEFAULT_AGENT_DATA
 
     loki, prom = _backend_urls(state)
     start_ns, end_ns = _ns_window(time_range)
@@ -709,30 +711,61 @@ def summary_gateway(
         label="decrypt_rate",
     )
 
-    # Live catalog sync (best-effort): topics on the Pi missing from registry meta.
+    # Live catalog + topic disk usage (best-effort SSH).
     catalog_topics: dict[str, dict[str, Any]] = {}
+    topic_used_by_name: dict[str, int] = {}
+    topic_usage_probed = False
     if gw is not None:
         try:
             from .deps import open_ssh_for
             from provisioner.kafka_install import read_remote_catalog
 
+            data_dir = str(
+                gw.get("data_dir") or gw.get("agent_data_dir") or DEFAULT_AGENT_DATA
+            ).strip() or DEFAULT_AGENT_DATA
+            # Prefer registry topic names so du globs match even before catalog sync.
+            planned_topics: list[str] = []
+            if gid:
+                for row in registry.list_devices(gid):
+                    meta = _device_meta(row)
+                    t = str(
+                        meta.get("kafka_topic") or kafka_topic_name(str(row["id"]))
+                    ).strip()
+                    if t:
+                        planned_topics.append(t)
             with open_ssh_for(state, gw) as ssh:
                 cat = read_remote_catalog(ssh)
-            raw_topics = cat.get("topics") or {}
-            if isinstance(raw_topics, dict):
-                for _key, rec in raw_topics.items():
-                    if not isinstance(rec, dict):
-                        continue
-                    did = str(rec.get("device_id") or "").strip()
-                    topic = str(rec.get("topic") or "").strip()
-                    if did and topic:
-                        catalog_topics[did] = rec
+                raw_topics = cat.get("topics") or {}
+                if isinstance(raw_topics, dict):
+                    for _key, rec in raw_topics.items():
+                        if not isinstance(rec, dict):
+                            continue
+                        did = str(rec.get("device_id") or "").strip()
+                        topic = str(rec.get("topic") or "").strip()
+                        if did and topic:
+                            catalog_topics[did] = rec
+                            if topic not in planned_topics:
+                                planned_topics.append(topic)
+                topic_used_by_name = probe_topic_used_bytes_map(
+                    ssh, data_dir, topics=planned_topics or None
+                )
+                topic_usage_probed = True
         except Exception as exc:  # noqa: BLE001 — Activities must not fail on SSH
             from .deps import sanitize_user_error
 
             # Never surface SSH key material (base64 bodies) in Activities UI.
             safe = sanitize_user_error(str(exc), fallback="SSH unavailable")
             warnings.append(f"kafka_catalog_sync: {safe}")
+
+    def _used_for_topic(topic: str) -> int | None:
+        if not topic_usage_probed:
+            return None
+        name = str(topic or "").strip()
+        if not name:
+            return None
+        if name in topic_used_by_name:
+            return int(topic_used_by_name[name])
+        return 0
 
     # Registry devices are authoritative for the Activities sensor list.
     connected: list[dict[str, Any]] = []
@@ -773,6 +806,7 @@ def summary_gateway(
                     "ip": row.get("ip") or overlay.get("source_ip") or "",
                     "kafka_topic": str(topic),
                     "kafka_retention_bytes": int(retention),
+                    "kafka_used_bytes": _used_for_topic(str(topic)),
                     "monitor_enabled": bool(int(row.get("monitor_enabled", 1) or 0)),
                     "is_fake": is_fake_meta(meta),
                     "client_id": overlay.get("client_id") or "",
@@ -800,12 +834,14 @@ def summary_gateway(
         # No registry gateway — fall back to Prom-only rows (legacy).
         for did, overlay in sorted(prom_connected.items()):
             delay = delay_by_id.get(did) or {}
+            topic = kafka_topic_name(did)
             connected.append(
                 {
                     "device_id": did,
                     "ip": overlay.get("source_ip") or "",
-                    "kafka_topic": kafka_topic_name(did),
+                    "kafka_topic": topic,
                     "kafka_retention_bytes": DEFAULT_TOPIC_RETENTION_BYTES,
+                    "kafka_used_bytes": _used_for_topic(topic),
                     "monitor_enabled": True,
                     "is_fake": False,
                     "client_id": overlay.get("client_id") or "",

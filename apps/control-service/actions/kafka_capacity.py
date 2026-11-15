@@ -125,3 +125,77 @@ def probe_total_storage_bytes(
     if total is None:
         raise RuntimeError(f"could not parse df output for {path}: {result.stdout!r}")
     return total
+
+
+def topic_name_from_log_dir(dirname: str) -> str:
+    """Map Kafka log dir ``sensor.fake1-0`` → topic ``sensor.fake1``."""
+    name = (dirname or "").rstrip("/").rsplit("/", 1)[-1]
+    if "-" not in name:
+        return name
+    topic, _, maybe_part = name.rpartition("-")
+    if maybe_part.isdigit() and topic:
+        return topic
+    return name
+
+
+def parse_du_topic_sizes(stdout: str) -> dict[str, int]:
+    """Sum ``du -sb`` lines into ``{topic: used_bytes}`` (multi-partition safe)."""
+    out: dict[str, int] = {}
+    for raw in (stdout or "").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        parts = line.split(None, 1)
+        if len(parts) < 2:
+            continue
+        try:
+            size = int(parts[0])
+        except ValueError:
+            continue
+        if size < 0:
+            continue
+        topic = topic_name_from_log_dir(parts[1])
+        if not topic or "*" in topic:
+            continue
+        out[topic] = int(out.get(topic, 0)) + size
+    return out
+
+
+def probe_topic_used_bytes_map(
+    ssh: "SSHClient",
+    data_dir: str,
+    topics: list[str] | None = None,
+) -> dict[str, int]:
+    """Return on-disk Kafka log bytes per topic under ``{data_dir}/kafka/data``.
+
+    Missing topic dirs yield no entry (caller may treat as 0). Command failures
+    with empty stdout return ``{}``; callers should not treat that as SSH auth
+    failure (use the surrounding connect error for that).
+    """
+    base = f"{str(data_dir).rstrip('/')}/kafka/data"
+    if topics:
+        cleaned = [str(t).strip() for t in topics if str(t).strip()]
+        if not cleaned:
+            return {}
+        globs = " ".join(shell_quote(f"{base}/{t}-*") for t in cleaned)
+        cmd = f"du -sb -- {globs} 2>/dev/null || true"
+    else:
+        cmd = f"du -sb -- {shell_quote(base)}/* 2>/dev/null || true"
+    result = ssh.run(cmd, timeout=30.0)
+    return parse_du_topic_sizes(getattr(result, "stdout", "") or "")
+
+
+def probe_topic_used_bytes(
+    ssh: "SSHClient",
+    data_dir: str,
+    topic: str,
+) -> int | None:
+    """Return used bytes for one topic, or None when the probe yields nothing useful."""
+    name = str(topic or "").strip()
+    if not name:
+        return None
+    sizes = probe_topic_used_bytes_map(ssh, data_dir, topics=[name])
+    if name not in sizes:
+        # No matching log dirs → empty topic (0), distinct from probe hard-fail.
+        return 0
+    return int(sizes[name])
