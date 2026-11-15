@@ -629,11 +629,48 @@
     paintLineChart("chart-gw_delay", []);
     paintLineChart("chart-sensor_kafka", []);
     paintLineChart("chart-sensor_delay", []);
+    paintKafkaStorageBar("gw-sensor-kafka-storage", null, null);
   }
 
   function fmtRetention(bytes) {
     if (bytes == null || !isFinite(Number(bytes))) return "—";
     return fmtBytes(Number(bytes));
+  }
+
+  function fmtStorageUsed(bytes) {
+    if (bytes == null || bytes === "" || !Number.isFinite(Number(bytes))) return "—";
+    return fmtBytes(Number(bytes));
+  }
+
+  /** Used-vs-retention bar for per-sensor Kafka topic storage. */
+  function paintKafkaStorageBar(elOrId, usedBytes, retentionBytes) {
+    const el = typeof elOrId === "string" ? $(elOrId) : elOrId;
+    if (!el) return;
+    const usedOk = usedBytes != null && Number.isFinite(Number(usedBytes));
+    const capOk =
+      retentionBytes != null &&
+      Number.isFinite(Number(retentionBytes)) &&
+      Number(retentionBytes) > 0;
+    if (!usedOk) {
+      el.innerHTML =
+        `<div class="kafka-storage-empty muted">Storage usage unavailable</div>`;
+      return;
+    }
+    const used = Math.max(0, Number(usedBytes));
+    const cap = capOk ? Number(retentionBytes) : 0;
+    const pct = cap > 0 ? Math.min(100, (used / cap) * 100) : 0;
+    const over = cap > 0 && used > cap;
+    const caption = capOk
+      ? `${fmtBytes(used)} / ${fmtBytes(cap)}`
+      : `${fmtBytes(used)} used`;
+    el.innerHTML =
+      `<div class="kafka-storage-bar${over ? " is-over" : ""}">` +
+      `<div class="kafka-storage-track" role="meter" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct.toFixed(1)}" aria-label="Topic storage used">` +
+      `<div class="kafka-storage-fill" style="width:${pct.toFixed(1)}%"></div>` +
+      `</div>` +
+      `<div class="kafka-storage-caption">${escapeHtml(caption)}` +
+      (capOk ? ` (${pct.toFixed(pct >= 10 ? 0 : 1)}%)` : "") +
+      `</div></div>`;
   }
 
   function numOrDash(v, digits) {
@@ -1002,6 +1039,7 @@
     metricCards($("gw-sensor-kafka-meta"), [
       ["Topic", sensor.kafka_topic || "—"],
       ["Retention cap", fmtRetention(sensor.kafka_retention_bytes)],
+      ["Storage used", fmtStorageUsed(sensor.kafka_used_bytes)],
     ]);
     metricCards($("gw-sensor-delay-metrics"), [
       ["Latest delay", formatDelay(sm.delay_latest)],
@@ -1013,6 +1051,11 @@
       unit: "msgs/s",
       formatValue: (v) => fmtChartNum(v) + " msgs/s",
     });
+    paintKafkaStorageBar(
+      "gw-sensor-kafka-storage",
+      sensor.kafka_used_bytes,
+      sensor.kafka_retention_bytes
+    );
     paintLineChart(
       "chart-sensor_delay",
       sanitizeDelaySeries(charts.delay || []),

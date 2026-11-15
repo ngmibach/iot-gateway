@@ -442,6 +442,61 @@ class QueryApiTests(unittest.TestCase):
         )
         self.assertNotIn(leaked, joined)
         self.assertNotIn("AAAA", joined)
+        for s in r.json()["connected_sensors"]:
+            self.assertIsNone(s.get("kafka_used_bytes"))
+
+    def test_summary_gateway_kafka_used_bytes(self) -> None:
+        """SSH catalog sync attaches on-disk topic sizes to connected sensors."""
+        self.registry.upsert_device(
+            gateway_id="gw1",
+            id="sensor_a",
+            ip="10.0.0.1",
+            monitor_enabled=1,
+            meta_json={
+                "kafka_topic": "sensor.sensor_a",
+                "kafka_retention_bytes": 1073741824,
+            },
+        )
+
+        class _UsageSSH:
+            def run(self, cmd: str, timeout: float = 30.0) -> Any:  # noqa: ARG002
+                class R:
+                    exit_code = 0
+                    stdout = (
+                        "4096\t/var/lib/iot-gateway-agent/kafka/data/sensor.sensor_a-0\n"
+                    )
+                    stderr = ""
+
+                return R()
+
+        @contextmanager
+        def good_ssh(_gw: dict[str, Any]) -> Iterator[_UsageSSH]:
+            yield _UsageSSH()
+
+        self.app = create_app(
+            settings=self.settings,
+            registry=self.registry,
+            open_ssh=good_ssh,
+        )
+        client = TestClient(self.app)
+
+        def empty_proxy(url: str, params: dict[str, Any]) -> Any:
+            return {"status": "success", "data": {"result": []}}
+
+        with (
+            patch("api.query._proxy_get", side_effect=empty_proxy),
+            patch(
+                "provisioner.kafka_install.read_remote_catalog",
+                return_value={"topics": {}},
+            ),
+        ):
+            r = client.get(
+                "/api/v1/query/summaries/gateway", params={"gateway_id": "gw1"}
+            )
+        self.assertEqual(r.status_code, 200, r.text)
+        by_id = {s["device_id"]: s for s in r.json()["connected_sensors"]}
+        self.assertEqual(by_id["sensor_a"]["kafka_used_bytes"], 4096)
+        self.assertEqual(by_id["sensor_a"]["kafka_retention_bytes"], 1073741824)
 
     def test_summary_gateway_scalars(self) -> None:
         self.registry.upsert_device(
