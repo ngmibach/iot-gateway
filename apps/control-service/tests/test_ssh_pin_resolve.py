@@ -10,6 +10,7 @@ from unittest import mock
 
 from api.deps import (
     resolve_ssh_host_pin,
+    resolve_ssh_key_path,
     sanitize_user_error,
 )
 from api.settings import Settings
@@ -73,6 +74,108 @@ class ResolveSshHostPinTests(unittest.TestCase):
             )
             self.assertIsNone(pin)
             self.assertEqual(known, [])
+
+
+class ResolveSshKeyPathTests(unittest.TestCase):
+    def test_prefers_env_key_when_file_exists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            env_key = root / "from-env"
+            env_key.write_text("k", encoding="utf-8")
+            settings_key = root / "ssh" / "id_ed25519_gateway"
+            settings_key.parent.mkdir(parents=True)
+            settings_key.write_text("k2", encoding="utf-8")
+            (root / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "default_gateway_id": "gateway",
+                        "gateways": {
+                            "gateway": {
+                                "host": "172.20.10.2",
+                                "ssh_key_path": str(settings_key),
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings = Settings(data_dir=root, ssh_key_path=str(env_key))
+            got = resolve_ssh_key_path(
+                settings, {"id": "gateway", "host": "172.20.10.2"}
+            )
+            self.assertEqual(got, str(env_key))
+
+    def test_falls_back_to_settings_json_when_env_missing(self) -> None:
+        """Control started before Install: IOTGW_SSH_KEY unset, key only in settings."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key = root / "ssh" / "id_ed25519_gateway"
+            key.parent.mkdir(parents=True)
+            key.write_text("private", encoding="utf-8")
+            (root / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "default_gateway_id": "gateway",
+                        "gateways": {
+                            "gateway": {
+                                "host": "172.20.10.2",
+                                "username": "admin",
+                                "ssh_key_path": str(key),
+                                "password_auth_disabled": True,
+                            }
+                        },
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings = Settings(data_dir=root, ssh_key_path=None)
+            got = resolve_ssh_key_path(
+                settings, {"id": "gateway", "host": "172.20.10.2", "ssh_user": "admin"}
+            )
+            self.assertEqual(got, str(key))
+
+    def test_falls_back_to_conventional_data_dir_key(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key = root / "ssh" / "id_ed25519_gateway"
+            key.parent.mkdir(parents=True)
+            key.write_text("private", encoding="utf-8")
+            settings = Settings(data_dir=root, ssh_key_path=None)
+            got = resolve_ssh_key_path(
+                settings, {"id": "gateway", "host": "172.20.10.2"}
+            )
+            self.assertEqual(got, str(key))
+
+    def test_matches_settings_row_by_host_when_id_differs(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            key = root / "keyfile"
+            key.write_text("private", encoding="utf-8")
+            (root / "settings.json").write_text(
+                json.dumps(
+                    {
+                        "gateways": {
+                            "gateway": {
+                                "host": "172.20.10.2",
+                                "ssh_key_path": str(key),
+                            }
+                        }
+                    }
+                ),
+                encoding="utf-8",
+            )
+            settings = Settings(data_dir=root, ssh_key_path=None)
+            got = resolve_ssh_key_path(
+                settings, {"id": "other", "host": "172.20.10.2"}
+            )
+            self.assertEqual(got, str(key))
+
+    def test_returns_none_when_no_key_available(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            settings = Settings(data_dir=Path(tmp), ssh_key_path=None)
+            self.assertIsNone(
+                resolve_ssh_key_path(settings, {"id": "gateway", "host": "10.0.0.1"})
+            )
 
 
 class SshMismatchMessageTests(unittest.TestCase):

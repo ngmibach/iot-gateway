@@ -91,6 +91,72 @@ def resolve_ssh_host_pin(
     return None, known_paths
 
 
+def _settings_json(data_dir: Path) -> Optional[dict[str, Any]]:
+    path = Path(data_dir) / "settings.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def resolve_ssh_key_path(
+    settings: Settings, gateway: dict[str, Any]
+) -> Optional[str]:
+    """Resolve a private key path for day-2 SSH at connect time.
+
+    ``Settings.ssh_key_path`` comes from ``IOTGW_SSH_KEY`` at process start. After
+    Install the desktop writes ``gateways.<id>.ssh_key_path`` into settings.json
+    without restarting control-service; Activities / playbooks must still find the
+    key. Prefer an existing env path, then settings.json, then the conventional
+    ``data_dir/ssh/id_ed25519_<gateway_id>`` file.
+    """
+    env_key = (settings.ssh_key_path or "").strip()
+    if env_key and Path(env_key).is_file():
+        return env_key
+
+    gid = str(gateway.get("id") or "").strip()
+    host = str(gateway.get("host") or "").strip()
+    data = _settings_json(settings.data_dir)
+    if data is not None:
+        gateways = data.get("gateways")
+        if isinstance(gateways, dict):
+            rows: list[Any] = []
+            if gid and isinstance(gateways.get(gid), dict):
+                rows.append(gateways[gid])
+            default_gid = str(data.get("default_gateway_id") or "").strip()
+            if (
+                default_gid
+                and default_gid != gid
+                and isinstance(gateways.get(default_gid), dict)
+            ):
+                rows.append(gateways[default_gid])
+            if host:
+                for row in gateways.values():
+                    if not isinstance(row, dict):
+                        continue
+                    if str(row.get("host") or "").strip() == host:
+                        rows.append(row)
+            seen: set[str] = set()
+            for row in rows:
+                path = str(row.get("ssh_key_path") or "").strip()
+                if not path or path in seen:
+                    continue
+                seen.add(path)
+                if Path(path).is_file():
+                    return path
+
+    if gid:
+        conventional = Path(settings.data_dir) / "ssh" / f"id_ed25519_{gid}"
+        if conventional.is_file():
+            return str(conventional)
+
+    # Preserve explicit env override even when the file is missing (clearer errors).
+    return env_key or None
+
+
 @dataclass
 class AppState:
     settings: Settings
@@ -137,18 +203,19 @@ def get_cert_cache(state: AppState = Depends(get_state)) -> CertBundleCache:
 
 
 def default_open_ssh(settings: Settings) -> OpenSSH:
-    """Build Paramiko sessions from registry gateway rows + env credentials."""
+    """Build Paramiko sessions from registry gateway rows + live key resolution."""
 
     @contextmanager
     def _open(gateway: dict[str, Any]) -> Iterator[Any]:
         from actions.ssh import SSHClient, SSHTarget
 
         pin_b64, known_paths = resolve_ssh_host_pin(settings, gateway)
+        key_filename = resolve_ssh_key_path(settings, gateway)
         target = SSHTarget(
             host=gateway["host"],
             username=gateway["ssh_user"],
             password=settings.ssh_password,
-            key_filename=settings.ssh_key_path,
+            key_filename=key_filename,
             host_key_base64=pin_b64,
             known_hosts_paths=known_paths or None,
             allow_unknown_host=settings.allow_unknown_host and not pin_b64,
