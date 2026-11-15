@@ -476,6 +476,29 @@ input[type="checkbox"] { min-width: auto; }
   padding-top: 0.75rem;
   border-top: 1px solid var(--border);
 }
+.ctl-device-summary {
+  margin: 0.5rem 0 0.25rem;
+}
+.ctl-section {
+  margin: 1.1rem 0 0.35rem;
+  padding: 0.85rem 0.9rem 0.75rem;
+  background: #121a24;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.ctl-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+.ctl-section-help {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+.ctl-section .view-actions {
+  margin-top: 0.65rem;
+  padding-top: 0.65rem;
+}
 .badge.fake {
   background: #2a2540;
   color: #c4b5fd;

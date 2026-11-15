@@ -108,6 +108,15 @@ class WizardApiTests(unittest.TestCase):
         self.assertIn('id="btn-ctl-ap-save"', actions_html)
         self.assertIn('id="btn-ctl-ap-lift"', actions_html)
         self.assertIn("Auto prevent", actions_html)
+        self.assertIn('id="ctl-section-publish"', actions_html)
+        self.assertIn('id="ctl-section-auto-prevent"', actions_html)
+        self.assertIn('id="ctl-section-kafka"', actions_html)
+        self.assertIn("Clear Kafka storage", actions_html)
+        self.assertIn("Publish control", actions_html)
+        self.assertNotIn(
+            "Clear Kafka needs Kafka running on the gateway. Block uses Mosquitto ACL only.",
+            actions_html,
+        )
         self.assertIn("Find sensor", actions_html)
         self.assertIn("Create fake sensor", actions_html)
         self.assertIn('id="host-list"', actions_html)

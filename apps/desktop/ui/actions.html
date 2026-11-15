@@ -439,8 +439,7 @@
     <section class="panel action-panel hidden" data-action="control" id="panel-control">
       <h2>Control</h2>
       <p class="muted">
-        Block a sensor from publishing (keeps registration), or clear its Kafka topic data.
-        Permanent removal stays on View → Delete.
+        Choose a sensor, then use one section below. Permanent removal stays on View → Delete.
       </p>
 
       <div class="row">
@@ -452,77 +451,94 @@
       <div id="ctl-empty" class="muted">No registered sensors on this gateway.</div>
 
       <div id="ctl-form" class="hidden">
-        <div class="row">
-          <label>Type</label>
-          <span id="ctl-type-badge">—</span>
-        </div>
-        <div class="row">
-          <label>Publish</label>
-          <span id="ctl-publish-badge" class="badge">—</span>
-          <span class="muted" id="ctl-topic-line"></span>
-        </div>
-        <div class="row">
-          <label>Kafka topic</label>
-          <span class="mono" id="ctl-kafka-topic">—</span>
-        </div>
-
-        <div class="row view-actions">
-          <button type="button" class="danger" id="btn-ctl-block">Block publish</button>
-          <button type="button" class="primary hidden" id="btn-ctl-unblock">Allow publish</button>
+        <div class="ctl-device-summary">
+          <div class="row">
+            <label>Type</label>
+            <span id="ctl-type-badge">—</span>
+          </div>
+          <div class="row">
+            <label>Publish</label>
+            <span id="ctl-publish-badge" class="badge">—</span>
+            <span class="muted" id="ctl-topic-line"></span>
+          </div>
+          <div class="row">
+            <label>Kafka topic</label>
+            <span class="mono" id="ctl-kafka-topic">—</span>
+          </div>
         </div>
 
-        <h3>Auto prevent</h3>
-        <p class="muted">
-          When this sensor exceeds the invalid-message limit, the gateway drops its IP at the
-          firewall so traffic never reaches MQTT. Test sensors keep running.
-        </p>
-        <div class="row">
-          <input type="checkbox" id="ctl-ap-enabled" />
-          <label for="ctl-ap-enabled" style="min-width:auto">
-            Enable auto prevent
-            <span class="field-help" tabindex="0" aria-label="What is Auto prevent?">?
-              <span class="field-help-tip">Gateway firewall quarantine after too many invalid messages in the time window.</span>
-            </span>
-          </label>
-        </div>
-        <div class="row">
-          <label for="ctl-ap-limit">
-            Invalid message limit
-            <span class="field-help" tabindex="0" aria-label="What is Invalid message limit?">?
-              <span class="field-help-tip">How many invalid messages from this sensor in the window before quarantine.</span>
-            </span>
-          </label>
-          <input id="ctl-ap-limit" type="number" min="1" max="100000" value="10" />
-        </div>
-        <div class="row">
-          <label for="ctl-ap-window">
-            Window (minutes)
-            <span class="field-help" tabindex="0" aria-label="What is Window?">?
-              <span class="field-help-tip">Sliding time window for the invalid-message count.</span>
-            </span>
-          </label>
-          <input id="ctl-ap-window" type="number" min="1" max="1440" value="5" />
-        </div>
-        <div class="row">
-          <label>Status</label>
-          <span id="ctl-ap-status" class="badge">Off</span>
-          <span class="muted" id="ctl-ap-status-detail"></span>
-        </div>
-        <div class="row view-actions">
-          <button type="button" class="primary" id="btn-ctl-ap-save">Save auto prevent</button>
-          <button type="button" class="secondary hidden" id="btn-ctl-ap-lift">Lift quarantine</button>
+        <div class="ctl-section" id="ctl-section-publish">
+          <h3 class="ctl-section-title">Publish control</h3>
+          <p class="muted ctl-section-help">
+            Block or allow MQTT publish for this sensor. Registration stays; only the Mosquitto ACL changes.
+          </p>
+          <div class="row view-actions">
+            <button type="button" class="danger" id="btn-ctl-block">Block publish</button>
+            <button type="button" class="primary hidden" id="btn-ctl-unblock">Allow publish</button>
+          </div>
         </div>
 
-        <div class="row">
-          <input type="checkbox" id="ctl-purge-confirm" />
-          <label for="ctl-purge-confirm" style="min-width:auto">
-            I understand this deletes stored Kafka messages for this sensor
-          </label>
+        <div class="ctl-section" id="ctl-section-auto-prevent">
+          <h3 class="ctl-section-title">Auto prevent</h3>
+          <p class="muted ctl-section-help">
+            When this sensor exceeds the invalid-message limit, the gateway firewall drops its IP
+            so traffic never reaches MQTT. Test sensors keep running.
+          </p>
+          <div class="row">
+            <input type="checkbox" id="ctl-ap-enabled" />
+            <label for="ctl-ap-enabled" style="min-width:auto">
+              Enable auto prevent
+              <span class="field-help" tabindex="0" aria-label="What is Auto prevent?">?
+                <span class="field-help-tip">Gateway firewall quarantine after too many invalid messages in the time window.</span>
+              </span>
+            </label>
+          </div>
+          <div class="row">
+            <label for="ctl-ap-limit">
+              Invalid message limit
+              <span class="field-help" tabindex="0" aria-label="What is Invalid message limit?">?
+                <span class="field-help-tip">How many invalid messages from this sensor in the window before quarantine.</span>
+              </span>
+            </label>
+            <input id="ctl-ap-limit" type="number" min="1" max="100000" value="10" />
+          </div>
+          <div class="row">
+            <label for="ctl-ap-window">
+              Window (minutes)
+              <span class="field-help" tabindex="0" aria-label="What is Window?">?
+                <span class="field-help-tip">Sliding time window for the invalid-message count.</span>
+              </span>
+            </label>
+            <input id="ctl-ap-window" type="number" min="1" max="1440" value="5" />
+          </div>
+          <div class="row">
+            <label>Status</label>
+            <span id="ctl-ap-status" class="badge">Off</span>
+            <span class="muted" id="ctl-ap-status-detail"></span>
+          </div>
+          <div class="row view-actions">
+            <button type="button" class="primary" id="btn-ctl-ap-save">Save auto prevent</button>
+            <button type="button" class="secondary hidden" id="btn-ctl-ap-lift">Lift quarantine</button>
+          </div>
         </div>
-        <div class="row view-actions">
-          <button type="button" class="danger" id="btn-ctl-purge" disabled>Clear Kafka data</button>
+
+        <div class="ctl-section" id="ctl-section-kafka">
+          <h3 class="ctl-section-title">Clear Kafka storage</h3>
+          <p class="muted ctl-section-help">
+            Delete stored messages for this sensor’s Kafka topic. Requires Kafka running on the gateway.
+            Does not unregister the sensor.
+          </p>
+          <div class="row">
+            <input type="checkbox" id="ctl-purge-confirm" />
+            <label for="ctl-purge-confirm" style="min-width:auto">
+              I understand this deletes stored Kafka messages for this sensor
+            </label>
+          </div>
+          <div class="row view-actions">
+            <button type="button" class="danger" id="btn-ctl-purge" disabled>Clear Kafka data</button>
+          </div>
         </div>
-        <p class="muted">Clear Kafka needs Kafka running on the gateway. Block uses Mosquitto ACL only. Auto prevent uses the gateway firewall.</p>
+
         <div id="ctl-msg"></div>
       </div>
     </section>
